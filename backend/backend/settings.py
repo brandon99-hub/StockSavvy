@@ -9,7 +9,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'your-secret-key-here')
 
-DEBUG = True
+#DEBUG = True
 
 ALLOWED_HOSTS = ['*']
 
@@ -34,6 +34,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
 ]
 
 ROOT_URLCONF = 'backend.urls'
@@ -113,6 +114,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "https://stocksavvy.onrender.com"
 ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -139,13 +141,21 @@ CORS_ALLOW_HEADERS = [
 
 # URL Settings
 APPEND_SLASH = True
-
+# settings.py
+STATICFILES_DIRS = [
+    os.path.join(BASE_DIR, 'frontend/client/dist/public')
+]
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+DEBUG = os.getenv("DEBUG", "False") == "True"  # Use environment variable
+SESSION_COOKIE_SECURE = not DEBUG  # True in production
+CSRF_COOKIE_SECURE = not DEBUG
+CSRF_TRUSTED_ORIGINS = ["https://*.onrender.com"]  # Add this
 # Session Settings
 SESSION_COOKIE_SAMESITE = 'Lax'
-SESSION_COOKIE_SECURE = False  # Set to True in production with HTTPS
+#SESSION_COOKIE_SECURE = False  # Set to True in production with HTTPS
 SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_SAMESITE = 'Lax'
-CSRF_COOKIE_SECURE = False  # Set to True in production with HTTPS
+#CSRF_COOKIE_SECURE = False  # Set to True in production with HTTPS
 
 # Custom User Model
 AUTH_USER_MODEL = 'api.User' 

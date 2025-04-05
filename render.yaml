@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: fullstack-app
+    runtime: python
+    buildCommand: |
+      pip install -r requirements.txt
+      cd frontend/client && npm install && npm run build  # MOVE THIS FIRST
+      python manage.py migrate
+      python manage.py collectstatic --noinput
+    startCommand: gunicorn backend.wsgi:application
+    envVars:
+      - key: DEBUG
+        value: "False"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: postgres
+          property: connectionString
+      - key: NODE_VERSION
+        value: 18.18.2
+    staticPublishPath: "./frontend/client/dist/public"  # Updated path
