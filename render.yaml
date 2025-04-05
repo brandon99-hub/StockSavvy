@@ -3,10 +3,13 @@ services:
     name: fullstack-app
     runtime: python
     buildCommand: |
-      pip install -r requirements.txt
-      cd frontend/client && npm install && npm run build  # MOVE THIS FIRST
-      python manage.py migrate
-      python manage.py collectstatic --noinput
+      poetry install --no-interaction --no-ansi && 
+      cd frontend/client && 
+      npm install && 
+      npm run build && 
+      cd ../../ && 
+      poetry run python manage.py migrate && 
+      poetry run python manage.py collectstatic --noinput
     startCommand: gunicorn backend.wsgi:application
     envVars:
       - key: DEBUG
