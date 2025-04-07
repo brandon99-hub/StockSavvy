@@ -2,7 +2,6 @@ services:
   - type: web
     name: fullstack-app
     runtime: python
-    staticPublishPath: "../frontend/client/dist/public"  # Corrected path
     buildCommand: |
       poetry install && 
       cd ../frontend/client &&  # Move up from backend directory
