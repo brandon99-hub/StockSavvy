@@ -42,7 +42,7 @@ ROOT_URLCONF = 'backend.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [os.path.join(BASE_DIR, 'frontend/client/dist')],
+        'DIRS': [os.path.join(BASE_DIR, 'frontend/client/dist/public')],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -143,8 +143,12 @@ CORS_ALLOW_HEADERS = [
 APPEND_SLASH = True
 # settings.py
 STATICFILES_DIRS = [
-    os.path.join(BASE_DIR, 'frontend/client/dist')
+    os.path.join(BASE_DIR, 'frontend/client/dist/public/assets')
 ]
+TEMPLATES[0]['DIRS'] = [
+    os.path.join(BASE_DIR, 'frontend/client/dist/public'),
+]
+
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 DEBUG = os.getenv("DEBUG", "False") == "True"  # Use environment variable
 SESSION_COOKIE_SECURE = not DEBUG  # True in production
