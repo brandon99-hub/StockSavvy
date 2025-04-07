@@ -17,8 +17,13 @@ from django.db import connection
 from rest_framework.authtoken.models import Token
 from django.utils import timezone
 import decimal
+from django.views.generic import TemplateView
+
 
 User = get_user_model()
+
+class FrontendAppView(TemplateView):
+    template_name = "index.html"
 
 class IsAdminOrManager(BasePermission):
     """

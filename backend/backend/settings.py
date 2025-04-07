@@ -42,7 +42,7 @@ ROOT_URLCONF = 'backend.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [os.path.join(BASE_DIR, 'frontend/client/dist')],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -143,7 +143,7 @@ CORS_ALLOW_HEADERS = [
 APPEND_SLASH = True
 # settings.py
 STATICFILES_DIRS = [
-    os.path.join(BASE_DIR, 'frontend/client/dist/public')
+    os.path.join(BASE_DIR, 'frontend/client/dist')
 ]
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 DEBUG = os.getenv("DEBUG", "False") == "True"  # Use environment variable
