@@ -12,14 +12,11 @@ export default defineConfig(async ({ mode }) => {
     const isProduction = mode === "production";
     let cartographerPlugin;
 
-    // Dynamically import the cartographer plugin only in non-production environments
-    // when REPL_ID is defined
     if (process.env.NODE_ENV !== "production" && process.env.REPL_ID !== undefined) {
         const module = await import("@replit/vite-plugin-cartographer");
         cartographerPlugin = module.cartographer();
     }
 
-    // Return the Vite configuration object
     return {
         base: isProduction ? "/static/" : "/",
         root: path.resolve(__dirname, "client"),
@@ -37,7 +34,7 @@ export default defineConfig(async ({ mode }) => {
             },
         },
         build: {
-            outDir: path.resolve(__dirname, "client/dist/public"),
+            outDir: path.resolve(__dirname, "../dist"), // Changed to ../dist
             emptyOutDir: true,
         },
         server: {
