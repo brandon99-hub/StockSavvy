@@ -11,6 +11,8 @@ const __dirname = dirname(__filename);
 export default defineConfig({
     base: '/static/',
     root: path.resolve(__dirname, "client"),
+    publicDir: path.resolve(__dirname, "client/public"), // Add this line
+
 
     plugins: [
         react(),
@@ -39,9 +41,7 @@ export default defineConfig({
         manifest: true,
         emptyOutDir: true,
         rollupOptions: {
-            input: {
-                main: path.resolve(__dirname, 'client/src/main.tsx')
-            }
+            input: path.resolve(__dirname, 'client/index.html')
         }
     },
 
