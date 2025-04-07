@@ -2,8 +2,15 @@ services:
   - type: web
     name: fullstack-app
     runtime: python
+    staticPublishPath: "../frontend/client/dist/public"  # Corrected path
     buildCommand: |
-      poetry install --no-interaction --no-ansi && cd frontend/client && npm install && npm run build && cd ../.. && poetry run python backend/manage.py migrate && poetry run python backend/manage.py collectstatic --noinput
+      poetry install && 
+      cd ../frontend/client &&  # Move up from backend directory
+      npm install && 
+      npm run build && 
+      cd ../../backend && 
+      poetry run python manage.py migrate && 
+      poetry run python manage.py collectstatic --noinput
     startCommand: gunicorn backend.wsgi:application
     envVars:
       - key: DEBUG
@@ -16,4 +23,3 @@ services:
           property: connectionString
       - key: NODE_VERSION
         value: 18.18.2
-    staticPublishPath: "./frontend/client/dist/public"  # Updated path

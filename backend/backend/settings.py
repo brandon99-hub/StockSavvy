@@ -142,12 +142,15 @@ CORS_ALLOW_HEADERS = [
 # URL Settings
 APPEND_SLASH = True
 # settings.py
+
 STATICFILES_DIRS = [
-    os.path.join(BASE_DIR, 'frontend/client/dist/public/assets')
+    os.path.join(BASE_DIR, '../frontend/client/dist/public/assets')
 ]
+
 TEMPLATES[0]['DIRS'] = [
-    os.path.join(BASE_DIR, 'frontend/client/dist/public'),
+    os.path.join(BASE_DIR, '../frontend/client/dist/public'),
 ]
+
 
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 DEBUG = os.getenv("DEBUG", "False") == "True"  # Use environment variable
