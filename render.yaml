@@ -9,7 +9,7 @@ services:
         && npm run build \
         && cd ../.. \
         && poetry run python backend/manage.py migrate \
-        && poetry run python backend/manage.py collectstatic --noinput
+        && poetry run python backend/manage.py collectstatic --noinputm
     startCommand: gunicorn backend.wsgi:application
     envVars:
       - key: DEBUG
