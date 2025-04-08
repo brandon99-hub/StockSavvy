@@ -172,27 +172,27 @@ const AdvancedAnalytics = () => {
 
     // Fetch data
     const {data: products = [], isLoading: isProductsLoading} = useQuery<Product[]>({
-        queryKey: ['/api/products'],
+        queryKey: ['/api/products/'],
     });
 
     const {data: categories = [], isLoading: isCategoriesLoading} = useQuery<Category[]>({
-        queryKey: ['/api/categories'],
+        queryKey: ['/api/categories/'],
     });
 
     const {data: sales = [], isLoading: isSalesLoading} = useQuery<Sale[]>({
-        queryKey: ['/api/sales'],
+        queryKey: ['/api/sales/'],
     });
 
     const {data: activities = [], isLoading: isActivitiesLoading} = useQuery<Activity[]>({
-        queryKey: ['/api/activities'],
+        queryKey: ['/api/activities/'],
     });
 
     const {data: saleItems = [], isLoading: isSaleItemsLoading} = useQuery<any[]>({
-        queryKey: ['/api/sales/items'],
+        queryKey: ['/api/sales/items/'],
     });
 
     const {data: salesChartData = [], isLoading: isSalesChartLoading} = useQuery<SalesChartData[]>({
-        queryKey: ['/api/dashboard/sales-chart',
+        queryKey: ['/api/dashboard/sales-chart/',
             {
                 start: format(dateRange.start, 'yyyy-MM-dd'),
                 end: format(dateRange.end, 'yyyy-MM-dd')
@@ -201,7 +201,7 @@ const AdvancedAnalytics = () => {
     });
 
     const {data: categoryChartData = [], isLoading: isCategoryChartLoading} = useQuery<CategoryChartData[]>({
-        queryKey: ['/api/dashboard/category-chart',
+        queryKey: ['/api/dashboard/category-chart/',
             {
                 start: format(dateRange.start, 'yyyy-MM-dd'),
                 end: format(dateRange.end, 'yyyy-MM-dd')
@@ -210,7 +210,7 @@ const AdvancedAnalytics = () => {
     });
 
     const {data: dashboardStats = null, isLoading: isStatsLoading} = useQuery<DashboardStats>({
-        queryKey: ['/api/dashboard/stats',
+        queryKey: ['/api/dashboard/stats/',
             {
                 start: format(dateRange.start, 'yyyy-MM-dd'),
                 end: format(dateRange.end, 'yyyy-MM-dd')
@@ -234,7 +234,7 @@ const AdvancedAnalytics = () => {
     };
 
     const {data: profitData = [], isLoading: isProfitLoading} = useQuery<ProfitData[]>({
-        queryKey: ['/api/reports/profit',
+        queryKey: ['/api/reports/profit/',
             {
                 start: format(dateRange.start, 'yyyy-MM-dd'),
                 end: format(dateRange.end, 'yyyy-MM-dd')
@@ -624,7 +624,11 @@ const AdvancedAnalytics = () => {
                             </CardHeader>
                             <CardContent>
                                 <div className="text-2xl font-bold">
-                                    {formatCurrency(dashboardStats?.averageOrderValue || 0)}
+                                    {formatCurrency(
+                                        typeof dashboardStats?.averageOrderValue === 'string' ?
+                                            parseFloat(dashboardStats.averageOrderValue) :
+                                            dashboardStats?.averageOrderValue || 0
+                                    )}
                                 </div>
                                 <p className="text-xs text-gray-500 mt-1">
                                     {yearOverYearData && yearOverYearData[2]?.change ? (

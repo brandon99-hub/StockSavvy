@@ -42,23 +42,23 @@ const ReportGenerator = () => {
   
   // Fetch data based on report type
   const { data: products = [], isLoading: isProductsLoading } = useQuery<Product[]>({
-    queryKey: ['/api/products'],
+    queryKey: ['/api/products/'],
   });
   
   const { data: categories = [], isLoading: isCategoriesLoading } = useQuery<Category[]>({
-    queryKey: ['/api/categories'],
+    queryKey: ['/api/categories/'],
   });
   
   const { data: sales = [], isLoading: isSalesLoading } = useQuery<Sale[]>({
-    queryKey: ['/api/sales'],
+    queryKey: ['/api/sales/'],
   });
   
   const { data: saleItems = {}, isLoading: isSaleItemsLoading } = useQuery<Record<number, any[]>>({
-    queryKey: ['/api/sales/items'],
+    queryKey: ['/api/sales/items/'],
   });
   
   const { data: profitData = [], isLoading: isProfitLoading } = useQuery<any[]>({
-    queryKey: ['/api/reports/profit', { start: dateRange.start.toISOString(), end: dateRange.end.toISOString() }],
+    queryKey: ['/api/reports/profit/', { start: dateRange.start.toISOString(), end: dateRange.end.toISOString() }],
   });
   
   const isLoading = isProductsLoading || isCategoriesLoading || isSalesLoading || isSaleItemsLoading || isProfitLoading;

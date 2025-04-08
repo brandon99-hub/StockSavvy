@@ -1295,7 +1295,7 @@ class DashboardViewSet(viewsets.ViewSet):
                     SELECT 
                         COALESCE((SELECT COUNT(*) FROM products), 0) as total_products,
                         COALESCE((SELECT COUNT(*) FROM products WHERE quantity <= min_stock_level), 0) as low_stock_products,
-                        COALESCE((SELECT SUM(total_amount) FROM sales WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)), 0) as total_sales,
+                        COALESCE((SELECT SUM(total_amount) FROM sales, 0) as total_sales,
                         COALESCE((SELECT COUNT(*) FROM sales WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)), 0) as total_orders
                 """)
                 current_stats = cursor.fetchone()
@@ -1380,7 +1380,7 @@ class DashboardViewSet(viewsets.ViewSet):
                 # Format decimal values
                 for row in results:
                     if 'total_value' in row and row['total_value'] is not None:
-                        row['total_value'] = str(row['total_value'])
+                        row['total_value'] = float(row['total_value'])
                     if 'percentage' in row and row['percentage'] is not None:
                         row['percentage'] = round(float(row['percentage']), 1)
                 
@@ -1398,11 +1398,10 @@ class DashboardViewSet(viewsets.ViewSet):
             with connection.cursor() as cursor:
                 cursor.execute("""
                     SELECT 
-                        DATE_TRUNC('day', s.created_at)::date as date,
+                        DATE_TRUNC('day', s.created_at AT TIME ZONE 'UTC')::date as date,
                         COALESCE(SUM(s.total_amount), 0) as amount
                     FROM sales s
-                    WHERE s.created_at >= NOW() - INTERVAL '30 days'
-                    GROUP BY DATE_TRUNC('day', s.created_at)
+                    GROUP BY DATE_TRUNC('day', s.created_at AT TIME ZONE 'UTC')
                     ORDER BY date ASC
                 """)
                 columns = [col[0] for col in cursor.description]
@@ -1413,7 +1412,7 @@ class DashboardViewSet(viewsets.ViewSet):
                     if 'date' in row and row['date'] is not None:
                         row['date'] = row['date'].isoformat()
                     if 'amount' in row and row['amount'] is not None:
-                        row['amount'] = str(row['amount'])
+                        row['amount'] = float(row['amount'])
                 
                 return Response(results)
         except Exception as e:
