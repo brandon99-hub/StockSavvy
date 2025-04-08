@@ -33,7 +33,7 @@ class IsAdminOrManager(BasePermission):
         # Check if user is authenticated
         if not request.user.is_authenticated:
             return False
-        
+
         # Check if user has admin or manager role
         return request.user.role in ['admin', 'manager']
 
@@ -113,10 +113,10 @@ class UserViewSet(viewsets.ModelViewSet):
     def login(self, request):
         username = request.data.get('username')
         password = request.data.get('password')
-        
+
         try:
             from django.db import connection
-            
+
             with connection.cursor() as cursor:
                 cursor.execute(
                     "SELECT id, username, password, role, is_active, is_staff, is_superuser, name FROM users WHERE username = %s",
@@ -129,13 +129,13 @@ class UserViewSet(viewsets.ModelViewSet):
                         {'message': 'Invalid credentials'},
                         status=status.HTTP_401_UNAUTHORIZED
                     )
-                
+
                 user_id, db_username, db_password, role, is_active, is_staff, is_superuser, name = row
-                
+
                 print(f"Login attempt for user: {username}")
                 print(f"Stored password: {db_password}")
                 print(f"Provided password: {password}")
-                
+
                 if db_password == password:
                     print("Plain text password match")
                     user_data = {
@@ -148,7 +148,7 @@ class UserViewSet(viewsets.ModelViewSet):
                         'name': name,
                         'token': f"token_{user_id}_{username}"
                     }
-                    
+
                     try:
                         cursor.execute(
                             "INSERT INTO activities (type, description, user_id, created_at, status) VALUES (%s, %s, %s, NOW(), %s)",
@@ -156,14 +156,14 @@ class UserViewSet(viewsets.ModelViewSet):
                         )
                     except Exception as e:
                         print(f"Could not create activity: {str(e)}")
-                    
+
                     return Response(user_data)
-                
+
                 return Response(
                     {'message': 'Invalid credentials'},
                     status=status.HTTP_401_UNAUTHORIZED
                 )
-                
+
         except Exception as e:
             print(f"Login error: {str(e)}")
             return Response(
@@ -297,7 +297,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         is_authenticated, _, _ = self.check_token_auth(request)
         if not is_authenticated:
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        
+
         try:
             with connection.cursor() as cursor:
                 cursor.execute("""
@@ -336,12 +336,12 @@ class ProductViewSet(viewsets.ModelViewSet):
                 """)
                 columns = [col[0] for col in cursor.description]
                 results = [dict(zip(columns, row)) for row in cursor.fetchall()]
-                
+
                 # Format decimal values
                 for row in results:
                     if 'sell_price' in row and row['sell_price'] is not None:
                         row['sell_price'] = str(row['sell_price'])
-                
+
                 return Response({
                     'items': results,
                     'summary': {
@@ -361,19 +361,19 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
         if not is_admin:
             return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-            
+
         product = self.get_object()
         quantity = request.data.get('quantity', 0)
-        
+
         if quantity <= 0:
             return Response(
                 {'message': 'Quantity must be greater than 0'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         product.stock_quantity += quantity
         product.save()
-        
+
         # Create activity log
         try:
             with connection.cursor() as cursor:
@@ -383,7 +383,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                 )
         except Exception as e:
             print(f"Could not create activity: {str(e)}")
-        
+
         return Response(ProductSerializer(product).data)
 
 class SaleViewSet(viewsets.ModelViewSet):
@@ -395,11 +395,11 @@ class SaleViewSet(viewsets.ModelViewSet):
         auth_header = request.headers.get('Authorization')
         if not auth_header or not auth_header.startswith('Bearer '):
             return False, None, False
-        
+
         token = auth_header.split(' ')[1]
         if not token.startswith('token_'):
             return False, None, False
-        
+
         try:
             parts = token.split('_')
             user_id = int(parts[1])
@@ -415,7 +415,7 @@ class SaleViewSet(viewsets.ModelViewSet):
         except (IndexError, ValueError, Exception) as e:
             print(f"Token validation error: {str(e)}")
             return False, None, False
-        
+
         return False, None, False
 
     def list(self, request, *args, **kwargs):
@@ -436,18 +436,18 @@ class SaleViewSet(viewsets.ModelViewSet):
         is_authenticated, user_id, _ = self.check_token_auth(request)
         if not is_authenticated:
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        
+
         data = request.data
         now = timezone.now()  # This is already timezone-aware
-        
+
         try:
             # Get username from token
             token = request.headers.get('Authorization').split(' ')[1]
             username = token.split('_')[2]  # token format is token_userid_username
-            
+
             # Get the user instance by username
             user = User.objects.get_by_natural_key(username)
-            
+
             # Create the sale with timezone-aware datetime
             sale = Sale.objects.create(
                 user_id=user.id,
@@ -458,19 +458,19 @@ class SaleViewSet(viewsets.ModelViewSet):
                 discount_percentage=float(data.get('discountPercentage', 0)),
                 original_amount=float(data.get('originalAmount', 0))
             )
-            
+
             # Create sale items and track total items
             items_data = data.get('items', [])
             total_items = 0
-            
+
             for item_data in items_data:
                 product = Product.objects.get(id=item_data.get('id'))
                 quantity = int(item_data['quantity'])
                 unit_price = float(item_data.get('unitPrice', 0))
                 total_price = float(item_data.get('totalPrice', quantity * unit_price))
-                
+
                 total_items += quantity
-                
+
                 # Create sale item
                 SaleItem.objects.create(
                     sale=sale,
@@ -479,12 +479,12 @@ class SaleViewSet(viewsets.ModelViewSet):
                     unit_price=unit_price,
                     total_price=total_price
                 )
-                
+
                 # Update product quantity and timestamps
                 product.quantity = F('quantity') - quantity
                 product.updated_at = now  # Use timezone-aware datetime
                 product.save()
-                
+
                 # Log activity for each item with timezone-aware datetime
                 Activity.objects.create(
                     type='sale',
@@ -494,7 +494,7 @@ class SaleViewSet(viewsets.ModelViewSet):
                     created_at=now,
                     status='success'
                 )
-            
+
             # Create a summary activity with timezone-aware datetime
             Activity.objects.create(
                 type='sale',
@@ -503,9 +503,9 @@ class SaleViewSet(viewsets.ModelViewSet):
                 created_at=now,
                 status='success'
             )
-                
+
             return Response(SaleSerializer(sale).data)
-            
+
         except User.DoesNotExist:
             return Response({"detail": "User not found"}, status=status.HTTP_404_NOT_FOUND)
         except Product.DoesNotExist:
@@ -522,11 +522,11 @@ class ActivityViewSet(viewsets.ReadOnlyModelViewSet):
         auth_header = request.headers.get('Authorization')
         if not auth_header or not auth_header.startswith('Bearer '):
             return False, None, False
-        
+
         token = auth_header.split(' ')[1]
         if not token.startswith('token_'):
             return False, None, False
-        
+
         try:
             parts = token.split('_')
             user_id = int(parts[1])
@@ -542,7 +542,7 @@ class ActivityViewSet(viewsets.ReadOnlyModelViewSet):
         except (IndexError, ValueError, Exception) as e:
             print(f"Token validation error: {str(e)}")
             return False, None, False
-        
+
         return False, None, False
 
     def list(self, request, *args, **kwargs):
@@ -593,7 +593,7 @@ class SaleItemViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
         if not is_admin:
             return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-        
+
         try:
             with connection.cursor() as cursor:
                 cursor.execute("""
@@ -645,7 +645,7 @@ class SaleItemViewSet(viewsets.ModelViewSet):
                     })
 
                 return Response({
-                    'items': [{k: v for k, v in row.items() if k not in ['total_count', 'total_value']} 
+                    'items': [{k: v for k, v in row.items() if k not in ['total_count', 'total_value']}
                              for row in results],
                     'summary': {
                         'totalItems': results[0]['total_count'],
@@ -712,9 +712,9 @@ def profit_report(request):
                 WITH monthly_data AS (
                     SELECT 
                         DATE_TRUNC('month', s.created_at) as month,
-                        COALESCE(SUM(s.total_amount), 0) as revenue,
-                        COALESCE(SUM(si.quantity * p.buy_price), 0) as cost,
-                        COALESCE(SUM(s.total_amount) - SUM(si.quantity * p.buy_price), 0) as profit,
+                        COALESCE(SUM(s.total_amount::float), 0) as revenue,
+                        COALESCE(SUM(si.quantity * p.buy_price::float), 0) as cost,
+                        COALESCE(SUM(s.total_amount - si.quantity * p.buy_price)::float, 0) as profit,
                         COUNT(DISTINCT s.id) as total_sales,
                         COALESCE(SUM(si.quantity), 0) as total_items_sold
                     FROM sales s
@@ -902,7 +902,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
                     ORDER BY a.created_at DESC
                     LIMIT 10
                 """)
-                activities = [dict(zip([col[0] for col in cursor.description], row)) 
+                activities = [dict(zip([col[0] for col in cursor.description], row))
                             for row in cursor.fetchall()]
 
                 return Response({
@@ -931,11 +931,11 @@ class ReportViewSet(viewsets.ViewSet):
         auth_header = request.headers.get('Authorization')
         if not auth_header or not auth_header.startswith('Bearer '):
             return False, None, False
-        
+
         token = auth_header.split(' ')[1]
         if not token.startswith('token_'):
             return False, None, False
-        
+
         try:
             parts = token.split('_')
             user_id = int(parts[1])
@@ -951,7 +951,7 @@ class ReportViewSet(viewsets.ViewSet):
         except (IndexError, ValueError) as e:
             print(f"Token validation error: {str(e)}")
             return False, None, False
-        
+
         return False, None, False
 
     def list(self, request):
@@ -978,7 +978,7 @@ class ReportViewSet(viewsets.ViewSet):
                         FROM products
                     """)
                     summary = dict(zip([col[0] for col in cursor.description], cursor.fetchone()))
-                    
+
                     # Get category breakdown
                     cursor.execute("""
                         SELECT 
@@ -996,9 +996,9 @@ class ReportViewSet(viewsets.ViewSet):
                         HAVING COUNT(p.id) > 0
                         ORDER BY COUNT(p.id) DESC
                     """)
-                    categories = [dict(zip([col[0] for col in cursor.description], row)) 
+                    categories = [dict(zip([col[0] for col in cursor.description], row))
                                 for row in cursor.fetchall()]
-                    
+
                     # Get product details
                     cursor.execute("""
                         SELECT 
@@ -1025,7 +1025,7 @@ class ReportViewSet(viewsets.ViewSet):
                             END,
                             p.name
                     """)
-                    products = [dict(zip([col[0] for col in cursor.description], row)) 
+                    products = [dict(zip([col[0] for col in cursor.description], row))
                               for row in cursor.fetchall()]
 
                     # Format decimal values
@@ -1083,27 +1083,28 @@ class ReportViewSet(viewsets.ViewSet):
                     cursor.execute(f"""
                         SELECT 
                             s.id,
-                            s.created_at,
-                            s.total_amount,
-                            s.original_amount,
-                            s.discount,
+                            s.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Nairobi' as created_at,
+                            s.total_amount::float,
+                            s.original_amount::float,
+                            s.discount::float,
                             u.username as sold_by,
                             COUNT(si.id) as items_count,
                             SUM(si.quantity) as total_items,
                             STRING_AGG(
-                                CONCAT(p.name, ' (', si.quantity, ' @ ', si.unit_price, ')'),
+                                CONCAT(p.name, ' (', si.quantity, ' @ ', si.unit_price::float, ')'),
                                 ', '
                             ) as items_list
                         FROM sales s
-                        LEFT JOIN users u ON s.user_id = u.id
                         LEFT JOIN sale_items si ON s.id = si.sale_id
                         LEFT JOIN products p ON si.product_id = p.id
-                        {date_filter}
+                        LEFT JOIN users u ON s.user_id = u.id
+                        WHERE s.created_at BETWEEN %s AND %s
                         GROUP BY s.id, s.created_at, s.total_amount, s.original_amount, 
                                 s.discount, u.username
                         ORDER BY s.created_at DESC
-                    """, params)
-                    sales = [dict(zip([col[0] for col in cursor.description], row)) 
+                    """, [start_date, end_date])
+
+                    sales = [dict(zip([col[0] for col in cursor.description], row))
                             for row in cursor.fetchall()]
 
                     # Format dates and decimal values
@@ -1132,7 +1133,7 @@ class ReportViewSet(viewsets.ViewSet):
         is_authenticated, _, _ = self.check_token_auth(request)
         if not is_authenticated:
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        
+
         try:
             with connection.cursor() as cursor:
                 cursor.execute("""
@@ -1156,7 +1157,7 @@ class ReportViewSet(viewsets.ViewSet):
         is_authenticated, _, _ = self.check_token_auth(request)
         if not is_authenticated:
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        
+
         try:
             with connection.cursor() as cursor:
                 cursor.execute("""
@@ -1207,15 +1208,15 @@ class ReportViewSet(viewsets.ViewSet):
                         current_stock ASC,
                         name ASC
                 """)
-                
+
                 columns = [col[0] for col in cursor.description]
                 results = [dict(zip(columns, row)) for row in cursor.fetchall()]
-                
+
                 # Format decimal values
                 for row in results:
                     if 'sell_price' in row and row['sell_price'] is not None:
                         row['sell_price'] = str(row['sell_price'])
-                
+
                 if not results:
                     return Response({
                         'items': [],
@@ -1225,9 +1226,9 @@ class ReportViewSet(viewsets.ViewSet):
                             'lowStock': 0
                         }
                     })
-                
+
                 return Response({
-                    'items': [{k: v for k, v in row.items() if k not in ['out_of_stock_count', 'low_stock_count']} 
+                    'items': [{k: v for k, v in row.items() if k not in ['out_of_stock_count', 'low_stock_count']}
                              for row in results],
                     'summary': {
                         'total': len(results),
@@ -1235,7 +1236,7 @@ class ReportViewSet(viewsets.ViewSet):
                         'lowStock': results[0]['low_stock_count']
                     }
                 })
-                
+
         except Exception as e:
             print(f"Error in low_stock: {str(e)}")
             return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1270,7 +1271,7 @@ class DashboardViewSet(viewsets.ViewSet):
         is_authenticated, _, _ = self.check_token_auth(request)
         if not is_authenticated:
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        
+
         try:
             with connection.cursor() as cursor:
                 # Get current month stats
@@ -1282,7 +1283,7 @@ class DashboardViewSet(viewsets.ViewSet):
                         COALESCE((SELECT COUNT(*) FROM sales WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)), 0) as total_orders
                 """)
                 current_stats = cursor.fetchone()
-                
+
                 # Get last month stats for comparison
                 cursor.execute("""
                     SELECT 
@@ -1292,17 +1293,17 @@ class DashboardViewSet(viewsets.ViewSet):
                         COALESCE((SELECT COUNT(*) FROM sales WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') AND created_at < DATE_TRUNC('month', CURRENT_DATE)), 0) as last_month_orders
                 """)
                 last_month_stats = cursor.fetchone()
-                
+
                 if current_stats and last_month_stats:
                     total_products, low_stock_products, total_sales, total_orders = current_stats
                     last_month_products, last_month_low_stock, last_month_sales, last_month_orders = last_month_stats
-                    
+
                     # Calculate percentage changes
                     products_change = ((total_products - last_month_products) / last_month_products * 100) if last_month_products > 0 else 0
                     low_stock_change = ((low_stock_products - last_month_low_stock) / last_month_low_stock * 100) if last_month_low_stock > 0 else 0
                     sales_change = ((total_sales - last_month_sales) / last_month_sales * 100) if last_month_sales > 0 else 0
                     orders_change = ((total_orders - last_month_orders) / last_month_orders * 100) if last_month_orders > 0 else 0
-                    
+
                     return Response({
                         'totalProducts': total_products,
                         'lowStockCount': low_stock_products,
@@ -1318,14 +1319,14 @@ class DashboardViewSet(viewsets.ViewSet):
         except Exception as e:
             print(f"Error in stats: {str(e)}")
             return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
+
         return Response({"detail": "Error fetching stats"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def category_chart(self, request):
         is_authenticated, _, _ = self.check_token_auth(request)
         if not is_authenticated:
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        
+
         try:
             with connection.cursor() as cursor:
                 cursor.execute("""
@@ -1359,14 +1360,14 @@ class DashboardViewSet(viewsets.ViewSet):
                 """)
                 columns = [col[0] for col in cursor.description]
                 results = [dict(zip(columns, row)) for row in cursor.fetchall()]
-                
+
                 # Format decimal values
                 for row in results:
                     if 'total_value' in row and row['total_value'] is not None:
                         row['total_value'] = str(row['total_value'])
                     if 'percentage' in row and row['percentage'] is not None:
                         row['percentage'] = round(float(row['percentage']), 1)
-                
+
                 return Response(results)
         except Exception as e:
             print(f"Error in category_chart: {str(e)}")
@@ -1376,7 +1377,7 @@ class DashboardViewSet(viewsets.ViewSet):
         is_authenticated, _, _ = self.check_token_auth(request)
         if not is_authenticated:
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        
+
         try:
             with connection.cursor() as cursor:
                 cursor.execute("""
@@ -1390,15 +1391,15 @@ class DashboardViewSet(viewsets.ViewSet):
                 """)
                 columns = [col[0] for col in cursor.description]
                 results = [dict(zip(columns, row)) for row in cursor.fetchall()]
-                
+
                 # Format dates and decimal values
                 for row in results:
                     if 'date' in row and row['date'] is not None:
                         row['date'] = row['date'].isoformat()
                     if 'amount' in row and row['amount'] is not None:
                         row['amount'] = str(row['amount'])
-                
+
                 return Response(results)
         except Exception as e:
             print(f"Error in sales_chart: {str(e)}")
-            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR) 
+            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

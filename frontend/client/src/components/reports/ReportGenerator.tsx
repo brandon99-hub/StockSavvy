@@ -59,7 +59,12 @@ const ReportGenerator = () => {
     });
 
     const {data: sales = [], isLoading: isSalesLoading} = useQuery<Sale[]>({
-        queryKey: ['/api/sales/'],
+        queryKey: ['/api/sales/', {
+            params: {
+                start: dateRange.start.toISOString(),
+                end: dateRange.end.toISOString()
+            }
+        }],
     });
 
 
@@ -76,6 +81,8 @@ const ReportGenerator = () => {
             }
         }],
     });
+    const totalRevenue = profitData?.reduce((sum, day) =>
+        sum + Number(day.revenue), 0) || 0;
 
     const isLoading = isProductsLoading || isCategoriesLoading || isSalesLoading || isSaleItemsLoading || isProfitLoading;
 
