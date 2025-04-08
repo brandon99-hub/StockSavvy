@@ -1,7 +1,7 @@
 // @ts-ignore
 import React from "react";
 import {useQuery, useQueryClient} from "@tanstack/react-query";
-import {Product, Activity} from "../../types";
+import {Product, Activity, Category} from "../../types";
 import StatCard from "./StatCard";
 import SalesChart from "./SalesChart";
 import CategoryChart from "./CategoryChart";
@@ -77,6 +77,9 @@ const Dashboard = () => {
         Activity[]
     >({
         queryKey: ["/api/activities/"],
+    });
+    const {data: categories} = useQuery<Category[]>({
+        queryKey: ['/api/categories/'],
     });
 
     // Loading state
@@ -180,6 +183,7 @@ const Dashboard = () => {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <LowStockTable
                     products={lowStockData?.items || []}
+                    categories={categories || []}
                     onReorder={() =>
                         queryClient.invalidateQueries({queryKey: ["/api/products"]})
                     }
