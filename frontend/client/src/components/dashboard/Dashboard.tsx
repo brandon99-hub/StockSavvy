@@ -1,11 +1,7 @@
+// @ts-ignore
 import React from "react";
 import {useQuery, useQueryClient} from "@tanstack/react-query";
-import {
-    Product,
-    Sale,
-    Activity,
-    Category
-} from "../../types";
+import {Product, Activity} from "../../types";
 import StatCard from "./StatCard";
 import SalesChart from "./SalesChart";
 import CategoryChart from "./CategoryChart";
@@ -13,76 +9,83 @@ import LowStockTable from "./LowStockTable";
 import RecentActivityTable from "./RecentActivityTable";
 import {Skeleton} from "../ui/skeleton";
 
+// Response type interfaces
+interface LowStockResponse {
+    items: Product[];
+    summary: {
+        total: number;
+        outOfStock: number;
+        lowStock: number;
+    };
+}
+
+interface SalesChartData {
+    date: string;
+    amount: number;
+}
+
+interface CategoryChartData {
+    id: number;
+    name: string;
+    percentage: number;
+}
+
+interface DashboardStats {
+    totalProducts: number;
+    lowStockCount: number;
+    totalSales: number;
+    pendingOrders: number;
+    compareLastMonth: {
+        products: number;
+        lowStock: number;
+        sales: number;
+        orders: number;
+    };
+}
+
 const Dashboard = () => {
     const queryClient = useQueryClient();
 
-    // Enhanced stats query with validation
-    const {data: stats, isLoading: isStatsLoading} = useQuery<{
-        totalProducts: number,
-        lowStockCount: number,
-        totalSales: number,
-        pendingOrders: number,
-        compareLastMonth: {
-            products: number,
-            lowStock: number,
-            sales: number,
-            orders: number
-        }
-    }>({
-        queryKey: ['/api/dashboard/stats/'],
-        refetchInterval: 60000
-        // Remove the broken select transformation
+    // Dashboard stats query
+    const {data: stats, isLoading: isStatsLoading} = useQuery<DashboardStats>({
+        queryKey: ["/api/dashboard/stats/"],
+        refetchInterval: 60000,
     });
 
-    // Add calculation helper function
-    const calculateRealChange = (metric: string) => {
-        // Simple implementation to avoid errors
-        return 0; // Default to 0% change
-    };
+    // Low stock products query
+    const {data: lowStockData, isLoading: isLowStockLoading} =
+        useQuery<LowStockResponse>({
+            queryKey: ["/api/products/low-stock/"],
+        });
 
-    // Helper functions for metric calculation
-    const getCurrentMetric = (metric: string): number => {
-        // Simple implementation that would be replaced with real logic
-        return 0;
-    };
-
-    const getPreviousMonthMetric = (metric: string): number => {
-        // Simple implementation that would be replaced with real logic
-        return 0;
-    };
-
-    // Existing queries remain the same
-    const {data: products, isLoading: isProductsLoading} = useQuery<Product[]>({
-        queryKey: ['/api/products/'],
+    // Sales chart data query
+    const {data: salesData, isLoading: isSalesDataLoading} = useQuery<
+        SalesChartData[]
+    >({
+        queryKey: ["/api/dashboard/sales-chart/"],
     });
 
-    const {data: lowStockItems, isLoading: isLowStockLoading} = useQuery<Product[]>({
-        queryKey: ['/api/products/low-stock/'],
+    // Category chart data query
+    const {data: categoryData, isLoading: isCategoryDataLoading} = useQuery<
+        CategoryChartData[]
+    >({
+        queryKey: ["/api/dashboard/category-chart/"],
     });
 
-    const {data: categories, isLoading: isCategoriesLoading} = useQuery<Category[]>({
-        queryKey: ['/api/categories/'],
-    });
-
-    const {data: activities, isLoading: isActivitiesLoading} = useQuery<Activity[]>({
-        queryKey: ['/api/activities/'],
-    });
-
-    const {data: salesData, isLoading: isSalesDataLoading} = useQuery<{ date: string, amount: number }[]>({
-        queryKey: ['/api/dashboard/sales-chart/'],
-    });
-
-    const {data: categoryData, isLoading: isCategoryDataLoading} = useQuery<{
-        id: number,
-        name: string,
-        percentage: number
-    }[]>({
-        queryKey: ['/api/dashboard/category-chart/'],
+    // Recent activities query
+    const {data: activities, isLoading: isActivitiesLoading} = useQuery<
+        Activity[]
+    >({
+        queryKey: ["/api/activities/"],
     });
 
     // Loading state
-    const isLoading = isStatsLoading || isProductsLoading || isLowStockLoading ||
-        isCategoriesLoading || isActivitiesLoading || isSalesDataLoading || isCategoryDataLoading;
+    const isLoading =
+        isStatsLoading ||
+        isLowStockLoading ||
+        isSalesDataLoading ||
+        isCategoryDataLoading ||
+        isActivitiesLoading;
 
     if (isLoading) {
         return (
@@ -118,10 +121,12 @@ const Dashboard = () => {
         <div>
             <div className="mb-6">
                 <h1 className="text-2xl font-semibold text-gray-800">Dashboard</h1>
-                <p className="text-gray-600">Welcome back! Here's what's happening with your inventory today.</p>
+                <p className="text-gray-600">
+                    Welcome back! Here's what's happening with your inventory today.
+                </p>
             </div>
 
-            {/* Stats Cards with validated data */}
+            {/* Stats Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                 <StatCard
                     title="Total Stock Items"
@@ -166,7 +171,6 @@ const Dashboard = () => {
                 <div className="lg:col-span-2 bg-white p-6 rounded-lg shadow-sm border border-gray-200">
                     <SalesChart data={salesData || []}/>
                 </div>
-
                 <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
                     <CategoryChart data={categoryData || []}/>
                 </div>
@@ -174,9 +178,11 @@ const Dashboard = () => {
 
             {/* Tables Row */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <LowStockTable 
-                    products={lowStockItems || []} 
-                    onReorder={() => queryClient.invalidateQueries({ queryKey: ['/api/products'] })}
+                <LowStockTable
+                    products={lowStockData?.items || []}
+                    onReorder={() =>
+                        queryClient.invalidateQueries({queryKey: ["/api/products"]})
+                    }
                 />
                 <RecentActivityTable
                     activities={activities || []}
@@ -185,6 +191,6 @@ const Dashboard = () => {
             </div>
         </div>
     );
-}
+};
 
 export default Dashboard;
