@@ -1,4 +1,5 @@
 import {useState} from 'react';
+import {useEffect} from 'react';
 import {useQuery} from '@tanstack/react-query';
 import {format, subDays, startOfDay, endOfDay} from 'date-fns';
 import {
@@ -33,6 +34,14 @@ import {exportInventoryToPDF, exportSalesToPDF, exportProfitToPDF, exportToCSV} 
 import {Product, Sale, Category} from '../../../../shared/schema';
 
 const ReportGenerator = () => {
+    const controller = new AbortController();
+
+    useEffect(() => {
+        return () => {
+            controller.abort(); // Cancel pending requests on unmount
+        };
+    }, []);
+
     const [reportType, setReportType] = useState<'inventory' | 'sales' | 'profit'>('inventory');
     const [dateRange, setDateRange] = useState({
         start: startOfDay(subDays(new Date(), 30)),
@@ -54,8 +63,9 @@ const ReportGenerator = () => {
     });
 
 
-    const {data: saleItems = {}} = useQuery<Record<number, any[]>>({
-        queryKey: ['/api/sale-items/'], // Correct endpoint
+    const {data: saleItems = {}, isLoading: isSaleItemsLoading} = useQuery<Record<number, any[]>>({
+        queryKey: ['/api/sale-items/'],
+        signal: controller.signal,// Correct endpoint
     });
 
     const {data: profitData = [], isLoading: isProfitLoading} = useQuery<any[]>({
