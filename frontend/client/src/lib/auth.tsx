@@ -12,7 +12,9 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // API base URL
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.PROD
+  ? 'https://stocksavvy-ahtd.onrender.com'  // Your Render URL
+  : 'http://localhost:8000';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);

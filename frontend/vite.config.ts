@@ -47,12 +47,14 @@ export default defineConfig({
 
     server: {
         proxy: {
-            "/api": {
-                target: "http://localhost:8000",
+            '/api': {
+                target: import.meta.env.PROD
+                    ? 'https://stocksavvy-ahtd.onrender.com'  // Production URL
+                    : 'http://localhost:8000',                // Development URL
                 changeOrigin: true,
                 secure: false,
                 ws: true,
-            },
-        },
+            }
+        }
     }
 });
