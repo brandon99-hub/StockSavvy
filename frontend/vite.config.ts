@@ -11,8 +11,7 @@ const __dirname = dirname(__filename);
 export default defineConfig({
     base: '/static/',
     root: path.resolve(__dirname, "client"),
-    publicDir: path.resolve(__dirname, "client/public"), // Add this line
-
+    publicDir: path.resolve(__dirname, "client/public"),
 
     plugins: [
         react(),
@@ -49,8 +48,8 @@ export default defineConfig({
         proxy: {
             '/api': {
                 target: import.meta.env.PROD
-                    ? 'https://stocksavvy-ahtd.onrender.com'  // Production URL
-                    : 'http://localhost:8000',                // Development URL
+                    ? 'https://stocksavvy-ahtd.onrender.com'
+                    : 'http://localhost:8000',
                 changeOrigin: true,
                 secure: false,
                 ws: true,
