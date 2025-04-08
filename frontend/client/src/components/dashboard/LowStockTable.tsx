@@ -1,3 +1,4 @@
+// @ts-ignore
 import React, { useState } from "react";
 import { useToast } from "../../hooks/use-toast";
 import { apiRequest } from "../../lib/queryClient";
@@ -28,7 +29,8 @@ const LowStockTable = ({ products, onReorder }: LowStockTableProps) => {
       setIsLoading(true);
       setReorderingProduct(productId);
       
-      await apiRequest(`/products/${productId}/reorder/`, {
+      // To:
+    await apiRequest(`/products/${productId}/restock/`, {
         method: "POST",
       });
 

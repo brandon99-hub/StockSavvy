@@ -23,8 +23,9 @@ urlpatterns = [
     path('', include(router.urls)),
     path('test/', test_connection),
     path('reports/profit/', profit_report, name='profit-report'),
-    path('products/low-stock/', ProductViewSet.as_view({'get': 'low_stock'}), name='low-stock-products'),
+    path('products/low_stock/', ProductViewSet.as_view({'get': 'low_stock'}), name='low-stock-products'),
     path('dashboard/stats/', DashboardViewSet.as_view({'get': 'stats'}), name='dashboard-stats'),
     path('dashboard/category-chart/', DashboardViewSet.as_view({'get': 'category_chart'}), name='dashboard-category-chart'),
     path('dashboard/sales-chart/', DashboardViewSet.as_view({'get': 'sales_chart'}), name='dashboard-sales-chart'),
+    path('products/<int:pk>/reorder/', ProductViewSet.as_view({'post': 'restock'}), name='product-restock'),
 ] 
