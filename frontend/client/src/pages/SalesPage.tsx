@@ -14,22 +14,22 @@ const SalesPage = () => {
 
   // Fetch sales
   const { data: sales = [], isLoading: isSalesLoading } = useQuery<Sale[]>({
-    queryKey: ['/api/sales'],
+    queryKey: ['/api/sales/'],
   });
 
   // Fetch sale items
   const { data: saleItems = {}, isLoading: isSaleItemsLoading } = useQuery<Record<number, SaleItem[]>>({
-    queryKey: ['sales/items'],
+    queryKey: ['sales/items/'],
   });
 
   // Fetch products for product lookup
   const { data: products = [], isLoading: isProductsLoading } = useQuery<Product[]>({
-    queryKey: ['/api/products'],
+    queryKey: ['/api/products/'],
   });
 
   // Fetch users for user lookup
   const { data: users = [], isLoading: isUsersLoading } = useQuery<User[]>({
-    queryKey: ['/api/users'],
+    queryKey: ['/api/users/'],
   });
 
   const isLoading = isSalesLoading || isSaleItemsLoading || isProductsLoading || isUsersLoading;

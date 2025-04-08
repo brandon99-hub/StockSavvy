@@ -16,17 +16,17 @@ const InventoryPage = () => {
 
   // Fetch products
   const { data: products = [], isLoading: isProductsLoading } = useQuery<Product[]>({
-    queryKey: ['/api/products'],
+    queryKey: ['/api/products/'],
   });
 
   // Fetch categories
   const { data: categories = [], isLoading: isCategoriesLoading } = useQuery<Category[]>({
-    queryKey: ['/api/categories'],
+    queryKey: ['/api/categories/'],
   });
   
   // Fetch low stock products
   const { data: lowStockProducts = [], isLoading: isLowStockLoading } = useQuery<Product[]>({
-    queryKey: ['products/low-stock'],
+    queryKey: ['products/low-stock/'],
   });
 
   const isLoading = isProductsLoading || isCategoriesLoading || isLowStockLoading;

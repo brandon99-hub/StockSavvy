@@ -29,7 +29,7 @@ const Dashboard = () => {
             orders: number
         }
     }>({
-        queryKey: ['/api/dashboard/stats'],
+        queryKey: ['/api/dashboard/stats/'],
         refetchInterval: 60000
         // Remove the broken select transformation
     });
@@ -53,23 +53,23 @@ const Dashboard = () => {
 
     // Existing queries remain the same
     const {data: products, isLoading: isProductsLoading} = useQuery<Product[]>({
-        queryKey: ['/api/products'],
+        queryKey: ['/api/products/'],
     });
 
     const {data: lowStockItems, isLoading: isLowStockLoading} = useQuery<Product[]>({
-        queryKey: ['/api/products/low-stock'],
+        queryKey: ['/api/products/low-stock/'],
     });
 
     const {data: categories, isLoading: isCategoriesLoading} = useQuery<Category[]>({
-        queryKey: ['/api/categories'],
+        queryKey: ['/api/categories/'],
     });
 
     const {data: activities, isLoading: isActivitiesLoading} = useQuery<Activity[]>({
-        queryKey: ['/api/activities'],
+        queryKey: ['/api/activities/'],
     });
 
     const {data: salesData, isLoading: isSalesDataLoading} = useQuery<{ date: string, amount: number }[]>({
-        queryKey: ['/api/dashboard/sales-chart'],
+        queryKey: ['/api/dashboard/sales-chart/'],
     });
 
     const {data: categoryData, isLoading: isCategoryDataLoading} = useQuery<{
@@ -77,7 +77,7 @@ const Dashboard = () => {
         name: string,
         percentage: number
     }[]>({
-        queryKey: ['/api/dashboard/category-chart'],
+        queryKey: ['/api/dashboard/category-chart/'],
     });
 
     // Loading state
