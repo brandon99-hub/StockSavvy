@@ -25,7 +25,7 @@ api.interceptors.request.use(
     }
 
     // Add CSRF token for non-GET requests
-    if (config.method !== 'get') {
+    if (config.method?.toLowerCase() !== 'get') {
       const csrfToken = getCsrfToken();
       if (csrfToken) {
         config.headers['X-CSRFToken'] = csrfToken;
@@ -44,23 +44,23 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     const originalRequest = error.config;
-    
+
     // Handle 401 Unauthorized errors
     if (error.response && error.response.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
-      
+
       // Clear user data and redirect to login
       localStorage.removeItem('user');
       window.location.href = '/login';
-      
+
       return Promise.reject(error);
     }
-    
+
     // Handle 403 Forbidden errors (likely CSRF issue)
     if (error.response && error.response.status === 403) {
       console.warn('403 Forbidden - Possible CSRF token issue or insufficient permissions');
     }
-    
+
     return Promise.reject(error);
   }
 );
@@ -74,58 +74,63 @@ function getCsrfToken(): string | null {
   return cookieValue || null;
 }
 
-// API request methods
+// API request methods with URL normalization
 export const apiClient = {
   // GET request
   async get<T>(url: string, params = {}): Promise<T> {
-    const response = await api.get<T>(url, { params });
+    const normalizedUrl = url.startsWith('/') ? url : `/${url}`;
+    const response = await api.get<T>(normalizedUrl, { params });
     return response.data;
   },
-  
+
   // POST request
   async post<T>(url: string, data = {}): Promise<T> {
-    const response = await api.post<T>(url, data);
+    const normalizedUrl = url.startsWith('/') ? url : `/${url}`;
+    const response = await api.post<T>(normalizedUrl, data);
     return response.data;
   },
-  
+
   // PUT request
   async put<T>(url: string, data = {}): Promise<T> {
-    const response = await api.put<T>(url, data);
+    const normalizedUrl = url.startsWith('/') ? url : `/${url}`;
+    const response = await api.put<T>(normalizedUrl, data);
     return response.data;
   },
-  
+
   // PATCH request
   async patch<T>(url: string, data = {}): Promise<T> {
-    const response = await api.patch<T>(url, data);
+    const normalizedUrl = url.startsWith('/') ? url : `/${url}`;
+    const response = await api.patch<T>(normalizedUrl, data);
     return response.data;
   },
-  
+
   // DELETE request
   async delete<T>(url: string): Promise<T> {
-    const response = await api.delete<T>(url);
+    const normalizedUrl = url.startsWith('/') ? url : `/${url}`;
+    const response = await api.delete<T>(normalizedUrl);
     return response.data;
   },
-  
+
   // Login request (returns user with token)
   async login(username: string, password: string) {
     const response = await api.post('/api/users/login/', { username, password });
-    
+
     // Get token from response headers or body
-    const token = response.headers.authorization || 
+    const token = response.headers.authorization ||
                  (response.data.token ? response.data.token : null);
-    
+
     // Create user object with token
     const user = {
       ...response.data,
       token: token ? token.replace('Bearer ', '') : null
     };
-    
+
     // Store user in localStorage
     localStorage.setItem('user', JSON.stringify(user));
-    
+
     return user;
   },
-  
+
   // Logout request
   async logout() {
     try {
@@ -136,4 +141,4 @@ export const apiClient = {
   }
 };
 
-export default apiClient; 
+export default apiClient;
