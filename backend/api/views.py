@@ -657,6 +657,7 @@ class SaleItemViewSet(viewsets.ModelViewSet):
             print(f"Error in SaleItemViewSet list: {str(e)}")
             return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
 def check_token_auth(request):
     auth_header = request.headers.get('Authorization')
     if auth_header and auth_header.startswith('Bearer '):
@@ -668,64 +669,45 @@ def check_token_auth(request):
                     user_id = int(parts[1])
                     with connection.cursor() as cursor:
                         cursor.execute(
-                            "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
+                            "SELECT id, is_staff, is_superuser, role FROM users WHERE id = %s",
                             [user_id]
                         )
                         row = cursor.fetchone()
                         if row:
-                            is_staff, is_superuser, role = row
-                            return True, user_id, is_staff or is_superuser or role in ['admin', 'manager']
+                            user_id, is_staff, is_superuser, role = row
+                            # Allow any authenticated user
+                            return True, user_id, True
             except (IndexError, ValueError) as e:
                 print(f"Token validation error: {str(e)}")
                 pass
     return False, None, False
 
+
 @api_view(['GET'])
 def profit_report(request):
-    auth_header = request.headers.get('Authorization')
-    if not auth_header or not auth_header.startswith('Bearer '):
+    # Validate token once at the start
+    is_authenticated, user_id, _ = check_token_auth(request)
+    if not is_authenticated:
         return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-    
-    token = auth_header.split(' ')[1]
-    if not token or not token.startswith('token_'):
-        return Response({"detail": "Invalid token format"}, status=status.HTTP_401_UNAUTHORIZED)
-    
+
     try:
-        parts = token.split('_')
-        user_id = int(parts[1])
+        # Get date range from query params
+        start_date = request.query_params.get('start')
+        end_date = request.query_params.get('end')
+
+        date_filter = ""
+        params = []
+        if start_date and end_date:
+            date_filter = """
+                WHERE s.created_at >= %s::timestamp
+                AND s.created_at <= %s::timestamp + interval '1 day'
+            """
+            params = [start_date, end_date]
+        else:
+            date_filter = "WHERE s.created_at >= DATE_TRUNC('month', CURRENT_DATE)"
+
+        # Get profit report data
         with connection.cursor() as cursor:
-            # Check user permissions
-            cursor.execute(
-                "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
-                [user_id]
-            )
-            row = cursor.fetchone()
-            if not row:
-                return Response({"detail": "User not found"}, status=status.HTTP_401_UNAUTHORIZED)
-            
-            is_staff, is_superuser, role = row
-            # Allow any authenticated user to access the profit report
-            is_authenticated, user_id, is_admin = check_token_auth(request)
-            if not is_authenticated:
-                return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-            
-            # Get date range from query params
-            start_date = request.query_params.get('start')
-            end_date = request.query_params.get('end')
-            
-            date_filter = ""
-            params = []
-            if start_date and end_date:
-                date_filter = """
-                    WHERE s.created_at >= %s::timestamp
-                    AND s.created_at <= %s::timestamp + interval '1 day'
-                """
-                params = [start_date, end_date]
-            else:
-                # Default to current month if no date range specified
-                date_filter = "WHERE s.created_at >= DATE_TRUNC('month', CURRENT_DATE)"
-            
-            # Get profit report data
             cursor.execute(f"""
                 WITH monthly_data AS (
                     SELECT 
@@ -755,23 +737,23 @@ def profit_report(request):
                 FROM monthly_data
                 ORDER BY month DESC
             """, params)
-            
+
             columns = [col[0] for col in cursor.description]
             results = [dict(zip(columns, row)) for row in cursor.fetchall()]
-            
+
             # Calculate totals
             total_revenue = sum(float(row['revenue']) for row in results) if results else 0
             total_cost = sum(float(row['cost']) for row in results) if results else 0
             total_profit = sum(float(row['profit']) for row in results) if results else 0
             total_margin = round((total_profit / total_revenue * 100), 2) if total_revenue > 0 else 0
-            
-            # Format dates and decimal values
+
+            # Format values
             for row in results:
                 row['month'] = row['month'].strftime('%Y-%m-%d')
                 for key in ['revenue', 'cost', 'profit']:
                     if key in row and row[key] is not None:
                         row[key] = str(row[key])
-            
+
             return Response({
                 'summary': {
                     'totalRevenue': str(total_revenue),
@@ -781,7 +763,7 @@ def profit_report(request):
                 },
                 'monthly': results
             })
-            
+
     except Exception as e:
         print(f"Error in profit_report: {str(e)}")
         return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
