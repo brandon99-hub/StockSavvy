@@ -25,7 +25,7 @@ const Header = ({toggleSidebar}: HeaderProps) => {
 
     // Fetch activities from the /api/activities endpoint
     const {data: activities = []} = useQuery<Activity[]>({
-        queryKey: ['/api/activities'],
+        queryKey: ['/api/activities/'],
         select: (data) => data.filter(activity =>
             ['stock_added', 'stock_removed', 'order', 'restock_order', 'sale'].includes(activity.type)
         )

@@ -705,6 +705,7 @@ def profit_report(request):
             
             is_staff, is_superuser, role = row
             # Allow any authenticated user to access the profit report
+            is_authenticated, user_id, is_admin = check_token_auth(request)
             if not is_authenticated:
                 return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
             

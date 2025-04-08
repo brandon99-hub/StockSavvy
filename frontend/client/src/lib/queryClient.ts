@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 
 // Base URL for API requests
+// @ts-ignore
 const API_BASE_URL = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 
 // Helper function to handle API responses

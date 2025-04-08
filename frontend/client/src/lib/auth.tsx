@@ -1,3 +1,4 @@
+// @ts-ignore
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { User } from "../types";
 
@@ -12,6 +13,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // API base URL
+// @ts-ignore
 const API_BASE_URL = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
