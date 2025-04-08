@@ -46,14 +46,14 @@ export default defineConfig({
 
     server: {
         proxy: {
-            '/api': {
-                target: import.meta.env.PROD
+            "/api": {
+                target: process.env.NODE_ENV === 'production'
                     ? 'https://stocksavvy-ahtd.onrender.com'
                     : 'http://localhost:8000',
                 changeOrigin: true,
                 secure: false,
                 ws: true,
-            }
-        }
+            },
+        },
     }
 });
