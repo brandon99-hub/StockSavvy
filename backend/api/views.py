@@ -659,8 +659,8 @@ def check_token_auth(request):
                         row = cursor.fetchone()
                         if row:
                             user_id, is_staff, is_superuser, role = row
-                            # Allow any authenticated user
-                            return True, user_id, True
+                            # Check if user has admin privileges
+                            return True, user_id, is_staff or is_superuser or role in ['admin', 'manager']
             except (IndexError, ValueError) as e:
                 print(f"Token validation error: {str(e)}")
                 pass
