@@ -63,11 +63,9 @@ class UserViewSet(viewsets.ModelViewSet):
         if auth_header and auth_header.startswith('Bearer '):
             token = auth_header.split(' ')[1]
             if token and token.startswith('token_'):
-                # Extract user_id from token (format: token_userid_username)
                 try:
                     parts = token.split('_')
                     user_id = int(parts[1])
-                    # Get user from database to check admin status
                     with connection.cursor() as cursor:
                         cursor.execute(
                             "SELECT is_staff, is_superuser FROM users WHERE id = %s",
@@ -153,6 +151,23 @@ class UserViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def logout(self, request):
         return Response({'message': 'Logged out successfully'})
+
+    def destroy(self, request, *args, **kwargs):
+        is_authenticated, user_id, is_admin = self.check_token_auth(request)
+        if not is_authenticated:
+            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+        if not is_admin:
+            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
+            
+        try:
+            instance = self.get_object()
+            self.perform_destroy(instance)
+            return Response({"message": "User deleted successfully"}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response(
+                {"detail": f"Error deleting user: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class CategoryViewSet(viewsets.ModelViewSet):
@@ -420,7 +435,7 @@ class SaleViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
 
         data = request.data
-        now = timezone.now()  # This is already timezone-aware
+        now = timezone.now()
 
         try:
             # Get username from token
@@ -430,7 +445,7 @@ class SaleViewSet(viewsets.ModelViewSet):
             # Get the user instance by username
             user = User.objects.get_by_natural_key(username)
 
-            # Create the sale with timezone-aware datetime
+            # Create the sale
             sale = Sale.objects.create(
                 user_id=user.id,
                 sale_date=now,
@@ -462,12 +477,12 @@ class SaleViewSet(viewsets.ModelViewSet):
                     total_price=total_price
                 )
 
-                # Update product quantity and timestamps
+                # Update product quantity
                 product.quantity = F('quantity') - quantity
-                product.updated_at = now  # Use timezone-aware datetime
+                product.updated_at = now
                 product.save()
 
-                # Log activity for each item with timezone-aware datetime
+                # Log activity for each item
                 Activity.objects.create(
                     type='sale',
                     description=f'Sold {quantity} {product.name}(s)',
@@ -477,7 +492,18 @@ class SaleViewSet(viewsets.ModelViewSet):
                     status='success'
                 )
 
-            # Create a summary activity with timezone-aware datetime
+                # Check if product is low on stock after sale
+                if product.quantity <= product.min_stock_level:
+                    Activity.objects.create(
+                        type='low_stock',
+                        description=f'Low stock alert: {product.name} ({product.quantity} remaining)',
+                        product=product,
+                        user=user,
+                        created_at=now,
+                        status='warning'
+                    )
+
+            # Create a summary activity
             Activity.objects.create(
                 type='sale',
                 description=f'Created sale #{sale.id} with {total_items} items for KSh {sale.total_amount}',
@@ -881,22 +907,34 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 """)
                 product_data = dict(zip([col[0] for col in cursor.description], cursor.fetchone()))
 
-                # Recent activities
+                # Recent activities with proper timezone handling and formatting
                 cursor.execute("""
                     SELECT 
                         a.id,
                         a.type,
                         a.description,
-                        a.created_at,
+                        a.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Nairobi' as created_at,
                         a.status,
-                        u.username as user_name
+                        u.username as user_name,
+                        CASE 
+                            WHEN a.type = 'sale' THEN 'sale'
+                            WHEN a.type = 'restock' THEN 'restock'
+                            WHEN a.type = 'low_stock' THEN 'warning'
+                            ELSE 'info'
+                        END as activity_type
                     FROM activities a
                     LEFT JOIN users u ON a.user_id = u.id
+                    WHERE a.created_at >= NOW() - INTERVAL '7 days'
                     ORDER BY a.created_at DESC
                     LIMIT 10
                 """)
-                activities = [dict(zip([col[0] for col in cursor.description], row))
-                              for row in cursor.fetchall()]
+                activities = [
+                    {
+                        **dict(zip([col[0] for col in cursor.description], row)),
+                        'created_at': row[3].isoformat() if row[3] else None
+                    }
+                    for row in cursor.fetchall()
+                ]
 
                 return Response({
                     'sales': {
