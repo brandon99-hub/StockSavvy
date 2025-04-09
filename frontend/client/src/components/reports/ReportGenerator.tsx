@@ -102,10 +102,9 @@ const useReportsData = (reportType: string, dateRange: { start: Date; end: Date 
     const salesQuery = useQuery({
         queryKey: ['sales', dateRange],
         queryFn: async () => {
-            const response = await axios.get('/api/reports/', {
+            const response = await axios.get('/api/sales-items/', {
                 headers,
                 params: {
-                    type: 'sales',
                     start: format(dateRange.start, 'yyyy-MM-dd'),
                     end: format(dateRange.end, 'yyyy-MM-dd')
                 }

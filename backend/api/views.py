@@ -18,6 +18,7 @@ from rest_framework.authtoken.models import Token
 from django.utils import timezone
 import decimal
 from django.views.generic import TemplateView
+from django.conf import settings
 
 User = get_user_model()
 
@@ -701,44 +702,52 @@ def check_token_auth(request):
 
 @api_view(['GET'])
 def profit_report(request):
-    # Validate token once at the start
-    is_authenticated, user_id, is_admin = check_token_auth(request)
-    if not is_authenticated:
+    # Validate token
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
         return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-    if not is_admin:
-        return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-
+    
+    token = auth_header.split(' ')[1]
     try:
-        # Get date range from query params
-        start_date = request.query_params.get('start')
-        end_date = request.query_params.get('end')
-
-        date_filter = ""
-        params = []
-        if start_date and end_date:
-            date_filter = """
-                WHERE s.created_at >= %s::timestamp
-                AND s.created_at <= %s::timestamp + interval '1 day'
-            """
-            params = [start_date, end_date]
-        else:
-            date_filter = "WHERE s.created_at >= DATE_TRUNC('month', CURRENT_DATE)"
-
-        # Get profit report data
+        # Decode token and get user info
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+        user_id = payload.get('user_id')
+        
+        # Get user role and permissions
         with connection.cursor() as cursor:
-            cursor.execute(f"""
+            cursor.execute("""
+                SELECT u.is_staff, u.is_superuser, ur.role 
+                FROM users u 
+                LEFT JOIN user_roles ur ON u.id = ur.user_id 
+                WHERE u.id = %s
+            """, [user_id])
+            row = cursor.fetchone()
+            if not row:
+                return Response({"detail": "User not found"}, status=status.HTTP_401_UNAUTHORIZED)
+            
+            is_staff, is_superuser, role = row
+            is_admin = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager'])
+            if not is_admin:
+                return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
+
+            # Get date range from query params
+            start_date = request.query_params.get('start')
+            end_date = request.query_params.get('end')
+            if not start_date or not end_date:
+                return Response({"detail": "Date range required"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Get profit report data
+            cursor.execute("""
                 WITH monthly_data AS (
                     SELECT 
                         DATE_TRUNC('month', s.created_at) as month,
                         COALESCE(SUM(s.total_amount::float), 0) as revenue,
                         COALESCE(SUM(si.quantity * p.buy_price::float), 0) as cost,
-                        COALESCE(SUM(s.total_amount - si.quantity * p.buy_price)::float, 0) as profit,
-                        COUNT(DISTINCT s.id) as total_sales,
-                        COALESCE(SUM(si.quantity), 0) as total_items_sold
+                        COALESCE(SUM(s.total_amount::float - (si.quantity * p.buy_price::float)), 0) as profit
                     FROM sales s
                     LEFT JOIN sale_items si ON s.id = si.sale_id
                     LEFT JOIN products p ON si.product_id = p.id
-                    {date_filter}
+                    WHERE s.created_at BETWEEN %s::timestamp AND %s::timestamp + interval '1 day'
                     GROUP BY DATE_TRUNC('month', s.created_at)
                 )
                 SELECT 
@@ -746,15 +755,13 @@ def profit_report(request):
                     revenue,
                     cost,
                     profit,
-                    total_sales,
-                    total_items_sold,
                     CASE 
-                        WHEN revenue > 0 THEN CAST((profit / revenue * 100) AS DECIMAL(10,2))
+                        WHEN revenue > 0 THEN ROUND(CAST((profit / revenue * 100) AS DECIMAL(10,2)), 2)
                         ELSE 0 
                     END as profit_margin
                 FROM monthly_data
                 ORDER BY month DESC
-            """, params)
+            """, [start_date, end_date])
 
             columns = [col[0] for col in cursor.description]
             results = [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -765,10 +772,10 @@ def profit_report(request):
             total_profit = sum(float(row['profit']) for row in results) if results else 0
             total_margin = round((total_profit / total_revenue * 100), 2) if total_revenue > 0 else 0
 
-            # Format values
+            # Format response data
             for row in results:
                 row['month'] = row['month'].strftime('%Y-%m-%d')
-                for key in ['revenue', 'cost', 'profit']:
+                for key in ['revenue', 'cost', 'profit', 'profit_margin']:
                     if key in row and row[key] is not None:
                         row[key] = str(row[key])
 
@@ -782,9 +789,11 @@ def profit_report(request):
                 'monthly': results
             })
 
+    except jwt.InvalidTokenError:
+        return Response({"detail": "Invalid token"}, status=status.HTTP_401_UNAUTHORIZED)
     except Exception as e:
-        print(f"Error in profit_report: {str(e)}")
-        return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        print(f"Error generating profit report: {str(e)}")
+        return Response({"detail": "Internal server error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class RestockRuleViewSet(viewsets.ModelViewSet):
@@ -1005,7 +1014,7 @@ class ReportViewSet(viewsets.ViewSet):
                         DATE_TRUNC('month', s.created_at) as month,
                         COALESCE(SUM(s.total_amount), 0) as revenue,
                         COALESCE(SUM(si.quantity * p.buy_price), 0) as cost,
-                        COALESCE(SUM(s.total_amount - (si.quantity * p.buy_price)), 0) as profit
+                        COALESCE(SUM(s.total_amount - si.quantity * p.buy_price)), 0) as profit
                     FROM sales s
                     JOIN sale_items si ON s.id = si.sale_id
                     JOIN products p ON si.product_id = p.id
