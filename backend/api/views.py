@@ -670,9 +670,11 @@ def check_token_auth(request):
 @api_view(['GET'])
 def profit_report(request):
     # Validate token once at the start
-    is_authenticated, user_id, _ = check_token_auth(request)
+    is_authenticated, user_id, is_admin = check_token_auth(request)
     if not is_authenticated:
         return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+    if not is_admin:
+        return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
 
     try:
         # Get date range from query params
