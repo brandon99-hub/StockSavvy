@@ -15,6 +15,16 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { useToast } from '../../hooks/use-toast';
 import { AlertCircle, Pencil, Save, Trash2, X } from 'lucide-react';
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "../ui/alert-dialog";
 
 // Define Category interface
 interface Category {
@@ -29,6 +39,7 @@ const CategoryManager = () => {
     const [editingId, setEditingId] = useState<number | null>(null);
     const [editName, setEditName] = useState<string>('');
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [categoryToDelete, setCategoryToDelete] = useState<Category | null>(null);
 
     // Fetch categories
     const { data: categories, isLoading, error } = useQuery({
@@ -156,9 +167,14 @@ const CategoryManager = () => {
     };
 
     // Delete a category
-    const handleDelete = (id: number) => {
-        if (window.confirm('Are you sure you want to delete this category?')) {
-            deleteMutation.mutate(id);
+    const handleDelete = (category: Category) => {
+        setCategoryToDelete(category);
+    };
+
+    const confirmDelete = () => {
+        if (categoryToDelete) {
+            deleteMutation.mutate(categoryToDelete.id);
+            setCategoryToDelete(null);
         }
     };
 
@@ -254,7 +270,7 @@ const CategoryManager = () => {
                                                 <Button
                                                     variant="ghost"
                                                     size="icon"
-                                                    onClick={() => handleDelete(category.id)}
+                                                    onClick={() => handleDelete(category)}
                                                     disabled={deleteMutation.isPending}
                                                 >
                                                     <Trash2 className="h-4 w-4" />
@@ -267,6 +283,29 @@ const CategoryManager = () => {
                         )}
                     </TableBody>
                 </Table>
+
+                {/* Delete Confirmation Dialog */}
+                <AlertDialog open={!!categoryToDelete} onOpenChange={(open) => !open && setCategoryToDelete(null)}>
+                    <AlertDialogContent>
+                        <AlertDialogHeader>
+                            <AlertDialogTitle>Delete Category</AlertDialogTitle>
+                            <AlertDialogDescription>
+                                Are you sure you want to delete the category "{categoryToDelete?.name}"? 
+                                This action cannot be undone and may affect products assigned to this category.
+                            </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                                onClick={confirmDelete}
+                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                disabled={deleteMutation.isPending}
+                            >
+                                {deleteMutation.isPending ? "Deleting..." : "Delete"}
+                            </AlertDialogAction>
+                        </AlertDialogFooter>
+                    </AlertDialogContent>
+                </AlertDialog>
             </CardContent>
         </Card>
     );

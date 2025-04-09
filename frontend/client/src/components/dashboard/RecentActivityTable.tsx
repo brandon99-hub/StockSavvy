@@ -36,9 +36,14 @@ const RecentActivityTable = ({ activities, queryClient }: RecentActivityTablePro
   const itemsPerPage = 4;
   const { toast } = useToast();
   
-  const totalPages = Math.ceil(activities.length / itemsPerPage);
+  // Sort activities by created_at in descending order
+  const sortedActivities = [...activities].sort((a, b) => 
+    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+  
+  const totalPages = Math.ceil(sortedActivities.length / itemsPerPage);
   const startIndex = (page - 1) * itemsPerPage;
-  const displayActivities = activities.slice(startIndex, startIndex + itemsPerPage);
+  const displayActivities = sortedActivities.slice(startIndex, startIndex + itemsPerPage);
   
   const getActivityIcon = (type: string) => {
     switch (type) {

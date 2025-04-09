@@ -525,7 +525,7 @@ class SaleViewSet(viewsets.ModelViewSet):
 
 
 class ActivityViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Activity.objects.all()
+    queryset = Activity.objects.all().order_by('-created_at')
     serializer_class = ActivitySerializer
     permission_classes = []
 
@@ -736,14 +736,16 @@ def profit_report(request):
             if not start_date or not end_date:
                 return Response({"detail": "Date range required"}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Get profit report data
+            # Get profit report data with optimized query
             cursor.execute("""
                 WITH monthly_data AS (
                     SELECT 
                         DATE_TRUNC('month', s.created_at) as month,
                         COALESCE(SUM(s.total_amount::float), 0) as revenue,
                         COALESCE(SUM(si.quantity * p.buy_price::float), 0) as cost,
-                        COALESCE(SUM(s.total_amount::float - (si.quantity * p.buy_price::float)), 0) as profit
+                        COALESCE(SUM(s.total_amount::float - (si.quantity * p.buy_price::float)), 0) as profit,
+                        COUNT(DISTINCT s.id) as transaction_count,
+                        COUNT(DISTINCT si.product_id) as unique_products
                     FROM sales s
                     LEFT JOIN sale_items si ON s.id = si.sale_id
                     LEFT JOIN products p ON si.product_id = p.id
@@ -755,6 +757,8 @@ def profit_report(request):
                     revenue,
                     cost,
                     profit,
+                    transaction_count,
+                    unique_products,
                     CASE 
                         WHEN revenue > 0 THEN ROUND(CAST((profit / revenue * 100) AS DECIMAL(10,2)), 2)
                         ELSE 0 
@@ -770,6 +774,7 @@ def profit_report(request):
             total_revenue = sum(float(row['revenue']) for row in results) if results else 0
             total_cost = sum(float(row['cost']) for row in results) if results else 0
             total_profit = sum(float(row['profit']) for row in results) if results else 0
+            total_transactions = sum(int(row['transaction_count']) for row in results) if results else 0
             total_margin = round((total_profit / total_revenue * 100), 2) if total_revenue > 0 else 0
 
             # Format response data
@@ -784,6 +789,7 @@ def profit_report(request):
                     'totalRevenue': str(total_revenue),
                     'totalCost': str(total_cost),
                     'totalProfit': str(total_profit),
+                    'totalTransactions': total_transactions,
                     'profitMargin': total_margin
                 },
                 'monthly': results
