@@ -644,35 +644,31 @@ class SaleItemViewSet(viewsets.ModelViewSet):
 
 def check_token_auth(request):
     auth_header = request.headers.get('Authorization')
-    print(f"Auth header: {auth_header}")  # Debug log
-    
-    if auth_header and auth_header.startswith('Bearer '):
-        token = auth_header.split(' ')[1]
-        print(f"Token: {token}")  # Debug log
-        
-        if token and token.startswith('token_'):
-            try:
-                parts = token.split('_')
-                if len(parts) >= 2:
-                    user_id = int(parts[1])
-                    with connection.cursor() as cursor:
-                        cursor.execute(
-                            "SELECT id, is_staff, is_superuser, role FROM users WHERE id = %s",
-                            [user_id]
-                        )
-                        row = cursor.fetchone()
-                        if row:
-                            user_id, is_staff, is_superuser, role = row
-                            print(f"User {user_id} - is_staff: {is_staff}, is_superuser: {is_superuser}, role: {role}")  # Debug log
-                            
-                            # Check admin privileges - user must be either staff, superuser, or have admin/manager role
-                            is_admin = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager'])
-                            print(f"Is admin: {is_admin}")  # Debug log
-                            
-                            return True, user_id, is_admin
-            except (IndexError, ValueError) as e:
-                print(f"Token validation error: {str(e)}")  # Debug log
-                pass
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return False, None, False
+
+    token = auth_header.split(' ')[1]
+    if not token.startswith('token_'):
+        return False, None, False
+
+    try:
+        parts = token.split('_')
+        user_id = int(parts[1])
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id, is_staff, is_superuser, role FROM users WHERE id = %s",
+                [user_id]
+            )
+            row = cursor.fetchone()
+            if row:
+                user_id, is_staff, is_superuser, role = row
+                # Check admin privileges - must be staff, superuser, or have admin/manager role
+                is_admin = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager'])
+                return True, user_id, is_admin
+    except (IndexError, ValueError) as e:
+        print(f"Token validation error: {str(e)}")
+        return False, None, False
+
     return False, None, False
 
 
