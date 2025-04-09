@@ -172,5 +172,8 @@ CSRF_COOKIE_SAMESITE = 'Lax'
 # Ensure Whitenoise is properly configured
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.ModelBackend'
+]
 # Custom User Model
 AUTH_USER_MODEL = 'api.User'

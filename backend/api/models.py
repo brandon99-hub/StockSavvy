@@ -8,13 +8,11 @@ from django.contrib.auth.hashers import check_password, make_password  # Add thi
 
 class UserManager(BaseUserManager):
     def get_by_natural_key(self, username):
-        # Use Django ORM instead of raw SQL
-        return self.get(username=username)
+        # Direct ORM query without recursion
+        return self.get(**{self.model.USERNAME_FIELD: username})
 
-    def get(self, **kwargs):
-        if 'username' in kwargs:
-            return self.get_by_natural_key(kwargs['username'])
-        raise ValueError("This UserManager only supports get by username")
+    # Remove the custom get() method completely
+    # Let BaseUserManager handle it
 
     def create_user(self, username, password=None, **extra_fields):
         if not username:
@@ -29,7 +27,6 @@ class UserManager(BaseUserManager):
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
         return self.create_user(username, password, **extra_fields)
-
 
 class User(AbstractBaseUser):
     id = models.AutoField(primary_key=True)
