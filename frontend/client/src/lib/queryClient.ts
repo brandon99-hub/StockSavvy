@@ -1,7 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 
 // Base URL for API requests
-// @ts-ignore
 const API_BASE_URL = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 
 // Helper function to handle API responses
@@ -16,10 +15,6 @@ async function handleResponse(response: Response) {
       localStorage.removeItem('token');
       window.location.href = '/login';
       throw new Error('Authentication required');
-    }
-    
-    if (response.status === 403) {
-      throw new Error('Permission denied');
     }
     
     throw new Error(errorMessage);
@@ -37,7 +32,6 @@ export const apiRequest = async (url: string, options: RequestInit = {}) => {
   };
   
   if (token) {
-    // Use token directly without Bearer prefix
     headers['Authorization'] = token;
   }
   
@@ -60,7 +54,6 @@ export const queryClient = new QueryClient({
         };
         
         if (token) {
-          // Use token directly without Bearer prefix
           headers['Authorization'] = token;
         }
         
@@ -71,10 +64,8 @@ export const queryClient = new QueryClient({
         return handleResponse(response);
       },
       retry: (failureCount, error) => {
-        // Don't retry on authentication or permission errors
-        if (error instanceof Error && 
-            (error.message === 'Authentication required' || 
-             error.message === 'Permission denied')) {
+        // Don't retry on authentication errors
+        if (error instanceof Error && error.message === 'Authentication required') {
           return false;
         }
         return failureCount < 3;

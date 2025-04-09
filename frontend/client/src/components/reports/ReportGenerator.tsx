@@ -7,7 +7,7 @@ import {
   LineChart, Line, Area, AreaChart
 } from 'recharts';
 import { Box, Card, CardContent, Typography, CircularProgress, Alert, Tabs, Tab } from '@mui/material';
-import { DateRangePicker } from '@mui/x-date-pickers-pro';
+import { DateRangePicker } from '@mui/x-date-pickers-pro/DateRangePicker';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { Button } from '../ui/button';

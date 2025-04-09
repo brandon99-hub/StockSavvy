@@ -24,18 +24,9 @@ api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
     if (token) {
-      // Add Bearer prefix to the token
-      config.headers['Authorization'] = `Bearer ${token}`;
+      // Add token directly without Bearer prefix
+      config.headers['Authorization'] = token;
     }
-
-    // Add CSRF token for non-GET requests
-    if (config.method?.toLowerCase() !== 'get') {
-      const csrfToken = getCsrfToken();
-      if (csrfToken) {
-        config.headers['X-CSRFToken'] = csrfToken;
-      }
-    }
-
     return config;
   },
   (error) => {
@@ -47,24 +38,12 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    const originalRequest = error.config;
-
-    // Handle 401 Unauthorized errors
-    if (error.response && error.response.status === 401 && !originalRequest._retry) {
-      originalRequest._retry = true;
-
+    if (error.response?.status === 401) {
       // Clear user data and redirect to login
       localStorage.removeItem('user');
+      localStorage.removeItem('token');
       window.location.href = '/login';
-
-      return Promise.reject(error);
     }
-
-    // Handle 403 Forbidden errors (likely CSRF issue)
-    if (error.response && error.response.status === 403) {
-      console.warn('403 Forbidden - Possible CSRF token issue or insufficient permissions');
-    }
-
     return Promise.reject(error);
   }
 );
@@ -78,55 +57,15 @@ function getCsrfToken(): string | null {
   return cookieValue || null;
 }
 
-// API request methods with URL normalization
+// API request methods
 export const apiClient = {
-  // GET request
-  async get<T>(url: string, params = {}): Promise<T> {
-    const normalizedUrl = url.startsWith('/') ? url : `/${url}`;
-    const response = await api.get<T>(normalizedUrl, { params });
-    return response.data;
-  },
-
-  // POST request
-  async post<T>(url: string, data = {}): Promise<T> {
-    const normalizedUrl = url.startsWith('/') ? url : `/${url}`;
-    const response = await api.post<T>(normalizedUrl, data);
-    return response.data;
-  },
-
-  // PUT request
-  async put<T>(url: string, data = {}): Promise<T> {
-    const normalizedUrl = url.startsWith('/') ? url : `/${url}`;
-    const response = await api.put<T>(normalizedUrl, data);
-    return response.data;
-  },
-
-  // PATCH request
-  async patch<T>(url: string, data = {}): Promise<T> {
-    const normalizedUrl = url.startsWith('/') ? url : `/${url}`;
-    const response = await api.patch<T>(normalizedUrl, data);
-    return response.data;
-  },
-
-  // DELETE request
-  async delete<T>(url: string): Promise<T> {
-    const normalizedUrl = url.startsWith('/') ? url : `/${url}`;
-    const response = await api.delete<T>(normalizedUrl);
-    return response.data;
-  },
-
-  // Login request (returns user with token)
+  // Login request
   async login(username: string, password: string) {
     const response = await api.post('/api/users/login/', { username, password });
-    
-    // Get token from response data
-    const userData = response.data;
-    
-    // Store user in localStorage
-    localStorage.setItem('user', JSON.stringify(userData));
-    localStorage.setItem('token', userData.token);
-    
-    return userData;
+    const { token, user } = response.data;
+    localStorage.setItem('token', token);
+    localStorage.setItem('user', JSON.stringify(user));
+    return response.data;
   },
 
   // Logout request
@@ -134,9 +73,30 @@ export const apiClient = {
     try {
       await api.post('/api/users/logout/');
     } finally {
-      localStorage.removeItem('user');
       localStorage.removeItem('token');
+      localStorage.removeItem('user');
     }
+  },
+
+  // Generic request methods
+  async get<T>(url: string, params = {}) {
+    const response = await api.get<T>(url, { params });
+    return response.data;
+  },
+
+  async post<T>(url: string, data = {}) {
+    const response = await api.post<T>(url, data);
+    return response.data;
+  },
+
+  async put<T>(url: string, data = {}) {
+    const response = await api.put<T>(url, data);
+    return response.data;
+  },
+
+  async delete<T>(url: string) {
+    const response = await api.delete<T>(url);
+    return response.data;
   }
 };
 
