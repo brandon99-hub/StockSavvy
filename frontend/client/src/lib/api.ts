@@ -24,8 +24,8 @@ api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
     if (token) {
-      // Add token directly without Bearer prefix
-      config.headers['Authorization'] = token;
+      // Add token with Bearer prefix
+      config.headers['Authorization'] = `Bearer ${token}`;
     }
     return config;
   },
