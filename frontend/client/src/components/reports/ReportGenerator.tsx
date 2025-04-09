@@ -75,6 +75,7 @@ const useReportsData = (reportType: string, dateRange: { start: Date; end: Date 
             const response = await axios.get('/api/products/', { headers });
             return response.data;
         },
+        enabled: reportType === 'inventory',
     });
 
     // Categories query
@@ -84,6 +85,17 @@ const useReportsData = (reportType: string, dateRange: { start: Date; end: Date 
             const response = await axios.get('/api/categories/', { headers });
             return response.data;
         },
+        enabled: reportType === 'inventory',
+    });
+
+    // Inventory report query
+    const inventoryQuery = useQuery({
+        queryKey: ['inventory-report'],
+        queryFn: async () => {
+            const response = await axios.get('/api/reports/inventory/', { headers });
+            return response.data;
+        },
+        enabled: reportType === 'inventory',
     });
 
     // Sales query with date range
@@ -132,12 +144,14 @@ const useReportsData = (reportType: string, dateRange: { start: Date; end: Date 
     return {
         products: productsQuery.data || [],
         categories: categoriesQuery.data || [],
+        inventoryReport: inventoryQuery.data || { summary: {}, categories: [], products: [] },
         sales: salesQuery.data || { summary: {}, sales: [] },
         saleItems: saleItemsQuery.data || {},
         profitData: profitQuery.data || { summary: {}, monthly: [] },
         isLoading: {
             products: productsQuery.isLoading,
             categories: categoriesQuery.isLoading,
+            inventory: inventoryQuery.isLoading,
             sales: salesQuery.isLoading,
             saleItems: saleItemsQuery.isLoading,
             profit: profitQuery.isLoading
@@ -145,6 +159,7 @@ const useReportsData = (reportType: string, dateRange: { start: Date; end: Date 
         isError: {
             products: productsQuery.isError,
             categories: categoriesQuery.isError,
+            inventory: inventoryQuery.isError,
             sales: salesQuery.isError,
             saleItems: saleItemsQuery.isError,
             profit: profitQuery.isError
@@ -152,6 +167,7 @@ const useReportsData = (reportType: string, dateRange: { start: Date; end: Date 
         errors: {
             products: productsQuery.error,
             categories: categoriesQuery.error,
+            inventory: inventoryQuery.error,
             sales: salesQuery.error,
             saleItems: saleItemsQuery.error,
             profit: profitQuery.error
@@ -179,6 +195,7 @@ const ReportGenerator = () => {
     const {
         products,
         categories,
+        inventoryReport,
         sales,
         saleItems,
         profitData,
