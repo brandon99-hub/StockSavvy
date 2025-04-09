@@ -59,32 +59,39 @@ const ReportGenerator = () => {
     });
 
     const {data: sales = [], isLoading: isSalesLoading} = useQuery<Sale[]>({
-        queryKey: ['/api/sales/', {
-            params: {
-                start: dateRange.start.toISOString(),
-                end: dateRange.end.toISOString()
-            }
+        queryKey: ['/api/reports/', { 
+            type: 'sales',
+            start: format(dateRange.start, 'yyyy-MM-dd'),
+            end: format(dateRange.end, 'yyyy-MM-dd')
         }],
     });
 
-
     const {data: saleItems = {}, isLoading: isSaleItemsLoading} = useQuery<Record<number, any[]>>({
-        queryKey: ['/api/sale-items/'],
-        signal: controller.signal,// Correct endpoint
+        queryKey: ['/api/sales-items/'],
+        signal: controller.signal,
     });
 
     const {data: profitData = [], isLoading: isProfitLoading} = useQuery<any[]>({
         queryKey: ['/api/reports/profit/', {
-            params: {
-                start: dateRange.start.toISOString(),
-                end: dateRange.end.toISOString()
-            }
+            start: format(dateRange.start, 'yyyy-MM-dd'),
+            end: format(dateRange.end, 'yyyy-MM-dd')
         }],
     });
-    const totalRevenue = profitData?.reduce((sum, day) =>
-        sum + Number(day.revenue), 0) || 0;
 
-    const isLoading = isProductsLoading || isCategoriesLoading || isSalesLoading || isSaleItemsLoading || isProfitLoading;
+    // Transform the data from the backend response
+    const salesData = sales?.summary || {
+        totalSales: '0.00',
+        totalTransactions: 0,
+        averageSale: '0.00',
+        totalItems: 0
+    };
+
+    const profitSummary = profitData?.summary || {
+        totalRevenue: '0.00',
+        totalCost: '0.00',
+        totalProfit: '0.00',
+        profitMargin: 0
+    };
 
     // Transform categories array to an object for easier lookup
     const categoryMap = categories.reduce((acc, category) => {
@@ -107,26 +114,11 @@ const ReportGenerator = () => {
         value: Number(product.buyPrice) * product.quantity
     }));
 
-    // Generate sales report data for chart
-    const filteredSales = sales.filter(sale => {
-        const saleDate = new Date(sale.saleDate);
-        return saleDate >= dateRange.start && saleDate <= dateRange.end;
-    });
+    // Use the sales data from the backend directly
+    const salesChartData = sales?.sales || [];
 
-    // Group sales by date for chart
-    const salesByDate = filteredSales.reduce((acc, sale) => {
-        const dateStr = format(new Date(sale.saleDate), 'yyyy-MM-dd');
-        if (!acc[dateStr]) {
-            acc[dateStr] = {date: dateStr, revenue: 0, transactions: 0};
-        }
-        acc[dateStr].revenue += Number(sale.totalAmount);
-        acc[dateStr].transactions += 1;
-        return acc;
-    }, {} as Record<string, { date: string, revenue: number, transactions: number }>);
-
-    const salesChartData = Object.values(salesByDate).sort((a, b) =>
-        new Date(a.date).getTime() - new Date(b.date).getTime()
-    );
+    // Use the profit data from the backend directly
+    const profitChartData = profitData?.monthly || [];
 
     // Handle export to PDF
     const handleExportPDF = () => {
@@ -164,18 +156,13 @@ const ReportGenerator = () => {
                 filename = 'inventory_report';
                 break;
             case 'sales':
-                data = filteredSales.map(sale => {
-                    const saleDate = new Date(sale.saleDate);
-                    const itemCount = saleItems[sale.id]?.reduce((sum, item) => sum + item.quantity, 0) || 0;
-
-                    return {
-                        'Sale ID': sale.id,
-                        Date: format(saleDate, 'yyyy-MM-dd HH:mm:ss'),
-                        'Total Amount': Number(sale.totalAmount).toFixed(2),
-                        'Items Sold': itemCount,
-                        'User ID': sale.userId
-                    };
-                });
+                data = sales.map(sale => ({
+                    'Sale ID': sale.id,
+                    Date: format(new Date(sale.saleDate), 'yyyy-MM-dd HH:mm:ss'),
+                    'Total Amount': Number(sale.totalAmount).toFixed(2),
+                    'Items Sold': saleItems[sale.id]?.length || 0,
+                    'User ID': sale.userId
+                }));
                 filename = 'sales_report';
                 break;
             case 'profit':
@@ -297,18 +284,17 @@ const ReportGenerator = () => {
                                 <div className="bg-white p-4 rounded-md shadow-sm">
                                     <p className="text-sm text-gray-500">Total Sales</p>
                                     <p className="text-xl font-bold">
-                                        KSh {filteredSales.reduce((sum, sale) => sum + Number(sale.totalAmount), 0).toFixed(2)}
+                                        KSh {salesData.totalSales}
                                     </p>
                                 </div>
                                 <div className="bg-white p-4 rounded-md shadow-sm">
                                     <p className="text-sm text-gray-500">Number of Transactions</p>
-                                    <p className="text-xl font-bold">{filteredSales.length}</p>
+                                    <p className="text-xl font-bold">{salesData.totalTransactions}</p>
                                 </div>
                                 <div className="bg-white p-4 rounded-md shadow-sm">
                                     <p className="text-sm text-gray-500">Average Sale</p>
                                     <p className="text-xl font-bold">
-                                        KSh {(filteredSales.reduce((sum, sale) => sum + Number(sale.totalAmount), 0) /
-                                        (filteredSales.length || 1)).toFixed(2)}
+                                        KSh {salesData.averageSale}
                                     </p>
                                 </div>
                             </div>
@@ -358,26 +344,25 @@ const ReportGenerator = () => {
                                 <div className="bg-white p-4 rounded-md shadow-sm">
                                     <p className="text-sm text-gray-500">Total Revenue</p>
                                     <p className="text-xl font-bold">
-                                        KSh {profitData.reduce((sum, day) => sum + day.revenue, 0).toFixed(2)}
+                                        KSh {profitSummary.totalRevenue}
                                     </p>
                                 </div>
                                 <div className="bg-white p-4 rounded-md shadow-sm">
                                     <p className="text-sm text-gray-500">Total Cost</p>
                                     <p className="text-xl font-bold">
-                                        KSh {profitData.reduce((sum, day) => sum + day.cost, 0).toFixed(2)}
+                                        KSh {profitSummary.totalCost}
                                     </p>
                                 </div>
                                 <div className="bg-white p-4 rounded-md shadow-sm">
                                     <p className="text-sm text-gray-500">Total Profit</p>
                                     <p className="text-xl font-bold text-green-600">
-                                        KSh {profitData.reduce((sum, day) => sum + (day.revenue - day.cost), 0).toFixed(2)}
+                                        KSh {profitSummary.totalProfit}
                                     </p>
                                 </div>
                                 <div className="bg-white p-4 rounded-md shadow-sm">
                                     <p className="text-sm text-gray-500">Profit Margin</p>
                                     <p className="text-xl font-bold">
-                                        {(profitData.reduce((sum, day) => sum + (day.revenue - day.cost), 0) /
-                                            profitData.reduce((sum, day) => sum + day.revenue, 0) * 100 || 0).toFixed(2)}%
+                                        {profitSummary.profitMargin.toFixed(2)}%
                                     </p>
                                 </div>
                             </div>
@@ -389,7 +374,7 @@ const ReportGenerator = () => {
                             <h3 className="font-semibold mb-2">Profit Trend</h3>
                             <ResponsiveContainer width="100%" height={300}>
                                 <BarChart
-                                    data={profitData}
+                                    data={profitChartData}
                                     margin={{top: 20, right: 30, left: 20, bottom: 50}}
                                 >
                                     <CartesianGrid strokeDasharray="3 3"/>
@@ -410,13 +395,13 @@ const ReportGenerator = () => {
                 <Button
                     variant="outline"
                     onClick={handleExportCSV}
-                    disabled={isLoading}
+                    disabled={isProductsLoading || isCategoriesLoading || isSalesLoading || isSaleItemsLoading || isProfitLoading}
                 >
                     <i className="fas fa-file-csv mr-2"></i> Export CSV
                 </Button>
                 <Button
                     onClick={handleExportPDF}
-                    disabled={isLoading}
+                    disabled={isProductsLoading || isCategoriesLoading || isSalesLoading || isSaleItemsLoading || isProfitLoading}
                 >
                     <i className="fas fa-file-pdf mr-2"></i> Export PDF
                 </Button>
