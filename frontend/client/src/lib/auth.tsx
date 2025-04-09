@@ -46,11 +46,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
 
       // Store user data and token
-      setUser(response);
-      localStorage.setItem('user', JSON.stringify(response));
-      localStorage.setItem('token', response.token);
+      const userData = {
+        ...response,
+        token: response.token // The token is already in the correct format from the backend
+      };
       
-      return response;
+      setUser(userData);
+      localStorage.setItem('user', JSON.stringify(userData));
+      localStorage.setItem('token', userData.token);
+      
+      return userData;
     } catch (error) {
       console.error('Login error:', error);
       throw error;

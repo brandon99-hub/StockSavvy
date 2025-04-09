@@ -37,8 +37,8 @@ export const apiRequest = async (url: string, options: RequestInit = {}) => {
   };
   
   if (token) {
-    // The backend expects the token directly, not as a Bearer token
-    headers['Authorization'] = token;
+    // Add Bearer prefix to the token
+    headers['Authorization'] = `Bearer ${token}`;
   }
   
   const response = await fetch(`${API_BASE_URL}${url}`, {
@@ -60,8 +60,8 @@ export const queryClient = new QueryClient({
         };
         
         if (token) {
-          // Use the same token format as apiRequest
-          headers['Authorization'] = token;
+          // Add Bearer prefix to the token
+          headers['Authorization'] = `Bearer ${token}`;
         }
         
         const response = await fetch(`${API_BASE_URL}${queryKey[0]}`, {
