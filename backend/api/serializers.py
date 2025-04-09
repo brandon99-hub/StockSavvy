@@ -8,20 +8,26 @@ import datetime
 
 
 class UserSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, required=False)  # Add password field
+    password = serializers.CharField(
+        write_only=True,
+        required=False,
+        style={'input_type': 'password'}
+    )
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'password', 'role', 'name', 'is_staff', 'is_superuser']
-        extra_kwargs = {'password': {'write_only': True}}
+        fields = ['id', 'username', 'password', 'name', 'role', 'is_staff', 'is_superuser']
+        extra_kwargs = {
+            'password': {'write_only': True}
+        }
 
     def create(self, validated_data):
-        # Hash password before saving
+        # Hash password during creation
         validated_data['password'] = make_password(validated_data.get('password'))
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
-        # Hash password if provided in update
+        # Hash password if provided during update
         if 'password' in validated_data:
             validated_data['password'] = make_password(validated_data.get('password'))
         return super().update(instance, validated_data)
