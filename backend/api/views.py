@@ -656,13 +656,13 @@ def check_token_auth(request):
         user_id = int(parts[1])
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT id, is_staff, is_superuser, role FROM users WHERE id = %s",
+                "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
                 [user_id]
             )
             row = cursor.fetchone()
             if row:
-                user_id, is_staff, is_superuser, role = row
-                # Check admin privileges - must be staff, superuser, or have admin/manager role
+                is_staff, is_superuser, role = row
+                # Match exactly how ViewSets check admin status
                 is_admin = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager'])
                 return True, user_id, is_admin
     except (IndexError, ValueError) as e:
