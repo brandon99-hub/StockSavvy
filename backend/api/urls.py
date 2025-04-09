@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     UserViewSet, CategoryViewSet, ProductViewSet, SaleViewSet,
     ActivityViewSet, RestockRuleViewSet, AnalyticsViewSet,
-    DashboardViewSet, ReportViewSet, SaleItemViewSet,
+    ReportViewSet, SaleItemViewSet,
     profit_report, test_connection
 )
 
@@ -16,7 +16,6 @@ router.register(r'activities', ActivityViewSet, basename='activities')
 router.register(r'restock-rules', RestockRuleViewSet, basename='restock-rules')
 router.register(r'analytics', AnalyticsViewSet, basename='analytics')
 router.register(r'reports', ReportViewSet, basename='reports')
-router.register(r'dashboard', DashboardViewSet, basename='dashboard')
 router.register(r'sales-items', SaleItemViewSet, basename='sale-items')
 
 urlpatterns = [
@@ -25,9 +24,9 @@ urlpatterns = [
     path('reports/inventory/', ReportViewSet.as_view({'get': 'inventory'}), name='inventory-report'),
     path('reports/sales/', ReportViewSet.as_view({'get': 'sales_chart'}), name='sales-report'),
     path('products/low-stock/', ProductViewSet.as_view({'get': 'low_stock'}), name='low-stock-products'),
-    path('dashboard/stats/', DashboardViewSet.as_view({'get': 'stats'}), name='dashboard-stats'),
-    path('dashboard/category-chart/', DashboardViewSet.as_view({'get': 'category_chart'}), name='dashboard-category-chart'),
-    path('dashboard/sales-chart/', DashboardViewSet.as_view({'get': 'sales_chart'}), name='dashboard-sales-chart'),
+    path('dashboard/stats/', ReportViewSet.as_view({'get': 'stats'}), name='dashboard-stats'),
+    path('dashboard/category-chart/', ReportViewSet.as_view({'get': 'category_chart'}), name='dashboard-category-chart'),
+    path('dashboard/sales-chart/', ReportViewSet.as_view({'get': 'sales_chart'}), name='dashboard-sales-chart'),
     path('products/<int:pk>/reorder/', ProductViewSet.as_view({'post': 'restock'}), name='product-restock'),
     path('', include(router.urls)),
 ] 
