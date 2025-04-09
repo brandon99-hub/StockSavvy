@@ -32,6 +32,7 @@ import {
 } from 'recharts';
 import {exportInventoryToPDF, exportSalesToPDF, exportProfitToPDF, exportToCSV} from '../../lib/exportUtils';
 import {Product, Sale, Category} from '../../../../shared/schema';
+import { TooltipFormatter } from 'recharts/types/component/Tooltip';
 
 const ReportGenerator = () => {
     const controller = new AbortController();
@@ -180,6 +181,58 @@ const ReportGenerator = () => {
         exportToCSV(data, filename);
     };
 
+    const renderSalesChart = () => {
+        if (!sales.sales?.length) return null;
+
+        const formatValue: TooltipFormatter = (value) => {
+            const numValue = Number(value);
+            return [!isNaN(numValue) ? numValue.toFixed(2) : String(value), 'Sales Amount'];
+        };
+
+        return (
+            <ResponsiveContainer width="100%" height={400}>
+                <BarChart data={sales.sales}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis 
+                        dataKey="created_at" 
+                        tickFormatter={(date) => new Date(date).toLocaleDateString()} 
+                    />
+                    <YAxis />
+                    <Tooltip
+                        labelFormatter={(date) => new Date(date).toLocaleString()}
+                        formatter={formatValue}
+                    />
+                    <Legend />
+                    <Bar dataKey="total_amount" fill="#8884d8" name="Sales Amount" />
+                </BarChart>
+            </ResponsiveContainer>
+        );
+    };
+
+    const renderProfitChart = () => {
+        if (!profitData.monthly?.length) return null;
+
+        const formatValue: TooltipFormatter = (value, name) => {
+            const numValue = Number(value);
+            return [!isNaN(numValue) ? numValue.toFixed(2) : String(value), name];
+        };
+
+        return (
+            <ResponsiveContainer width="100%" height={400}>
+                <LineChart data={profitData.monthly}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="month" />
+                    <YAxis />
+                    <Tooltip formatter={formatValue} />
+                    <Legend />
+                    <Line type="monotone" dataKey="revenue" stroke="#8884d8" name="Revenue" />
+                    <Line type="monotone" dataKey="cost" stroke="#82ca9d" name="Cost" />
+                    <Line type="monotone" dataKey="profit" stroke="#ffc658" name="Profit" />
+                </LineChart>
+            </ResponsiveContainer>
+        );
+    };
+
     return (
         <Card className="shadow-sm">
             <CardHeader>
@@ -304,36 +357,7 @@ const ReportGenerator = () => {
 
                         <div>
                             <h3 className="font-semibold mb-2">Sales Trend</h3>
-                            <ResponsiveContainer width="100%" height={300}>
-                                <LineChart
-                                    data={salesChartData}
-                                    margin={{top: 20, right: 30, left: 20, bottom: 50}}
-                                >
-                                    <CartesianGrid strokeDasharray="3 3"/>
-                                    <XAxis dataKey="date" angle={-45} textAnchor="end" height={70}/>
-                                    <YAxis yAxisId="left"/>
-                                    <YAxis yAxisId="right" orientation="right"/>
-                                    <Tooltip formatter={(value, name) => [
-                                        name === 'revenue' ? `KSh ${value.toFixed(2)}` : value,
-                                        name === 'revenue' ? 'Revenue' : 'Transactions'
-                                    ]}/>
-                                    <Legend/>
-                                    <Line
-                                        yAxisId="left"
-                                        type="monotone"
-                                        dataKey="revenue"
-                                        stroke="#3b82f6"
-                                        name="Revenue (KSh)"
-                                    />
-                                    <Line
-                                        yAxisId="right"
-                                        type="monotone"
-                                        dataKey="transactions"
-                                        stroke="#10b981"
-                                        name="Transactions"
-                                    />
-                                </LineChart>
-                            </ResponsiveContainer>
+                            {renderSalesChart()}
                         </div>
                     </TabsContent>
 
@@ -372,21 +396,7 @@ const ReportGenerator = () => {
 
                         <div>
                             <h3 className="font-semibold mb-2">Profit Trend</h3>
-                            <ResponsiveContainer width="100%" height={300}>
-                                <BarChart
-                                    data={profitChartData}
-                                    margin={{top: 20, right: 30, left: 20, bottom: 50}}
-                                >
-                                    <CartesianGrid strokeDasharray="3 3"/>
-                                    <XAxis dataKey="date" angle={-45} textAnchor="end" height={70}/>
-                                    <YAxis/>
-                                    <Tooltip formatter={(value) => [`KSh ${value.toFixed(2)}`, 'Amount']}/>
-                                    <Legend/>
-                                    <Bar dataKey="revenue" fill="#3b82f6" name="Revenue"/>
-                                    <Bar dataKey="cost" fill="#ef4444" name="Cost"/>
-                                    <Bar dataKey="profit" fill="#10b981" name="Profit"/>
-                                </BarChart>
-                            </ResponsiveContainer>
+                            {renderProfitChart()}
                         </div>
                     </TabsContent>
                 </Tabs>

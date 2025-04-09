@@ -715,7 +715,7 @@ def profit_report(request):
                     total_sales,
                     total_items_sold,
                     CASE 
-                        WHEN revenue > 0 THEN ROUND((profit / revenue * 100)::numeric, 2)
+                        WHEN revenue > 0 THEN CAST((profit / revenue * 100) AS DECIMAL(10,2))
                         ELSE 0 
                     END as profit_margin
                 FROM monthly_data
@@ -973,9 +973,9 @@ class ReportViewSet(viewsets.ViewSet):
                             COUNT(p.id) as product_count,
                             COALESCE(SUM(p.quantity), 0) as total_quantity,
                             COALESCE(SUM(p.quantity * p.sell_price), 0) as value,
-                            ROUND(
-                                COUNT(p.id)::float * 100 / NULLIF((SELECT COUNT(*) FROM products), 0),
-                                1
+                            CAST(
+                                (COUNT(p.id)::float * 100 / NULLIF((SELECT COUNT(*) FROM products), 0)) 
+                                AS DECIMAL(10,1)
                             ) as percentage
                         FROM categories c
                         LEFT JOIN products p ON c.id = p.category_id
@@ -1085,11 +1085,11 @@ class ReportViewSet(viewsets.ViewSet):
                         LEFT JOIN sale_items si ON s.id = si.sale_id
                         LEFT JOIN products p ON si.product_id = p.id
                         LEFT JOIN users u ON s.user_id = u.id
-                        WHERE s.created_at BETWEEN %s AND %s
+                        {date_filter}
                         GROUP BY s.id, s.created_at, s.total_amount, s.original_amount, 
                                 s.discount, u.username
                         ORDER BY s.created_at DESC
-                    """, [start_date, end_date])
+                    """, params)
 
                     sales = [dict(zip([col[0] for col in cursor.description], row))
                              for row in cursor.fetchall()]
