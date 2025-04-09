@@ -1,5 +1,15 @@
 import axios from 'axios';
 
+// Add type declaration for ImportMeta
+declare global {
+  interface ImportMeta {
+    env: {
+      VITE_API_URL: string;
+      [key: string]: string | undefined;
+    };
+  }
+}
+
 // Create base axios instance
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE || 'http://localhost:8000',
@@ -12,16 +22,10 @@ const api = axios.create({
 // Request interceptor to add auth token to all requests
 api.interceptors.request.use(
   (config) => {
-    const storedUser = localStorage.getItem('user');
-    if (storedUser) {
-      try {
-        const userData = JSON.parse(storedUser);
-        if (userData.token) {
-          config.headers['Authorization'] = `Bearer ${userData.token}`;
-        }
-      } catch (error) {
-        console.error('Error parsing stored user data:', error);
-      }
+    const token = localStorage.getItem('token');
+    if (token) {
+      // Add Bearer prefix to the token
+      config.headers['Authorization'] = `Bearer ${token}`;
     }
 
     // Add CSRF token for non-GET requests
@@ -114,21 +118,15 @@ export const apiClient = {
   // Login request (returns user with token)
   async login(username: string, password: string) {
     const response = await api.post('/api/users/login/', { username, password });
-
-    // Get token from response headers or body
-    const token = response.headers.authorization ||
-                 (response.data.token ? response.data.token : null);
-
-    // Create user object with token
-    const user = {
-      ...response.data,
-      token: token ? token.replace('Bearer ', '') : null
-    };
-
+    
+    // Get token from response data
+    const userData = response.data;
+    
     // Store user in localStorage
-    localStorage.setItem('user', JSON.stringify(user));
-
-    return user;
+    localStorage.setItem('user', JSON.stringify(userData));
+    localStorage.setItem('token', userData.token);
+    
+    return userData;
   },
 
   // Logout request
@@ -137,6 +135,7 @@ export const apiClient = {
       await api.post('/api/users/logout/');
     } finally {
       localStorage.removeItem('user');
+      localStorage.removeItem('token');
     }
   }
 };

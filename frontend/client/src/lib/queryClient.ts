@@ -37,8 +37,8 @@ export const apiRequest = async (url: string, options: RequestInit = {}) => {
   };
   
   if (token) {
-    // Add Bearer prefix to the token
-    headers['Authorization'] = `Bearer ${token}`;
+    // Use token directly without Bearer prefix
+    headers['Authorization'] = token;
   }
   
   const response = await fetch(`${API_BASE_URL}${url}`, {
@@ -60,8 +60,8 @@ export const queryClient = new QueryClient({
         };
         
         if (token) {
-          // Add Bearer prefix to the token
-          headers['Authorization'] = `Bearer ${token}`;
+          // Use token directly without Bearer prefix
+          headers['Authorization'] = token;
         }
         
         const response = await fetch(`${API_BASE_URL}${queryKey[0]}`, {
