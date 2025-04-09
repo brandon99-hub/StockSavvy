@@ -4,10 +4,10 @@ services:
     runtime: python
     buildCommand: |
       poetry install && 
-      cd ../frontend/client &&  # Move up from backend directory
+      cd frontend &&  # Move to frontend directory
       npm install && 
       npm run build && 
-      cd ../../backend && 
+      cd ../backend && 
       poetry run python manage.py migrate && 
       poetry run python manage.py collectstatic --noinput
     startCommand: gunicorn backend.wsgi:application
