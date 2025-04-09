@@ -1,7 +1,6 @@
 // @ts-ignore
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { User } from "../types";
-import { apiRequest } from "../lib/queryClient";
 import { useToast } from "../hooks/use-toast";
 import UsersList from "../components/users/UsersList";
 import AddUserForm from "../components/users/AddUserForm";
@@ -13,34 +12,48 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../components/ui/dialog";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "../lib/queryClient";
 
 const UsersPage = () => {
   const { toast } = useToast();
-  const [users, setUsers] = useState<User[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
 
-  const fetchUsers = async () => {
-    try {
-      setIsLoading(true);
-      const data = await apiRequest("/api/users/", { method: "GET" });
-      setUsers(data);
-    } catch (error) {
-      console.error("Failed to fetch users:", error);
+  // Use React Query to fetch users
+  const { data: users = [], isLoading, error } = useQuery<User[]>({
+    queryKey: ['/api/users/'],
+    queryFn: () => apiRequest("/api/users/", { method: "GET" }),
+    retry: (failureCount, error) => {
+      // Don't retry on authentication errors
+      if (error instanceof Error && error.message === 'Authentication required') {
+        return false;
+      }
+      return failureCount < 3;
+    },
+  });
+
+  // Delete user mutation
+  const deleteUserMutation = useMutation({
+    mutationFn: (userId: number) => apiRequest(`/api/users/${userId}/`, { method: "DELETE" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users/'] });
+      toast({
+        title: "Success",
+        description: "User deleted successfully",
+      });
+    },
+    onError: (error) => {
       toast({
         title: "Error",
-        description: "Failed to fetch users. You may not have permission to view this data.",
+        description: error instanceof Error 
+          ? error.message 
+          : "Failed to delete user. You may not have permission for this action.",
         variant: "destructive",
       });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchUsers();
-  }, []);
+    },
+  });
 
   const handleEdit = (user: User) => {
     setEditingUser(user);
@@ -48,37 +61,41 @@ const UsersPage = () => {
   };
 
   const handleDelete = async (userId: number) => {
-    try {
-      await apiRequest(`/api/users/${userId}/`, { method: "DELETE" });
-      setUsers(users.filter((user) => user.id !== userId));
-      toast({
-        title: "Success",
-        description: "User deleted successfully",
-      });
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to delete user. You may not have permission for this action.",
-        variant: "destructive",
-      });
-    }
+    deleteUserMutation.mutate(userId);
   };
 
   const handleUserAdded = (newUser: User) => {
-    setUsers([...users, newUser]);
+    queryClient.invalidateQueries({ queryKey: ['/api/users/'] });
     setIsAddDialogOpen(false);
+    toast({
+      title: "Success",
+      description: "User created successfully",
+    });
   };
 
   const handleUserUpdated = (updatedUser: User) => {
-    setUsers(users.map((user) => 
-      user.id === updatedUser.id ? updatedUser : user
-    ));
-    setIsAddDialogOpen(false);
+    queryClient.invalidateQueries({ queryKey: ['/api/users/'] });
     setEditingUser(null);
+    toast({
+      title: "Success",
+      description: "User updated successfully",
+    });
   };
 
   if (isLoading) {
-    return <div>Loading users...</div>;
+    return <div className="flex items-center justify-center h-64">
+      <div className="text-gray-500">Loading users...</div>
+    </div>;
+  }
+
+  if (error) {
+    return <div className="flex items-center justify-center h-64">
+      <div className="text-red-500">
+        {error instanceof Error 
+          ? error.message 
+          : "Error loading users. Please try again later."}
+      </div>
+    </div>;
   }
 
   return (

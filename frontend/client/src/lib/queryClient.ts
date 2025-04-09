@@ -60,7 +60,8 @@ export const queryClient = new QueryClient({
         };
         
         if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
+          // Use the same token format as apiRequest
+          headers['Authorization'] = token;
         }
         
         const response = await fetch(`${API_BASE_URL}${queryKey[0]}`, {
