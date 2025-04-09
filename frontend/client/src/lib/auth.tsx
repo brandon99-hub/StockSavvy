@@ -48,12 +48,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Store user data and token
       const userData = {
         ...response,
-        token: response.token // The token is already in the correct format from the backend
+        // Don't include token in user data
+        token: undefined
       };
+      
+      // Store token separately
+      const token = response.token;
       
       setUser(userData);
       localStorage.setItem('user', JSON.stringify(userData));
-      localStorage.setItem('token', userData.token);
+      localStorage.setItem('token', token);
       
       return userData;
     } catch (error) {

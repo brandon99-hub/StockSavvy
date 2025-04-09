@@ -62,9 +62,9 @@ export const apiClient = {
   // Login request
   async login(username: string, password: string) {
     const response = await api.post('/api/users/login/', { username, password });
-    const { token, user } = response.data;
+    const { token, ...userData } = response.data;
     localStorage.setItem('token', token);
-    localStorage.setItem('user', JSON.stringify(user));
+    localStorage.setItem('user', JSON.stringify(userData));
     return response.data;
   },
 
