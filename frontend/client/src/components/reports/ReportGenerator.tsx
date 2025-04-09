@@ -6,10 +6,11 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   LineChart, Line, Area, AreaChart
 } from 'recharts';
-import { Card, CardContent, Typography, Grid, Box, CircularProgress, Alert } from '@mui/material';
+import { Box, Card, CardContent, Typography, CircularProgress, Alert } from '@mui/material';
 import { DateRangePicker } from '@mui/x-date-pickers-pro';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { formatInTimeZone } from 'date-fns-tz';
 
 interface ProfitData {
   summary: {
@@ -34,14 +35,17 @@ const ReportGenerator: React.FC = () => {
   const [dateRange, setDateRange] = useState<[Date | null, Date | null]>([null, null]);
   const [startDate, endDate] = dateRange;
 
-  const { data: profitData, isLoading: profitLoading, error: profitError } = useQuery<ProfitData>({
+  const formatDate = (date: Date) => {
+    return format(date, 'yyyy-MM-dd');
+  };
+
+  const profitQuery = useQuery({
     queryKey: ['profit', startDate, endDate],
     queryFn: async () => {
-      if (!startDate || !endDate) return null;
       const response = await axios.get('/api/reports/profit/', {
         params: {
-          start: format(startDate, 'yyyy-MM-dd'),
-          end: format(endDate, 'yyyy-MM-dd'),
+          start: startDate ? formatDate(startDate) : undefined,
+          end: endDate ? formatDate(endDate) : undefined,
         },
       });
       return response.data;
@@ -61,60 +65,60 @@ const ReportGenerator: React.FC = () => {
   };
 
   const renderSummary = () => {
-    if (!profitData?.summary) return null;
+    if (!profitQuery.data?.summary) return null;
 
-    const { totalRevenue, totalCost, totalProfit, totalTransactions, profitMargin } = profitData.summary;
+    const { totalRevenue, totalCost, totalProfit, totalTransactions, profitMargin } = profitQuery.data.summary;
 
     return (
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} sm={6} md={2.4}>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+        <Box sx={{ flex: '1 1 30%', minWidth: '250px' }}>
           <Card>
             <CardContent>
-              <Typography color="textSecondary" gutterBottom>Total Revenue</Typography>
-              <Typography variant="h6">{formatCurrency(totalRevenue)}</Typography>
+              <Typography variant="h6" gutterBottom>Total Revenue</Typography>
+              <Typography variant="h4">{formatCurrency(totalRevenue)}</Typography>
             </CardContent>
           </Card>
-        </Grid>
-        <Grid item xs={12} sm={6} md={2.4}>
+        </Box>
+        <Box sx={{ flex: '1 1 30%', minWidth: '250px' }}>
           <Card>
             <CardContent>
-              <Typography color="textSecondary" gutterBottom>Total Cost</Typography>
-              <Typography variant="h6">{formatCurrency(totalCost)}</Typography>
+              <Typography variant="h6" gutterBottom>Total Cost</Typography>
+              <Typography variant="h4">{formatCurrency(totalCost)}</Typography>
             </CardContent>
           </Card>
-        </Grid>
-        <Grid item xs={12} sm={6} md={2.4}>
+        </Box>
+        <Box sx={{ flex: '1 1 30%', minWidth: '250px' }}>
           <Card>
             <CardContent>
-              <Typography color="textSecondary" gutterBottom>Total Profit</Typography>
-              <Typography variant="h6">{formatCurrency(totalProfit)}</Typography>
+              <Typography variant="h6" gutterBottom>Total Profit</Typography>
+              <Typography variant="h4">{formatCurrency(totalProfit)}</Typography>
             </CardContent>
           </Card>
-        </Grid>
-        <Grid item xs={12} sm={6} md={2.4}>
+        </Box>
+        <Box sx={{ flex: '1 1 30%', minWidth: '250px' }}>
           <Card>
             <CardContent>
-              <Typography color="textSecondary" gutterBottom>Total Transactions</Typography>
-              <Typography variant="h6">{totalTransactions}</Typography>
+              <Typography variant="h6" gutterBottom>Total Transactions</Typography>
+              <Typography variant="h4">{totalTransactions}</Typography>
             </CardContent>
           </Card>
-        </Grid>
-        <Grid item xs={12} sm={6} md={2.4}>
+        </Box>
+        <Box sx={{ flex: '1 1 30%', minWidth: '250px' }}>
           <Card>
             <CardContent>
-              <Typography color="textSecondary" gutterBottom>Profit Margin</Typography>
-              <Typography variant="h6">{profitMargin.toFixed(2)}%</Typography>
+              <Typography variant="h6" gutterBottom>Profit Margin</Typography>
+              <Typography variant="h4">{formatPercent(profitMargin.toString())}</Typography>
             </CardContent>
           </Card>
-        </Grid>
-      </Grid>
+        </Box>
+      </Box>
     );
   };
 
   const renderCharts = () => {
-    if (!profitData?.monthly) return null;
+    if (!profitQuery.data?.monthly) return null;
 
-    const chartData = profitData.monthly.map(item => ({
+    const chartData = profitQuery.data.monthly.map(item => ({
       ...item,
       revenue: parseFloat(item.revenue),
       cost: parseFloat(item.cost),
@@ -123,8 +127,8 @@ const ReportGenerator: React.FC = () => {
     }));
 
     return (
-      <Grid container spacing={3}>
-        <Grid item xs={12} md={6}>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+        <Box sx={{ flex: '1 1 45%', minWidth: '300px' }}>
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>Revenue vs Cost</Typography>
@@ -141,8 +145,8 @@ const ReportGenerator: React.FC = () => {
               </ResponsiveContainer>
             </CardContent>
           </Card>
-        </Grid>
-        <Grid item xs={12} md={6}>
+        </Box>
+        <Box sx={{ flex: '1 1 45%', minWidth: '300px' }}>
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>Profit Trend</Typography>
@@ -158,8 +162,8 @@ const ReportGenerator: React.FC = () => {
               </ResponsiveContainer>
             </CardContent>
           </Card>
-        </Grid>
-        <Grid item xs={12}>
+        </Box>
+        <Box sx={{ flex: '1 1 100%', minWidth: '300px' }}>
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>Profit Margin Trend</Typography>
@@ -175,41 +179,43 @@ const ReportGenerator: React.FC = () => {
               </ResponsiveContainer>
             </CardContent>
           </Card>
-        </Grid>
-      </Grid>
+        </Box>
+      </Box>
     );
   };
 
-  if (profitError) {
+  if (profitQuery.error) {
     return (
       <Alert severity="error" sx={{ mt: 2 }}>
-        Error loading profit report: {(profitError as Error).message}
+        Error loading profit report: {(profitQuery.error as Error).message}
       </Alert>
     );
   }
 
   return (
     <Box sx={{ p: 3 }}>
-      <Typography variant="h4" gutterBottom>Profit Report</Typography>
-      
-      <LocalizationProvider dateAdapter={AdapterDateFns}>
-        <DateRangePicker
-          value={dateRange}
-          onChange={(newValue) => setDateRange(newValue)}
-          sx={{ mb: 3 }}
-        />
-      </LocalizationProvider>
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+        <Typography variant="h4" gutterBottom>Profit Report</Typography>
+        
+        <LocalizationProvider dateAdapter={AdapterDateFns}>
+          <DateRangePicker
+            value={dateRange}
+            onChange={(newValue) => setDateRange(newValue)}
+            sx={{ mb: 3 }}
+          />
+        </LocalizationProvider>
 
-      {profitLoading ? (
-        <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-          <CircularProgress />
-        </Box>
-      ) : (
-        <>
-          {renderSummary()}
-          {renderCharts()}
-        </>
-      )}
+        {profitQuery.isLoading ? (
+          <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+            <CircularProgress />
+          </Box>
+        ) : (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {renderSummary()}
+            {renderCharts()}
+          </Box>
+        )}
+      </Box>
     </Box>
   );
 };
