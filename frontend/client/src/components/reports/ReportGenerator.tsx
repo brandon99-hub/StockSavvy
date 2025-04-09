@@ -90,7 +90,7 @@ const useReportsData = (reportType: string, dateRange: { start: Date; end: Date 
 
     // Inventory report query
     const inventoryQuery = useQuery({
-        queryKey: ['inventory-report'],
+        queryKey: ['inventory-report', reportType],
         queryFn: async () => {
             const response = await axios.get('/api/reports/inventory/', { headers });
             return response.data;
