@@ -37,7 +37,8 @@ export const apiRequest = async (url: string, options: RequestInit = {}) => {
   };
   
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+    // The backend expects the token directly, not as a Bearer token
+    headers['Authorization'] = token;
   }
   
   const response = await fetch(`${API_BASE_URL}${url}`, {

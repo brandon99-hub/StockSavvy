@@ -1,6 +1,7 @@
 // @ts-ignore
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { User } from "../types";
+import { apiRequest } from "./queryClient";
 
 interface AuthContextType {
   user: User | null;
@@ -16,116 +17,69 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 // @ts-ignore
 const API_BASE_URL = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Load user data from localStorage on mount
   useEffect(() => {
-    try {
-      const storedUser = localStorage.getItem("user");
-      if (storedUser) {
-        const userData = JSON.parse(storedUser);
-        setUser(userData);
-        setIsAuthenticated(true);
-        // Ensure token is stored in localStorage
-        if (userData.token) {
-          localStorage.setItem('token', userData.token);
-        }
-        console.log('User loaded from localStorage:', userData.username);
+    // Check for stored user data on mount
+    const storedUser = localStorage.getItem('user');
+    const storedToken = localStorage.getItem('token');
+    
+    if (storedUser && storedToken) {
+      try {
+        setUser(JSON.parse(storedUser));
+      } catch (error) {
+        console.error('Error parsing stored user:', error);
+        localStorage.removeItem('user');
+        localStorage.removeItem('token');
       }
-    } catch (err) {
-      console.error('Error loading user data from localStorage:', err);
-      localStorage.removeItem('user');
-      localStorage.removeItem('token');
-    } finally {
-      setIsLoading(false);
     }
+    setIsLoading(false);
   }, []);
 
-  // Login function
-  const login = async (credentials: { username: string; password: string }): Promise<User> => {
+  const login = async (credentials: { username: string; password: string }) => {
     try {
-      console.log('Logging in with:', credentials.username);
-      
-      const response = await fetch(`${API_BASE_URL}/api/users/login/`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+      const response = await apiRequest('/api/users/login/', {
+        method: 'POST',
         body: JSON.stringify(credentials),
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || "Login failed");
-      }
-
-      const userData = await response.json();
+      // Store user data and token
+      setUser(response);
+      localStorage.setItem('user', JSON.stringify(response));
+      localStorage.setItem('token', response.token);
       
-      if (!userData.id) {
-        throw new Error("Invalid user data received");
-      }
-
-      // Get token from response data
-      const token = userData.token;
-      
-      if (!token) {
-        throw new Error("No authentication token received");
-      }
-
-      // Create user object with token
-      const userWithToken = {
-        ...userData,
-        token
-      };
-      
-      console.log('Login successful for user:', userData.username);
-      
-      // Store both user data and token
-      setUser(userWithToken);
-      setIsAuthenticated(true);
-      localStorage.setItem("user", JSON.stringify(userWithToken));
-      localStorage.setItem("token", token);
-      
-      return userWithToken;
+      return response;
     } catch (error) {
-      console.error("Login error:", error);
+      console.error('Login error:', error);
       throw error;
     }
   };
 
-  // Logout function
   const logout = () => {
-    try {
-      // Clear localStorage and state
-      localStorage.removeItem("user");
-      localStorage.removeItem("token");
-      setUser(null);
-      setIsAuthenticated(false);
-      
-      // Attempt to call logout endpoint but don't wait for it
-      fetch(`${API_BASE_URL}/api/users/logout/`, {
-        method: "POST",
-      }).catch(err => console.error("Logout error:", err));
-      
-    } catch (err) {
-      console.error("Error during logout:", err);
-    }
+    setUser(null);
+    localStorage.removeItem('user');
+    localStorage.removeItem('token');
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, isAuthenticated, isLoading }}>
+    <AuthContext.Provider value={{
+      user,
+      login,
+      logout,
+      isAuthenticated: !!user,
+      isLoading,
+    }}>
       {children}
     </AuthContext.Provider>
   );
-}
+};
 
-export function useAuth() {
+export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    throw new Error("useAuth must be used within an AuthProvider");
+    throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-}
+};
