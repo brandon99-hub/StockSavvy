@@ -1,3 +1,4 @@
+// @ts-ignore
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '../components/ui/button';

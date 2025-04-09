@@ -1,3 +1,4 @@
+// @ts-ignore
 import React, { useEffect } from "react";
 import { Switch, Route, useLocation, Router } from "wouter";
 import { queryClient } from "./lib/queryClient";

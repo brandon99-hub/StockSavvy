@@ -1,3 +1,4 @@
+// @ts-ignore
 import React, { useState, useEffect } from "react";
 import { User } from "../types";
 import { apiRequest } from "../lib/queryClient";

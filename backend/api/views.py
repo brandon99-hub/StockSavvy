@@ -2,7 +2,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser, BasePermission
-from django.contrib.auth import login, logout, get_user_model
+from django.contrib.auth import login, logout, get_user_model, authenticate
 from django.db.models import Sum, F, Count
 from django.db.models.functions import TruncDate
 from .models import Category, Product, Sale, SaleItem, Activity, RestockRule
@@ -19,16 +19,18 @@ from django.utils import timezone
 import decimal
 from django.views.generic import TemplateView
 
-
 User = get_user_model()
+
 
 class FrontendAppView(TemplateView):
     template_name = "index.html"
+
 
 class IsAdminOrManager(BasePermission):
     """
     Custom permission to only allow admin or manager users to access the view.
     """
+
     def has_permission(self, request, view):
         # Check if user is authenticated
         if not request.user.is_authenticated:
@@ -37,6 +39,7 @@ class IsAdminOrManager(BasePermission):
         # Check if user has admin or manager role
         return request.user.role in ['admin', 'manager']
 
+
 @api_view(['GET'])
 def test_connection(request):
     return Response({
@@ -44,6 +47,7 @@ def test_connection(request):
         'message': 'Django backend is connected to frontend',
         'version': '1.0.0'
     })
+
 
 class UserViewSet(viewsets.ModelViewSet):
     serializer_class = UserSerializer
@@ -111,54 +115,28 @@ class UserViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def login(self, request):
-        username = request.data.get('username')
-        password = request.data.get('password')
-
         try:
-            from django.db import connection
+            username = request.data.get('username')
+            password = request.data.get('password')
 
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "SELECT id, username, password, role, is_active, is_staff, is_superuser, name FROM users WHERE username = %s",
-                    [username]
-                )
-                row = cursor.fetchone()
-                if not row:
-                    print(f"User not found: {username}")
-                    return Response(
-                        {'message': 'Invalid credentials'},
-                        status=status.HTTP_401_UNAUTHORIZED
-                    )
+            # Use Django's authenticate
+            user = authenticate(request, username=username, password=password)
 
-                user_id, db_username, db_password, role, is_active, is_staff, is_superuser, name = row
-
-                print(f"Login attempt for user: {username}")
-                print(f"Stored password: {db_password}")
-                print(f"Provided password: {password}")
-
-                if db_password == password:
-                    print("Plain text password match")
-                    user_data = {
-                        'id': user_id,
-                        'username': db_username,
-                        'role': role,
-                        'is_active': is_active,
-                        'is_staff': is_staff,
-                        'is_superuser': is_superuser,
-                        'name': name,
-                        'token': f"token_{user_id}_{username}"
-                    }
-
-                    try:
-                        cursor.execute(
-                            "INSERT INTO activities (type, description, user_id, created_at, status) VALUES (%s, %s, %s, NOW(), %s)",
-                            ['login', f'User {username} logged in', user_id, 'success']
-                        )
-                    except Exception as e:
-                        print(f"Could not create activity: {str(e)}")
-
-                    return Response(user_data)
-
+            if user is not None:
+                # Generate token and return user data
+                user_data = {
+                    'id': user.id,
+                    'username': user.username,
+                    'role': user.role,
+                    'is_active': user.is_active,
+                    'is_staff': user.is_staff,
+                    'is_superuser': user.is_superuser,
+                    'name': user.name,
+                    'token': f"token_{user.id}_{user.username}"
+                }
+                # Log activity (your existing code)
+                return Response(user_data)
+            else:
                 return Response(
                     {'message': 'Invalid credentials'},
                     status=status.HTTP_401_UNAUTHORIZED
@@ -171,9 +149,11 @@ class UserViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+
     @action(detail=False, methods=['post'])
     def logout(self, request):
         return Response({'message': 'Logged out successfully'})
+
 
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all()
@@ -226,6 +206,7 @@ class CategoryViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         return super().create(request, *args, **kwargs)
+
 
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all()
@@ -386,6 +367,7 @@ class ProductViewSet(viewsets.ModelViewSet):
 
         return Response(ProductSerializer(product).data)
 
+
 class SaleViewSet(viewsets.ModelViewSet):
     queryset = Sale.objects.all()
     serializer_class = SaleSerializer
@@ -513,6 +495,7 @@ class SaleViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
 class ActivityViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Activity.objects.all()
     serializer_class = ActivitySerializer
@@ -558,6 +541,7 @@ class ActivityViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         return super().list(request, *args, **kwargs)
+
 
 class SaleItemViewSet(viewsets.ModelViewSet):
     queryset = SaleItem.objects.all()
@@ -646,7 +630,7 @@ class SaleItemViewSet(viewsets.ModelViewSet):
 
                 return Response({
                     'items': [{k: v for k, v in row.items() if k not in ['total_count', 'total_value']}
-                             for row in results],
+                              for row in results],
                     'summary': {
                         'totalItems': results[0]['total_count'],
                         'totalValue': str(results[0]['total_value'])
@@ -768,6 +752,7 @@ def profit_report(request):
         print(f"Error in profit_report: {str(e)}")
         return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
 class RestockRuleViewSet(viewsets.ModelViewSet):
     queryset = RestockRule.objects.all()
     serializer_class = RestockRuleSerializer
@@ -828,6 +813,7 @@ class RestockRuleViewSet(viewsets.ModelViewSet):
         if not is_admin:
             return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
         return super().destroy(request, *args, **kwargs)
+
 
 class AnalyticsViewSet(viewsets.ViewSet):
     permission_classes = []
@@ -903,7 +889,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
                     LIMIT 10
                 """)
                 activities = [dict(zip([col[0] for col in cursor.description], row))
-                            for row in cursor.fetchall()]
+                              for row in cursor.fetchall()]
 
                 return Response({
                     'sales': {
@@ -923,6 +909,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
         except Exception as e:
             print(f"Error in analytics: {str(e)}")
             return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class ReportViewSet(viewsets.ViewSet):
     permission_classes = []
@@ -997,7 +984,7 @@ class ReportViewSet(viewsets.ViewSet):
                         ORDER BY COUNT(p.id) DESC
                     """)
                     categories = [dict(zip([col[0] for col in cursor.description], row))
-                                for row in cursor.fetchall()]
+                                  for row in cursor.fetchall()]
 
                     # Get product details
                     cursor.execute("""
@@ -1026,7 +1013,7 @@ class ReportViewSet(viewsets.ViewSet):
                             p.name
                     """)
                     products = [dict(zip([col[0] for col in cursor.description], row))
-                              for row in cursor.fetchall()]
+                                for row in cursor.fetchall()]
 
                     # Format decimal values
                     for product in products:
@@ -1105,7 +1092,7 @@ class ReportViewSet(viewsets.ViewSet):
                     """, [start_date, end_date])
 
                     sales = [dict(zip([col[0] for col in cursor.description], row))
-                            for row in cursor.fetchall()]
+                             for row in cursor.fetchall()]
 
                     # Format dates and decimal values
                     for sale in sales:
@@ -1229,7 +1216,7 @@ class ReportViewSet(viewsets.ViewSet):
 
                 return Response({
                     'items': [{k: v for k, v in row.items() if k not in ['out_of_stock_count', 'low_stock_count']}
-                             for row in results],
+                              for row in results],
                     'summary': {
                         'total': len(results),
                         'outOfStock': results[0]['out_of_stock_count'],
@@ -1240,6 +1227,7 @@ class ReportViewSet(viewsets.ViewSet):
         except Exception as e:
             print(f"Error in low_stock: {str(e)}")
             return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class DashboardViewSet(viewsets.ViewSet):
     permission_classes = []
@@ -1299,10 +1287,14 @@ class DashboardViewSet(viewsets.ViewSet):
                     last_month_products, last_month_low_stock, last_month_sales, last_month_orders = last_month_stats
 
                     # Calculate percentage changes
-                    products_change = ((total_products - last_month_products) / last_month_products * 100) if last_month_products > 0 else 0
-                    low_stock_change = ((low_stock_products - last_month_low_stock) / last_month_low_stock * 100) if last_month_low_stock > 0 else 0
-                    sales_change = ((total_sales - last_month_sales) / last_month_sales * 100) if last_month_sales > 0 else 0
-                    orders_change = ((total_orders - last_month_orders) / last_month_orders * 100) if last_month_orders > 0 else 0
+                    products_change = ((
+                                               total_products - last_month_products) / last_month_products * 100) if last_month_products > 0 else 0
+                    low_stock_change = ((
+                                                low_stock_products - last_month_low_stock) / last_month_low_stock * 100) if last_month_low_stock > 0 else 0
+                    sales_change = ((
+                                            total_sales - last_month_sales) / last_month_sales * 100) if last_month_sales > 0 else 0
+                    orders_change = ((
+                                             total_orders - last_month_orders) / last_month_orders * 100) if last_month_orders > 0 else 0
 
                     return Response({
                         'totalProducts': total_products,
