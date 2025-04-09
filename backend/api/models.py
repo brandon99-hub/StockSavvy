@@ -68,7 +68,7 @@ class User(AbstractBaseUser):
 
     class Meta:
         db_table = 'users'
-        managed = False
+        managed = True
 
 class Category(models.Model):
     name = models.TextField(unique=True)
