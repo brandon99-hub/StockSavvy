@@ -114,7 +114,12 @@ const ReportGenerator: React.FC = () => {
   const inventoryQuery = useQuery({
     queryKey: ['inventory'],
     queryFn: async () => {
-      const response = await axios.get('/api/reports/inventory/');
+      const token = localStorage.getItem('token');
+      const response = await axios.get('/api/reports/inventory/', {
+        headers: {
+          Authorization: token
+        }
+      });
       return response.data as InventoryData;
     },
   });
@@ -123,7 +128,11 @@ const ReportGenerator: React.FC = () => {
   const profitQuery = useQuery({
     queryKey: ['profit', startDate, endDate],
     queryFn: async () => {
+      const token = localStorage.getItem('token');
       const response = await axios.get('/api/reports/profit/', {
+        headers: {
+          Authorization: token
+        },
         params: {
           start: startDate ? formatDate(startDate) : undefined,
           end: endDate ? formatDate(endDate) : undefined,
@@ -138,7 +147,12 @@ const ReportGenerator: React.FC = () => {
   const salesQuery = useQuery({
     queryKey: ['sales'],
     queryFn: async () => {
-      const response = await axios.get('/api/sales-items/');
+      const token = localStorage.getItem('token');
+      const response = await axios.get('/api/sales-items/', {
+        headers: {
+          Authorization: token
+        }
+      });
       return response.data as SalesData;
     },
   });

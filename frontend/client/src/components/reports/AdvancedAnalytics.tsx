@@ -63,6 +63,7 @@ import {
 } from 'recharts';
 import {exportInventoryToPDF, exportSalesToPDF, exportProfitToPDF, exportToCSV} from '../../lib/exportUtils';
 import {Product, Sale, Category, Activity} from '../../../../shared/schema';
+import axios from 'axios';
 
 // Custom type definitions for analytics data
 interface SalesChartData {
@@ -173,22 +174,67 @@ const AdvancedAnalytics = () => {
     // Fetch data
     const {data: products = [], isLoading: isProductsLoading} = useQuery<Product[]>({
         queryKey: ['/api/products/'],
+        queryFn: async () => {
+            const token = localStorage.getItem('token');
+            const response = await axios.get('/api/products/', {
+                headers: {
+                    Authorization: token
+                }
+            });
+            return response.data;
+        }
     });
 
     const {data: categories = [], isLoading: isCategoriesLoading} = useQuery<Category[]>({
         queryKey: ['/api/categories/'],
+        queryFn: async () => {
+            const token = localStorage.getItem('token');
+            const response = await axios.get('/api/categories/', {
+                headers: {
+                    Authorization: token
+                }
+            });
+            return response.data;
+        }
     });
 
     const {data: sales = [], isLoading: isSalesLoading} = useQuery<Sale[]>({
         queryKey: ['/api/sales/'],
+        queryFn: async () => {
+            const token = localStorage.getItem('token');
+            const response = await axios.get('/api/sales/', {
+                headers: {
+                    Authorization: token
+                }
+            });
+            return response.data;
+        }
     });
 
     const {data: activities = [], isLoading: isActivitiesLoading} = useQuery<Activity[]>({
         queryKey: ['/api/activities/'],
+        queryFn: async () => {
+            const token = localStorage.getItem('token');
+            const response = await axios.get('/api/activities/', {
+                headers: {
+                    Authorization: token
+                }
+            });
+            return response.data;
+        }
     });
 
     const {data: saleItems = [], isLoading: isSaleItemsLoading} = useQuery<any[]>({
         queryKey: ['/api/sales/items/'],
+        queryFn: async () => {
+            const token = localStorage.getItem('token');
+            const response = await axios.get('/api/sales/items/', {
+                headers: {
+                    Authorization: token
+                }
+            });
+            return response.data;
+        }
     });
 
     const {data: salesChartData = [], isLoading: isSalesChartLoading} = useQuery<SalesChartData[]>({
@@ -198,6 +244,19 @@ const AdvancedAnalytics = () => {
                 end: format(dateRange.end, 'yyyy-MM-dd')
             }
         ],
+        queryFn: async () => {
+            const token = localStorage.getItem('token');
+            const response = await axios.get('/api/dashboard/sales-chart/', {
+                headers: {
+                    Authorization: token
+                },
+                params: {
+                    start: format(dateRange.start, 'yyyy-MM-dd'),
+                    end: format(dateRange.end, 'yyyy-MM-dd')
+                }
+            });
+            return response.data;
+        }
     });
 
     const {data: categoryChartData = [], isLoading: isCategoryChartLoading} = useQuery<CategoryChartData[]>({
@@ -207,6 +266,19 @@ const AdvancedAnalytics = () => {
                 end: format(dateRange.end, 'yyyy-MM-dd')
             }
         ],
+        queryFn: async () => {
+            const token = localStorage.getItem('token');
+            const response = await axios.get('/api/dashboard/category-chart/', {
+                headers: {
+                    Authorization: token
+                },
+                params: {
+                    start: format(dateRange.start, 'yyyy-MM-dd'),
+                    end: format(dateRange.end, 'yyyy-MM-dd')
+                }
+            });
+            return response.data;
+        }
     });
 
     const {data: dashboardStats = null, isLoading: isStatsLoading} = useQuery<DashboardStats>({
@@ -216,12 +288,26 @@ const AdvancedAnalytics = () => {
                 end: format(dateRange.end, 'yyyy-MM-dd')
             }
         ],
+        queryFn: async () => {
+            const token = localStorage.getItem('token');
+            const response = await axios.get('/api/dashboard/stats/', {
+                headers: {
+                    Authorization: token
+                },
+                params: {
+                    start: format(dateRange.start, 'yyyy-MM-dd'),
+                    end: format(dateRange.end, 'yyyy-MM-dd')
+                }
+            });
+            return response.data;
+        },
         select: (data) => ({
             ...data,
             totalRevenue: data?.totalRevenue || calculateTotalRevenue(filteredSales),
             averageOrderValue: data?.averageOrderValue || calculateAOV(filteredSales)
         })
     });
+
     // Add calculation functions
     const calculateTotalRevenue = (sales: Sale[]) => {
         return sales.reduce((sum, sale) => sum + parseFloat(sale.totalAmount), 0);
@@ -240,6 +326,19 @@ const AdvancedAnalytics = () => {
                 end: format(dateRange.end, 'yyyy-MM-dd')
             }
         ],
+        queryFn: async () => {
+            const token = localStorage.getItem('token');
+            const response = await axios.get('/api/reports/profit/', {
+                headers: {
+                    Authorization: token
+                },
+                params: {
+                    start: format(dateRange.start, 'yyyy-MM-dd'),
+                    end: format(dateRange.end, 'yyyy-MM-dd')
+                }
+            });
+            return response.data;
+        }
     });
 
     // Check if all data is loaded
