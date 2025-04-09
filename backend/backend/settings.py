@@ -57,6 +57,11 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'backend.wsgi.application'
 
+PASSWORD_HASHERS = [
+    'django.contrib.auth.hashers.PBKDF2PasswordHasher',  # Default hasher
+    # ... other hashers
+]
+
 # Database configuration
 DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://postgres.tmfdwxfdtwjbulrwqmus:Exlifes_6969@aws-0-eu-west-2.pooler.supabase.com:6543/postgres')
 

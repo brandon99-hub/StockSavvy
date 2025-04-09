@@ -3,34 +3,19 @@ from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
 from django.utils.translation import gettext_lazy as _
 import bcrypt
 from django.db import connection
+from django.contrib.auth.hashers import check_password, make_password  # Add this
+
 
 class UserManager(BaseUserManager):
     def get_by_natural_key(self, username):
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT id, username, password, role, is_active, is_staff, is_superuser, name FROM users WHERE username = %s",
-                [username]
-            )
-            row = cursor.fetchone()
-            if row is None:
-                raise self.model.DoesNotExist(f"User with username {username} does not exist")
-            user = self.model(
-                id=row[0],
-                username=row[1],
-                password=row[2],
-                role=row[3],
-                is_active=row[4],
-                is_staff=row[5],
-                is_superuser=row[6],
-                name=row[7]
-            )
-            return user
-    
+        # Use Django ORM instead of raw SQL
+        return self.get(username=username)
+
     def get(self, **kwargs):
         if 'username' in kwargs:
             return self.get_by_natural_key(kwargs['username'])
         raise ValueError("This UserManager only supports get by username")
-        
+
     def create_user(self, username, password=None, **extra_fields):
         if not username:
             raise ValueError('The Username field must be set')
@@ -39,11 +24,12 @@ class UserManager(BaseUserManager):
             user.set_password(password)
         user.save(using=self._db)
         return user
-    
+
     def create_superuser(self, username, password=None, **extra_fields):
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
         return self.create_user(username, password, **extra_fields)
+
 
 class User(AbstractBaseUser):
     id = models.AutoField(primary_key=True)
@@ -55,29 +41,30 @@ class User(AbstractBaseUser):
     is_staff = models.BooleanField(default=False)
     is_superuser = models.BooleanField(default=False)
     last_login = None  # Override the last_login field from AbstractBaseUser
-    
+
     USERNAME_FIELD = 'username'
     REQUIRED_FIELDS = []
-    
+
     objects = UserManager()
-    
+
     def set_password(self, raw_password):
-        salt = bcrypt.gensalt()
-        self.password = bcrypt.hashpw(raw_password.encode(), salt).decode()
-        
+        # Use Django's password hashing
+        self.password = make_password(raw_password)
+
     def check_password(self, raw_password):
-        return bcrypt.checkpw(raw_password.encode(), self.password.encode())
-    
+        # Use Django's password verification
+        return check_password(raw_password, self.password)
+
     def has_perm(self, perm, obj=None):
         return self.is_superuser
-    
+
     def has_module_perms(self, app_label):
         return self.is_superuser
-        
+
     @property
     def is_anonymous(self):
         return False
-        
+
     @property
     def is_authenticated(self):
         return True
