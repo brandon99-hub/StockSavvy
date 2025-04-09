@@ -22,6 +22,8 @@ router.register(r'sales-items', SaleItemViewSet, basename='sale-items')
 urlpatterns = [
     path('test/', test_connection),
     path('reports/profit/', profit_report, name='profit-report'),
+    path('reports/inventory/', ReportViewSet.as_view({'get': 'inventory'}), name='inventory-report'),
+    path('reports/sales/', ReportViewSet.as_view({'get': 'sales_chart'}), name='sales-report'),
     path('products/low-stock/', ProductViewSet.as_view({'get': 'low_stock'}), name='low-stock-products'),
     path('dashboard/stats/', DashboardViewSet.as_view({'get': 'stats'}), name='dashboard-stats'),
     path('dashboard/category-chart/', DashboardViewSet.as_view({'get': 'category_chart'}), name='dashboard-category-chart'),

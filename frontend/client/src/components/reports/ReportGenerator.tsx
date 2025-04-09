@@ -6,7 +6,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   LineChart, Line, Area, AreaChart
 } from 'recharts';
-import { Box, Card, CardContent, Typography, CircularProgress, Alert, Tabs, Tab } from '@mui/material';
+import { Box, Card, CardContent, Typography, CircularProgress, Alert, Tabs, Tab, AlertTitle } from '@mui/material';
 import { DateRangePicker } from '@mui/x-date-pickers-pro/DateRangePicker';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -111,50 +111,65 @@ const ReportGenerator: React.FC = () => {
   };
 
   // Inventory query
-  const inventoryQuery = useQuery({
+  const inventoryQuery = useQuery<InventoryData, Error>({
     queryKey: ['inventory'],
     queryFn: async () => {
       const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
       const response = await axios.get('/api/reports/inventory/', {
         headers: {
-          Authorization: token
+          Authorization: `Bearer ${token}`
         }
       });
-      return response.data as InventoryData;
+      return response.data;
     },
+    retry: 1
   });
 
   // Profit query
-  const profitQuery = useQuery({
+  const profitQuery = useQuery<ProfitData, Error>({
     queryKey: ['profit', startDate, endDate],
     queryFn: async () => {
       const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+      if (!startDate || !endDate) {
+        throw new Error('Date range is required');
+      }
       const response = await axios.get('/api/reports/profit/', {
         headers: {
-          Authorization: token
+          Authorization: `Bearer ${token}`
         },
         params: {
-          start: startDate ? formatDate(startDate) : undefined,
-          end: endDate ? formatDate(endDate) : undefined,
+          start: formatDate(startDate),
+          end: formatDate(endDate),
         },
       });
-      return response.data as ProfitData;
+      return response.data;
     },
     enabled: !!startDate && !!endDate,
+    retry: 1
   });
 
   // Sales query
-  const salesQuery = useQuery({
+  const salesQuery = useQuery<SalesData, Error>({
     queryKey: ['sales'],
     queryFn: async () => {
       const token = localStorage.getItem('token');
-      const response = await axios.get('/api/sales-items/', {
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+      const response = await axios.get('/api/reports/sales_chart/', {
         headers: {
-          Authorization: token
+          Authorization: `Bearer ${token}`
         }
       });
-      return response.data as SalesData;
+      return response.data;
     },
+    retry: 1
   });
 
   const formatCurrency = (value: string | number) => {
@@ -380,10 +395,32 @@ const ReportGenerator: React.FC = () => {
   };
 
   if (inventoryQuery.error || profitQuery.error || salesQuery.error) {
+    const error = inventoryQuery.error || profitQuery.error || salesQuery.error;
     return (
-      <Alert severity="error" sx={{ mt: 2 }}>
-        Error loading reports: {(inventoryQuery.error || profitQuery.error || salesQuery.error)?.message}
-      </Alert>
+      <Box sx={{ p: 3 }}>
+        <Alert severity="error" sx={{ mb: 2 }}>
+          <AlertTitle>Error Loading Reports</AlertTitle>
+          {error instanceof Error ? error.message : 'An unexpected error occurred'}
+        </Alert>
+        <Button 
+          variant="outline" 
+          onClick={() => {
+            inventoryQuery.refetch();
+            profitQuery.refetch();
+            salesQuery.refetch();
+          }}
+        >
+          Retry
+        </Button>
+      </Box>
+    );
+  }
+
+  if (inventoryQuery.isLoading || profitQuery.isLoading || salesQuery.isLoading) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+        <CircularProgress />
+      </Box>
     );
   }
 
@@ -412,42 +449,36 @@ const ReportGenerator: React.FC = () => {
           />
         </LocalizationProvider>
 
-        {(inventoryQuery.isLoading || profitQuery.isLoading || salesQuery.isLoading) ? (
-          <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-            <CircularProgress />
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <Tabs value={activeTab} onChange={handleTabChange} sx={{ borderBottom: 1, borderColor: 'divider' }}>
+            <Tab label="Sales Report" />
+            <Tab label="Inventory Report" />
+            <Tab label="Profit Report" />
+          </Tabs>
+
+          <Box sx={{ mt: 2 }}>
+            {activeTab === 0 && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {renderSalesSummary()}
+                {renderSalesCharts()}
+              </Box>
+            )}
+
+            {activeTab === 1 && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {renderInventorySummary()}
+                {renderInventoryCharts()}
+              </Box>
+            )}
+
+            {activeTab === 2 && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {renderProfitSummary()}
+                {renderProfitCharts()}
+              </Box>
+            )}
           </Box>
-        ) : (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <Tabs value={activeTab} onChange={handleTabChange} sx={{ borderBottom: 1, borderColor: 'divider' }}>
-              <Tab label="Sales Report" />
-              <Tab label="Inventory Report" />
-              <Tab label="Profit Report" />
-            </Tabs>
-
-            <Box sx={{ mt: 2 }}>
-              {activeTab === 0 && (
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  {renderSalesSummary()}
-                  {renderSalesCharts()}
-                </Box>
-              )}
-
-              {activeTab === 1 && (
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  {renderInventorySummary()}
-                  {renderInventoryCharts()}
-                </Box>
-              )}
-
-              {activeTab === 2 && (
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  {renderProfitSummary()}
-                  {renderProfitCharts()}
-                </Box>
-              )}
-            </Box>
-          </Box>
-        )}
+        </Box>
       </Box>
     </Box>
   );

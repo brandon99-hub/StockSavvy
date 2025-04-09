@@ -690,7 +690,6 @@ def check_token_auth(request):
             row = cursor.fetchone()
             if row:
                 is_staff, is_superuser, role = row
-                # Match exactly how ViewSets check admin status
                 is_admin = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager'])
                 return True, user_id, is_admin
     except (IndexError, ValueError) as e:
@@ -977,211 +976,27 @@ class ReportViewSet(viewsets.ViewSet):
 
     def check_token_auth(self, request):
         auth_header = request.headers.get('Authorization')
-        if not auth_header or not auth_header.startswith('Bearer '):
-            return False, None, False
-
-        token = auth_header.split(' ')[1]
-        if not token.startswith('token_'):
-            return False, None, False
-
-        try:
-            parts = token.split('_')
-            user_id = int(parts[1])
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
-                    [user_id]
-                )
-                row = cursor.fetchone()
-                if row:
-                    is_staff, is_superuser, role = row
-                    is_admin = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager'])
-                    return True, user_id, is_admin
-        except (IndexError, ValueError):
-            pass
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+            if token and token.startswith('token_'):
+                try:
+                    parts = token.split('_')
+                    if len(parts) >= 2:
+                        user_id = int(parts[1])
+                        with connection.cursor() as cursor:
+                            cursor.execute(
+                                "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
+                                [user_id]
+                            )
+                            row = cursor.fetchone()
+                            if row:
+                                is_staff, is_superuser, role = row
+                                is_admin = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager'])
+                                return True, user_id, is_admin
+                except (jwt.InvalidTokenError, IndexError, ValueError, Exception) as e:
+                    print(f"Token validation error: {str(e)}")
+                    return False, None, False
         return False, None, False
-
-    @action(detail=False, methods=['get'])
-    def profit(self, request):
-        is_authenticated, user_id, is_admin = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin:
-            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-
-        try:
-            start_date = request.query_params.get('start')
-            end_date = request.query_params.get('end')
-
-            with connection.cursor() as cursor:
-                # Get monthly profit data
-                cursor.execute("""
-                    SELECT 
-                        DATE_TRUNC('month', s.created_at) as month,
-                        COALESCE(SUM(s.total_amount), 0) as revenue,
-                        COALESCE(SUM(si.quantity * p.buy_price), 0) as cost,
-                        COALESCE(SUM(s.total_amount - si.quantity * p.buy_price)), 0) as profit
-                    FROM sales s
-                    JOIN sale_items si ON s.id = si.sale_id
-                    JOIN products p ON si.product_id = p.id
-                    WHERE s.created_at BETWEEN %s AND %s
-                    GROUP BY DATE_TRUNC('month', s.created_at)
-                    ORDER BY month
-                """, [start_date, end_date])
-                
-                monthly_data = []
-                for row in cursor.fetchall():
-                    month, revenue, cost, profit = row
-                    monthly_data.append({
-                        'month': month.strftime('%B %Y'),
-                        'revenue': float(revenue),
-                        'cost': float(cost),
-                        'profit': float(profit)
-                    })
-
-                # Get summary data
-                cursor.execute("""
-                    SELECT 
-                        COALESCE(SUM(s.total_amount), 0) as total_revenue,
-                        COALESCE(SUM(si.quantity * p.buy_price), 0) as total_cost,
-                        COALESCE(SUM(s.total_amount - (si.quantity * p.buy_price)), 0) as total_profit
-                    FROM sales s
-                    JOIN sale_items si ON s.id = si.sale_id
-                    JOIN products p ON si.product_id = p.id
-                    WHERE s.created_at BETWEEN %s AND %s
-                """, [start_date, end_date])
-                
-                row = cursor.fetchone()
-                total_revenue, total_cost, total_profit = row
-                profit_margin = (float(total_profit) / float(total_revenue) * 100) if float(total_revenue) > 0 else 0
-
-                return Response({
-                    'monthly': monthly_data,
-                    'summary': {
-                        'totalRevenue': str(total_revenue),
-                        'totalCost': str(total_cost),
-                        'totalProfit': str(total_profit),
-                        'profitMargin': profit_margin
-                    }
-                })
-        except Exception as e:
-            print(f"Error generating profit report: {str(e)}")
-            return Response(
-                {"detail": "Error generating profit report"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-    def sales_chart(self, request):
-        is_authenticated, _, _ = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-
-        try:
-            with connection.cursor() as cursor:
-                cursor.execute("""
-                    SELECT 
-                        DATE_TRUNC('day', s.created_at)::date as date,
-                        COALESCE(SUM(s.total_amount), 0) as amount
-                    FROM sales s
-                    WHERE s.created_at >= NOW() - INTERVAL '30 days'
-                    GROUP BY DATE_TRUNC('day', s.created_at)
-                    ORDER BY date ASC
-                """)
-                columns = [col[0] for col in cursor.description]
-                results = [dict(zip(columns, row)) for row in cursor.fetchall()]
-                return Response(results)
-        except Exception as e:
-            print(f"Error in sales_chart: {str(e)}")
-            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    @action(detail=False, methods=['get'])
-    def low_stock(self, request):
-        is_authenticated, _, _ = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-
-        try:
-            with connection.cursor() as cursor:
-                cursor.execute("""
-                    WITH low_stock_items AS (
-                        SELECT 
-                            p.id,
-                            p.name,
-                            p.sku,
-                            p.quantity as current_stock,
-                            p.min_stock_level,
-                            p.sell_price,
-                            c.name as category_name,
-                            COALESCE(SUM(si.quantity), 0) as total_sold,
-                            p.quantity = 0 as is_out_of_stock,
-                            CASE 
-                                WHEN p.quantity = 0 THEN 'Out of Stock'
-                                WHEN p.quantity <= p.min_stock_level THEN 'Low Stock'
-                                ELSE 'Normal'
-                            END as status,
-                            CASE
-                                WHEN p.quantity = 0 THEN 'critical'
-                                WHEN p.quantity <= p.min_stock_level THEN 'warning'
-                                ELSE 'normal'
-                            END as severity
-                        FROM products p
-                        LEFT JOIN categories c ON p.category_id = c.id
-                        LEFT JOIN sale_items si ON p.id = si.product_id
-                        WHERE p.quantity <= p.min_stock_level
-                        GROUP BY 
-                            p.id, p.name, p.sku, p.quantity, p.min_stock_level,
-                            p.sell_price, c.name
-                    )
-                    SELECT 
-                        *,
-                        (
-                            SELECT COUNT(*) 
-                            FROM low_stock_items 
-                            WHERE status = 'Out of Stock'
-                        ) as out_of_stock_count,
-                        (
-                            SELECT COUNT(*) 
-                            FROM low_stock_items 
-                            WHERE status = 'Low Stock'
-                        ) as low_stock_count
-                    FROM low_stock_items
-                    ORDER BY 
-                        is_out_of_stock DESC,
-                        current_stock ASC,
-                        name ASC
-                """)
-
-                columns = [col[0] for col in cursor.description]
-                results = [dict(zip(columns, row)) for row in cursor.fetchall()]
-
-                # Format decimal values
-                for row in results:
-                    if 'sell_price' in row and row['sell_price'] is not None:
-                        row['sell_price'] = str(row['sell_price'])
-
-                if not results:
-                    return Response({
-                        'items': [],
-                        'summary': {
-                            'total': 0,
-                            'outOfStock': 0,
-                            'lowStock': 0
-                        }
-                    })
-
-                return Response({
-                    'items': [{k: v for k, v in row.items() if k not in ['out_of_stock_count', 'low_stock_count']}
-                              for row in results],
-                    'summary': {
-                        'total': len(results),
-                        'outOfStock': results[0]['out_of_stock_count'],
-                        'lowStock': results[0]['low_stock_count']
-                    }
-                })
-
-        except Exception as e:
-            print(f"Error in low_stock: {str(e)}")
-            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'])
     def inventory(self, request):
@@ -1248,6 +1063,13 @@ class ReportViewSet(viewsets.ViewSet):
                 products = [dict(zip([col[0] for col in cursor.description], row))
                           for row in cursor.fetchall()]
 
+                # Format decimal values
+                for row in products:
+                    if 'buy_price' in row and row['buy_price'] is not None:
+                        row['buy_price'] = str(row['buy_price'])
+                    if 'sell_price' in row and row['sell_price'] is not None:
+                        row['sell_price'] = str(row['sell_price'])
+
                 return Response({
                     'summary': {
                         'totalProducts': summary['total_products'],
@@ -1266,37 +1088,136 @@ class ReportViewSet(viewsets.ViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-
-class DashboardViewSet(viewsets.ViewSet):
-    permission_classes = []
-
-    def check_token_auth(self, request):
-        auth_header = request.headers.get('Authorization')
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(' ')[1]
-            if token and token.startswith('token_'):
-                try:
-                    parts = token.split('_')
-                    if len(parts) >= 2:
-                        user_id = int(parts[1])
-                        with connection.cursor() as cursor:
-                            cursor.execute(
-                                "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
-                                [user_id]
-                            )
-                            row = cursor.fetchone()
-                            if row:
-                                is_staff, is_superuser, role = row
-                                return True, user_id, is_staff or is_superuser or role in ['admin', 'manager']
-                except (IndexError, ValueError) as e:
-                    print(f"Token validation error: {str(e)}")
-                    pass
-        return False, None, False
-
-    def stats(self, request):
-        is_authenticated, _, _ = self.check_token_auth(request)
+    @action(detail=False, methods=['get'])
+    def sales_chart(self, request):
+        is_authenticated, _, is_admin = self.check_token_auth(request)
         if not is_authenticated:
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+        if not is_admin:
+            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    SELECT 
+                        DATE_TRUNC('day', s.created_at)::date as date,
+                        COALESCE(SUM(s.total_amount), 0) as amount,
+                        COUNT(DISTINCT s.id) as transaction_count,
+                        COUNT(DISTINCT si.product_id) as unique_products
+                    FROM sales s
+                    LEFT JOIN sale_items si ON s.id = si.sale_id
+                    WHERE s.created_at >= NOW() - INTERVAL '30 days'
+                    GROUP BY DATE_TRUNC('day', s.created_at)
+                    ORDER BY date ASC
+                """)
+                columns = [col[0] for col in cursor.description]
+                results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+                # Format dates and decimal values
+                for row in results:
+                    if 'date' in row and row['date'] is not None:
+                        row['date'] = row['date'].isoformat()
+                    if 'amount' in row and row['amount'] is not None:
+                        row['amount'] = str(row['amount'])
+
+                return Response({
+                    'items': results,
+                    'summary': {
+                        'totalItems': sum(row['transaction_count'] for row in results),
+                        'totalValue': str(sum(float(row['amount']) for row in results))
+                    }
+                })
+        except Exception as e:
+            print(f"Error in sales_chart: {str(e)}")
+            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'])
+    def profit(self, request):
+        is_authenticated, user_id, is_admin = self.check_token_auth(request)
+        if not is_authenticated:
+            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+        if not is_admin:
+            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            start_date = request.query_params.get('start')
+            end_date = request.query_params.get('end')
+            if not start_date or not end_date:
+                return Response({"detail": "Date range required"}, status=status.HTTP_400_BAD_REQUEST)
+
+            with connection.cursor() as cursor:
+                # Get monthly profit data
+                cursor.execute("""
+                    WITH monthly_data AS (
+                        SELECT 
+                            DATE_TRUNC('month', s.created_at) as month,
+                            COALESCE(SUM(s.total_amount::float), 0) as revenue,
+                            COALESCE(SUM(si.quantity * p.buy_price::float), 0) as cost,
+                            COALESCE(SUM(s.total_amount::float - (si.quantity * p.buy_price::float)), 0) as profit,
+                            COUNT(DISTINCT s.id) as transaction_count,
+                            COUNT(DISTINCT si.product_id) as unique_products
+                        FROM sales s
+                        LEFT JOIN sale_items si ON s.id = si.sale_id
+                        LEFT JOIN products p ON si.product_id = p.id
+                        WHERE s.created_at BETWEEN %s::timestamp AND %s::timestamp + interval '1 day'
+                        GROUP BY DATE_TRUNC('month', s.created_at)
+                    )
+                    SELECT 
+                        month,
+                        revenue,
+                        cost,
+                        profit,
+                        transaction_count,
+                        unique_products,
+                        CASE 
+                            WHEN revenue > 0 THEN ROUND(CAST((profit / revenue * 100) AS DECIMAL(10,2)), 2)
+                            ELSE 0 
+                        END as profit_margin
+                    FROM monthly_data
+                    ORDER BY month DESC
+                """, [start_date, end_date])
+                
+                columns = [col[0] for col in cursor.description]
+                monthly_data = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+                # Calculate totals
+                total_revenue = sum(float(row['revenue']) for row in monthly_data) if monthly_data else 0
+                total_cost = sum(float(row['cost']) for row in monthly_data) if monthly_data else 0
+                total_profit = sum(float(row['profit']) for row in monthly_data) if monthly_data else 0
+                total_transactions = sum(int(row['transaction_count']) for row in monthly_data) if monthly_data else 0
+                total_margin = round((total_profit / total_revenue * 100), 2) if total_revenue > 0 else 0
+
+                # Format response data
+                for row in monthly_data:
+                    row['month'] = row['month'].strftime('%Y-%m-%d')
+                    for key in ['revenue', 'cost', 'profit', 'profit_margin']:
+                        if key in row and row[key] is not None:
+                            row[key] = str(row[key])
+
+                return Response({
+                    'summary': {
+                        'totalRevenue': str(total_revenue),
+                        'totalCost': str(total_cost),
+                        'totalProfit': str(total_profit),
+                        'totalTransactions': total_transactions,
+                        'profitMargin': total_margin
+                    },
+                    'monthly': monthly_data
+                })
+        except Exception as e:
+            print(f"Error generating profit report: {str(e)}")
+            return Response(
+                {"detail": "Internal server error"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        is_authenticated, _, is_admin = self.check_token_auth(request)
+        if not is_authenticated:
+            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+        if not is_admin:
+            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
 
         try:
             with connection.cursor() as cursor:
@@ -1325,14 +1246,10 @@ class DashboardViewSet(viewsets.ViewSet):
                     last_month_products, last_month_low_stock, last_month_sales, last_month_orders = last_month_stats
 
                     # Calculate percentage changes
-                    products_change = ((
-                                               total_products - last_month_products) / last_month_products * 100) if last_month_products > 0 else 0
-                    low_stock_change = ((
-                                                low_stock_products - last_month_low_stock) / last_month_low_stock * 100) if last_month_low_stock > 0 else 0
-                    sales_change = ((
-                                            total_sales - last_month_sales) / last_month_sales * 100) if last_month_sales > 0 else 0
-                    orders_change = ((
-                                             total_orders - last_month_orders) / last_month_orders * 100) if last_month_orders > 0 else 0
+                    products_change = ((total_products - last_month_products) / last_month_products * 100) if last_month_products > 0 else 0
+                    low_stock_change = ((low_stock_products - last_month_low_stock) / last_month_low_stock * 100) if last_month_low_stock > 0 else 0
+                    sales_change = ((total_sales - last_month_sales) / last_month_sales * 100) if last_month_sales > 0 else 0
+                    orders_change = ((total_orders - last_month_orders) / last_month_orders * 100) if last_month_orders > 0 else 0
 
                     return Response({
                         'totalProducts': total_products,
@@ -1352,10 +1269,13 @@ class DashboardViewSet(viewsets.ViewSet):
 
         return Response({"detail": "Error fetching stats"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @action(detail=False, methods=['get'])
     def category_chart(self, request):
-        is_authenticated, _, _ = self.check_token_auth(request)
+        is_authenticated, _, is_admin = self.check_token_auth(request)
         if not is_authenticated:
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+        if not is_admin:
+            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
 
         try:
             with connection.cursor() as cursor:
@@ -1401,35 +1321,4 @@ class DashboardViewSet(viewsets.ViewSet):
                 return Response(results)
         except Exception as e:
             print(f"Error in category_chart: {str(e)}")
-            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    def sales_chart(self, request):
-        is_authenticated, _, _ = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-
-        try:
-            with connection.cursor() as cursor:
-                cursor.execute("""
-                    SELECT 
-                        DATE_TRUNC('day', s.created_at)::date as date,
-                        COALESCE(SUM(s.total_amount), 0) as amount
-                    FROM sales s
-                    WHERE s.created_at >= NOW() - INTERVAL '30 days'
-                    GROUP BY DATE_TRUNC('day', s.created_at)
-                    ORDER BY date ASC
-                """)
-                columns = [col[0] for col in cursor.description]
-                results = [dict(zip(columns, row)) for row in cursor.fetchall()]
-
-                # Format dates and decimal values
-                for row in results:
-                    if 'date' in row and row['date'] is not None:
-                        row['date'] = row['date'].isoformat()
-                    if 'amount' in row and row['amount'] is not None:
-                        row['amount'] = str(row['amount'])
-
-                return Response(results)
-        except Exception as e:
-            print(f"Error in sales_chart: {str(e)}")
             return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
