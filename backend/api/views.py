@@ -477,8 +477,9 @@ class SaleViewSet(viewsets.ModelViewSet):
                     total_price=total_price
                 )
 
-                # Update product quantity
-                product.quantity = F('quantity') - quantity
+                # Update product quantity and get new quantity
+                new_quantity = product.quantity - quantity
+                product.quantity = new_quantity
                 product.updated_at = now
                 product.save()
 
@@ -493,10 +494,10 @@ class SaleViewSet(viewsets.ModelViewSet):
                 )
 
                 # Check if product is low on stock after sale
-                if product.quantity <= product.min_stock_level:
+                if new_quantity <= product.min_stock_level:
                     Activity.objects.create(
                         type='low_stock',
-                        description=f'Low stock alert: {product.name} ({product.quantity} remaining)',
+                        description=f'Low stock alert: {product.name} ({new_quantity} remaining)',
                         product=product,
                         user=user,
                         created_at=now,

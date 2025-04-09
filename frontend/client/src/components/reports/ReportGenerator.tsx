@@ -1,3 +1,4 @@
+import React from 'react';
 import {useState} from 'react';
 import {useEffect} from 'react';
 import {useQuery} from '@tanstack/react-query';
@@ -28,11 +29,135 @@ import {
     CartesianGrid,
     Tooltip,
     Legend,
-    ResponsiveContainer
+    ResponsiveContainer,
+    TooltipProps
 } from 'recharts';
 import {exportInventoryToPDF, exportSalesToPDF, exportProfitToPDF, exportToCSV} from '../../lib/exportUtils';
-import {Product, Sale, Category} from '../../../../shared/schema';
-import { TooltipFormatter } from 'recharts/types/component/Tooltip';
+import axios from 'axios';
+
+// Define types
+interface Product {
+    id: number;
+    name: string;
+    sku: string;
+    categoryId: number;
+    quantity: number;
+    minStockLevel: number;
+    buyPrice: string;
+    sellPrice: string;
+}
+
+interface Category {
+    id: number;
+    name: string;
+}
+
+interface Sale {
+    id: number;
+    userId: number;
+    saleDate: string;
+    totalAmount: string;
+}
+
+type NameType = string | number;
+type ValueType = string | number | Array<string | number>;
+type CustomTooltipFormatter = (value: ValueType, name: NameType) => [string | number, string];
+
+// Custom hook for fetching reports data
+const useReportsData = (reportType: string, dateRange: { start: Date; end: Date }) => {
+    const token = localStorage.getItem('token');
+    const headers = { Authorization: `Bearer ${token}` };
+
+    // Products query
+    const productsQuery = useQuery({
+        queryKey: ['products'],
+        queryFn: async () => {
+            const response = await axios.get('/api/products/', { headers });
+            return response.data;
+        },
+    });
+
+    // Categories query
+    const categoriesQuery = useQuery({
+        queryKey: ['categories'],
+        queryFn: async () => {
+            const response = await axios.get('/api/categories/', { headers });
+            return response.data;
+        },
+    });
+
+    // Sales query with date range
+    const salesQuery = useQuery({
+        queryKey: ['sales', dateRange],
+        queryFn: async () => {
+            const response = await axios.get('/api/reports/', {
+                headers,
+                params: {
+                    type: 'sales',
+                    start: format(dateRange.start, 'yyyy-MM-dd'),
+                    end: format(dateRange.end, 'yyyy-MM-dd')
+                }
+            });
+            return response.data;
+        },
+        enabled: reportType === 'sales',
+    });
+
+    // Sale items query
+    const saleItemsQuery = useQuery({
+        queryKey: ['saleItems'],
+        queryFn: async () => {
+            const response = await axios.get('/api/sales-items/', { headers });
+            return response.data;
+        },
+        enabled: reportType === 'sales',
+    });
+
+    // Profit query with date range
+    const profitQuery = useQuery({
+        queryKey: ['profit', dateRange],
+        queryFn: async () => {
+            const response = await axios.get('/api/reports/profit/', {
+                headers,
+                params: {
+                    start: format(dateRange.start, 'yyyy-MM-dd'),
+                    end: format(dateRange.end, 'yyyy-MM-dd')
+                }
+            });
+            return response.data;
+        },
+        enabled: reportType === 'profit',
+    });
+
+    return {
+        products: productsQuery.data || [],
+        categories: categoriesQuery.data || [],
+        sales: salesQuery.data || { summary: {}, sales: [] },
+        saleItems: saleItemsQuery.data || {},
+        profitData: profitQuery.data || { summary: {}, monthly: [] },
+        isLoading: {
+            products: productsQuery.isLoading,
+            categories: categoriesQuery.isLoading,
+            sales: salesQuery.isLoading,
+            saleItems: saleItemsQuery.isLoading,
+            profit: profitQuery.isLoading
+        },
+        isError: {
+            products: productsQuery.isError,
+            categories: categoriesQuery.isError,
+            sales: salesQuery.isError,
+            saleItems: saleItemsQuery.isError,
+            profit: profitQuery.isError
+        },
+        errors: {
+            products: productsQuery.error,
+            categories: categoriesQuery.error,
+            sales: salesQuery.error,
+            saleItems: saleItemsQuery.error,
+            profit: profitQuery.error
+        }
+    };
+};
 
 const ReportGenerator = () => {
     const controller = new AbortController();
@@ -50,76 +175,38 @@ const ReportGenerator = () => {
     });
     const [calendarOpen, setCalendarOpen] = useState(false);
 
-    // Fetch data based on report type
-    const {data: products = [], isLoading: isProductsLoading} = useQuery<Product[]>({
-        queryKey: ['/api/products/'],
-    });
-
-    const {data: categories = [], isLoading: isCategoriesLoading} = useQuery<Category[]>({
-        queryKey: ['/api/categories/'],
-    });
-
-    const {data: sales = [], isLoading: isSalesLoading} = useQuery<Sale[]>({
-        queryKey: ['/api/reports/', { 
-            type: 'sales',
-            start: format(dateRange.start, 'yyyy-MM-dd'),
-            end: format(dateRange.end, 'yyyy-MM-dd')
-        }],
-    });
-
-    const {data: saleItems = {}, isLoading: isSaleItemsLoading} = useQuery<Record<number, any[]>>({
-        queryKey: ['/api/sales-items/'],
-        signal: controller.signal,
-    });
-
-    const {data: profitData = [], isLoading: isProfitLoading} = useQuery<any[]>({
-        queryKey: ['/api/reports/profit/', {
-            start: format(dateRange.start, 'yyyy-MM-dd'),
-            end: format(dateRange.end, 'yyyy-MM-dd')
-        }],
-    });
-
-    // Transform the data from the backend response
-    const salesData = sales?.summary || {
-        totalSales: '0.00',
-        totalTransactions: 0,
-        averageSale: '0.00',
-        totalItems: 0
-    };
-
-    const profitSummary = profitData?.summary || {
-        totalRevenue: '0.00',
-        totalCost: '0.00',
-        totalProfit: '0.00',
-        profitMargin: 0
-    };
+    // Fetch data using custom hook
+    const {
+        products,
+        categories,
+        sales,
+        saleItems,
+        profitData,
+        isLoading,
+        isError,
+        errors
+    } = useReportsData(reportType, dateRange);
 
     // Transform categories array to an object for easier lookup
-    const categoryMap = categories.reduce((acc, category) => {
+    const categoryMap = categories.reduce((acc: Record<number, string>, category: Category) => {
         acc[category.id] = category.name;
         return acc;
-    }, {} as Record<number, string>);
+    }, {});
 
     // Transform products array to an object for easier lookup
-    const productMap = products.reduce((acc, product) => {
+    const productMap = products.reduce((acc: Record<number, Product>, product: Product) => {
         acc[product.id] = product;
         return acc;
-    }, {} as Record<number, Product>);
+    }, {});
 
     // Generate inventory report data
-    const inventoryData = products.map(product => ({
+    const inventoryData = products.map((product: Product) => ({
         ...product,
         categoryName: product.categoryId ? categoryMap[product.categoryId] : 'Uncategorized',
         status: product.quantity <= 0 ? 'Out of Stock' :
             product.quantity <= product.minStockLevel ? 'Low Stock' : 'In Stock',
         value: Number(product.buyPrice) * product.quantity
     }));
-
-    // Use the sales data from the backend directly
-    const salesChartData = sales?.sales || [];
-
-    // Use the profit data from the backend directly
-    const profitChartData = profitData?.monthly || [];
 
     // Handle export to PDF
     const handleExportPDF = () => {
@@ -128,10 +215,10 @@ const ReportGenerator = () => {
                 exportInventoryToPDF(products, categoryMap);
                 break;
             case 'sales':
-                exportSalesToPDF(sales, saleItems, productMap);
+                exportSalesToPDF(sales.sales, saleItems, productMap);
                 break;
             case 'profit':
-                exportProfitToPDF(profitData, dateRange);
+                exportProfitToPDF(profitData.monthly, dateRange);
                 break;
         }
     };
@@ -157,7 +244,7 @@ const ReportGenerator = () => {
                 filename = 'inventory_report';
                 break;
             case 'sales':
-                data = sales.map(sale => ({
+                data = sales.sales.map((sale: Sale) => ({
                     'Sale ID': sale.id,
                     Date: format(new Date(sale.saleDate), 'yyyy-MM-dd HH:mm:ss'),
                     'Total Amount': Number(sale.totalAmount).toFixed(2),
@@ -167,12 +254,12 @@ const ReportGenerator = () => {
                 filename = 'sales_report';
                 break;
             case 'profit':
-                data = profitData.map(item => ({
-                    Date: item.date,
-                    Revenue: item.revenue.toFixed(2),
-                    Cost: item.cost.toFixed(2),
-                    Profit: (item.revenue - item.cost).toFixed(2),
-                    'Profit Margin (%)': ((item.revenue - item.cost) / item.revenue * 100).toFixed(2)
+                data = profitData.monthly.map((item: any) => ({
+                    Month: item.month,
+                    Revenue: Number(item.revenue).toFixed(2),
+                    Cost: Number(item.cost).toFixed(2),
+                    Profit: (Number(item.revenue) - Number(item.cost)).toFixed(2),
+                    'Profit Margin (%)': ((Number(item.revenue) - Number(item.cost)) / Number(item.revenue) * 100).toFixed(2)
                 }));
                 filename = 'profit_report';
                 break;
@@ -184,9 +271,9 @@ const ReportGenerator = () => {
     const renderSalesChart = () => {
         if (!sales.sales?.length) return null;
 
-        const formatValue: TooltipFormatter = (value) => {
+        const formatValue: CustomTooltipFormatter = (value) => {
             const numValue = Number(value);
-            return [!isNaN(numValue) ? numValue.toFixed(2) : String(value), 'Sales Amount'];
+            return [!isNaN(numValue) ? `KSh ${numValue.toFixed(2)}` : String(value), 'Sales Amount'];
         };
 
         return (
@@ -195,11 +282,11 @@ const ReportGenerator = () => {
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis 
                         dataKey="created_at" 
-                        tickFormatter={(date) => new Date(date).toLocaleDateString()} 
+                        tickFormatter={(date) => format(new Date(date), 'MMM d')} 
                     />
                     <YAxis />
                     <Tooltip
-                        labelFormatter={(date) => new Date(date).toLocaleString()}
+                        labelFormatter={(date) => format(new Date(date), 'PPP')}
                         formatter={formatValue}
                     />
                     <Legend />
@@ -212,9 +299,9 @@ const ReportGenerator = () => {
     const renderProfitChart = () => {
         if (!profitData.monthly?.length) return null;
 
-        const formatValue: TooltipFormatter = (value, name) => {
+        const formatValue: CustomTooltipFormatter = (value, name) => {
             const numValue = Number(value);
-            return [!isNaN(numValue) ? numValue.toFixed(2) : String(value), name];
+            return [!isNaN(numValue) ? `KSh ${numValue.toFixed(2)}` : String(value), name];
         };
 
         return (
@@ -232,6 +319,34 @@ const ReportGenerator = () => {
             </ResponsiveContainer>
         );
     };
+
+    // Show loading state
+    if (Object.values(isLoading).some(Boolean)) {
+        return (
+            <Card className="shadow-sm">
+                <CardContent className="p-6">
+                    <div className="flex items-center justify-center space-x-2">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+                        <span>Loading reports...</span>
+                    </div>
+                </CardContent>
+            </Card>
+        );
+    }
+
+    // Show error state
+    if (Object.values(isError).some(Boolean)) {
+        return (
+            <Card className="shadow-sm">
+                <CardContent className="p-6">
+                    <div className="text-red-500">
+                        <h3 className="font-semibold">Error loading reports</h3>
+                        <p>Please try again later or contact support if the problem persists.</p>
+                    </div>
+                </CardContent>
+            </Card>
+        );
+    }
 
     return (
         <Card className="shadow-sm">
@@ -309,7 +424,7 @@ const ReportGenerator = () => {
                         <Separator/>
 
                         <div>
-                            <h3 className="font-semibold mb-2">Inventory Value</h3>
+                            <h3 className="font-semibold mb-2">Inventory Value by Category</h3>
                             <ResponsiveContainer width="100%" height={300}>
                                 <BarChart
                                     data={categories.map(cat => ({
@@ -323,7 +438,7 @@ const ReportGenerator = () => {
                                     <CartesianGrid strokeDasharray="3 3"/>
                                     <XAxis dataKey="name" angle={-45} textAnchor="end" height={70}/>
                                     <YAxis/>
-                                    <Tooltip formatter={(value) => [`KSh ${value.toFixed(2)}`, 'Value']}/>
+                                    <Tooltip formatter={(value) => [`KSh ${Number(value).toFixed(2)}`, 'Value']}/>
                                     <Bar dataKey="value" fill="#3b82f6" name="Value (KSh)"/>
                                 </BarChart>
                             </ResponsiveContainer>
@@ -337,17 +452,17 @@ const ReportGenerator = () => {
                                 <div className="bg-white p-4 rounded-md shadow-sm">
                                     <p className="text-sm text-gray-500">Total Sales</p>
                                     <p className="text-xl font-bold">
-                                        KSh {salesData.totalSales}
+                                        KSh {Number(sales.summary?.totalSales || 0).toFixed(2)}
                                     </p>
                                 </div>
                                 <div className="bg-white p-4 rounded-md shadow-sm">
                                     <p className="text-sm text-gray-500">Number of Transactions</p>
-                                    <p className="text-xl font-bold">{salesData.totalTransactions}</p>
+                                    <p className="text-xl font-bold">{sales.summary?.totalTransactions || 0}</p>
                                 </div>
                                 <div className="bg-white p-4 rounded-md shadow-sm">
                                     <p className="text-sm text-gray-500">Average Sale</p>
                                     <p className="text-xl font-bold">
-                                        KSh {salesData.averageSale}
+                                        KSh {Number(sales.summary?.averageSale || 0).toFixed(2)}
                                     </p>
                                 </div>
                             </div>
@@ -368,25 +483,25 @@ const ReportGenerator = () => {
                                 <div className="bg-white p-4 rounded-md shadow-sm">
                                     <p className="text-sm text-gray-500">Total Revenue</p>
                                     <p className="text-xl font-bold">
-                                        KSh {profitSummary.totalRevenue}
+                                        KSh {Number(profitData.summary?.totalRevenue || 0).toFixed(2)}
                                     </p>
                                 </div>
                                 <div className="bg-white p-4 rounded-md shadow-sm">
                                     <p className="text-sm text-gray-500">Total Cost</p>
                                     <p className="text-xl font-bold">
-                                        KSh {profitSummary.totalCost}
+                                        KSh {Number(profitData.summary?.totalCost || 0).toFixed(2)}
                                     </p>
                                 </div>
                                 <div className="bg-white p-4 rounded-md shadow-sm">
                                     <p className="text-sm text-gray-500">Total Profit</p>
                                     <p className="text-xl font-bold text-green-600">
-                                        KSh {profitSummary.totalProfit}
+                                        KSh {Number(profitData.summary?.totalProfit || 0).toFixed(2)}
                                     </p>
                                 </div>
                                 <div className="bg-white p-4 rounded-md shadow-sm">
                                     <p className="text-sm text-gray-500">Profit Margin</p>
                                     <p className="text-xl font-bold">
-                                        {profitSummary.profitMargin.toFixed(2)}%
+                                        {Number(profitData.summary?.profitMargin || 0).toFixed(2)}%
                                     </p>
                                 </div>
                             </div>
@@ -405,13 +520,13 @@ const ReportGenerator = () => {
                 <Button
                     variant="outline"
                     onClick={handleExportCSV}
-                    disabled={isProductsLoading || isCategoriesLoading || isSalesLoading || isSaleItemsLoading || isProfitLoading}
+                    disabled={Object.values(isLoading).some(Boolean)}
                 >
                     <i className="fas fa-file-csv mr-2"></i> Export CSV
                 </Button>
                 <Button
                     onClick={handleExportPDF}
-                    disabled={isProductsLoading || isCategoriesLoading || isSalesLoading || isSaleItemsLoading || isProfitLoading}
+                    disabled={Object.values(isLoading).some(Boolean)}
                 >
                     <i className="fas fa-file-pdf mr-2"></i> Export PDF
                 </Button>
