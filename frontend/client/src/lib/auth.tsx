@@ -45,16 +45,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         body: JSON.stringify(credentials),
       });
 
-      // Store user data and token
-      const userData = {
-        ...response,
-        // Don't include token in user data
-        token: undefined
-      };
+      // Extract token and user data
+      const { token, ...userData } = response;
       
-      // Store token separately
-      const token = response.token;
+      // Ensure token is a string
+      if (typeof token !== 'string') {
+        console.error('Token is not a string:', token);
+        throw new Error('Invalid token format received from server');
+      }
       
+      // Store user data and token separately
       setUser(userData);
       localStorage.setItem('user', JSON.stringify(userData));
       localStorage.setItem('token', token);

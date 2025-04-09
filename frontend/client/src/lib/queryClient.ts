@@ -1,3 +1,12 @@
+// Add ImportMeta interface declaration
+declare global {
+  interface ImportMeta {
+    env: {
+      VITE_API_BASE?: string;
+    };
+  }
+}
+
 import { QueryClient } from "@tanstack/react-query";
 
 // Base URL for API requests
@@ -6,34 +15,34 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 // Helper function to handle API responses
 async function handleResponse(response: Response) {
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    const errorMessage = errorData.detail || response.statusText;
-    
     if (response.status === 401) {
-      // Clear token and redirect to login on authentication error
-      localStorage.removeItem('user');
+      // Clear token and redirect to login
       localStorage.removeItem('token');
       window.location.href = '/login';
-      throw new Error('Authentication required');
+      throw new Error('Unauthorized');
     }
-    
-    throw new Error(errorMessage);
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || 'An error occurred');
   }
-  
   return response.json();
 }
 
 // API request function
 export const apiRequest = async (url: string, options: RequestInit = {}) => {
   const token = localStorage.getItem('token');
+  
+  // Ensure token is a string
+  if (token && typeof token !== 'string') {
+    console.error('Invalid token format:', token);
+    localStorage.removeItem('token');
+    throw new Error('Invalid token format');
+  }
+
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     ...options.headers,
   };
-  
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
   
   const response = await fetch(`${API_BASE_URL}${url}`, {
     ...options,
@@ -47,29 +56,8 @@ export const apiRequest = async (url: string, options: RequestInit = {}) => {
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      queryFn: async ({ queryKey }) => {
-        const token = localStorage.getItem('token');
-        const headers: HeadersInit = {
-          'Content-Type': 'application/json',
-        };
-        
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
-        }
-        
-        const response = await fetch(`${API_BASE_URL}${queryKey[0]}`, {
-          headers,
-        });
-        
-        return handleResponse(response);
-      },
-      retry: (failureCount, error) => {
-        // Don't retry on authentication errors
-        if (error instanceof Error && error.message === 'Authentication required') {
-          return false;
-        }
-        return failureCount < 3;
-      },
+      retry: 1,
+      refetchOnWindowFocus: false,
     },
   },
 });
