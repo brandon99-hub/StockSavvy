@@ -198,67 +198,36 @@ const AdvancedAnalytics = () => {
         queryFn: () => apiRequest('/api/sales/items/')
     });
 
-    const {data: salesChartData = [], isLoading: isSalesChartLoading} = useQuery<SalesChartData[]>({
-        queryKey: ['/api/dashboard/sales-chart/',
-            {
-                start: format(dateRange.start, 'yyyy-MM-dd'),
-                end: format(dateRange.end, 'yyyy-MM-dd')
-            }
-        ],
-        queryFn: () => apiRequest(`/api/dashboard/sales-chart/?start=${format(dateRange.start, 'yyyy-MM-dd')}&end=${format(dateRange.end, 'yyyy-MM-dd')}`)
+    const {data: stats = {}, isLoading: isStatsLoading} = useQuery({
+        queryKey: ['/api/dashboard/stats/'],
+        queryFn: () => apiRequest('/api/dashboard/stats/')
     });
 
-    const {data: categoryChartData = [], isLoading: isCategoryChartLoading} = useQuery<CategoryChartData[]>({
-        queryKey: ['/api/dashboard/category-chart/',
-            {
-                start: format(dateRange.start, 'yyyy-MM-dd'),
-                end: format(dateRange.end, 'yyyy-MM-dd')
-            }
-        ],
-        queryFn: () => apiRequest(`/api/dashboard/category-chart/?start=${format(dateRange.start, 'yyyy-MM-dd')}&end=${format(dateRange.end, 'yyyy-MM-dd')}`)
+    const {data: salesChartData = [], isLoading: isSalesDataLoading} = useQuery({
+        queryKey: ['/api/dashboard/sales-chart/'],
+        queryFn: () => apiRequest('/api/dashboard/sales-chart/')
     });
 
-    const {data: dashboardStats = null, isLoading: isStatsLoading} = useQuery<DashboardStats>({
-        queryKey: ['/api/dashboard/stats/',
-            {
-                start: format(dateRange.start, 'yyyy-MM-dd'),
-                end: format(dateRange.end, 'yyyy-MM-dd')
-            }
-        ],
-        queryFn: () => apiRequest(`/api/dashboard/stats/?start=${format(dateRange.start, 'yyyy-MM-dd')}&end=${format(dateRange.end, 'yyyy-MM-dd')}`)
+    const {data: categoryChartData = [], isLoading: isCategoryDataLoading} = useQuery({
+        queryKey: ['/api/dashboard/category-chart/'],
+        queryFn: () => apiRequest('/api/dashboard/category-chart/')
     });
 
-    // Add calculation functions
-    const calculateTotalRevenue = (sales: Sale[]) => {
-        return sales.reduce((sum, sale) => sum + Number(sale.total_amount), 0);
-    };
-
-    const calculateAOV = (sales: Sale[]) => {
-        return sales.length > 0
-            ? calculateTotalRevenue(sales) / sales.length
-            : 0;
-    };
-
-    const {data: profitData = [], isLoading: isProfitLoading} = useQuery<ProfitData[]>({
-        queryKey: ['/api/reports/profit/',
-            {
-                start: format(dateRange.start, 'yyyy-MM-dd'),
-                end: format(dateRange.end, 'yyyy-MM-dd')
-            }
-        ],
-        queryFn: () => apiRequest(`/api/reports/profit/?start=${format(dateRange.start, 'yyyy-MM-dd')}&end=${format(dateRange.end, 'yyyy-MM-dd')}`)
+    const {data: lowStockData = {items: [], summary: {total: 0, outOfStock: 0, lowStock: 0}}, isLoading: isLowStockLoading} = useQuery({
+        queryKey: ['/api/products/low-stock/'],
+        queryFn: () => apiRequest('/api/products/low-stock/')
     });
 
-    // Check if all data is loaded
+    // Calculate loading state
     const isLoading = isProductsLoading ||
         isCategoriesLoading ||
         isSalesLoading ||
         isActivitiesLoading ||
         isSaleItemsLoading ||
-        isSalesChartLoading ||
-        isCategoryChartLoading ||
         isStatsLoading ||
-        isProfitLoading;
+        isSalesDataLoading ||
+        isCategoryDataLoading ||
+        isLowStockLoading;
 
     // Create a map of products by ID for quick lookup
     const productsById = useMemo(() => {
@@ -513,6 +482,16 @@ const AdvancedAnalytics = () => {
         discount: Number(day.discount) || 0
     }));
 
+    // Transform data for analytics
+    const salesData = salesChartData.map(item => ({
+        date: new Date(item.date),
+        amount: item.amount
+    }));
+
+    const categoryData = categoryChartData.map(item => ({
+        name: item.name,
+        percentage: item.percentage
+    }));
 
     return (
         <div className="space-y-6">
@@ -590,7 +569,7 @@ const AdvancedAnalytics = () => {
                             <CardContent>
                                 <div className="text-2xl font-bold">
                                     {formatCurrency(
-                                        dashboardStats?.totalRevenue ||
+                                        stats?.totalRevenue ||
                                         calculateTotalRevenue(filteredSales)
                                     )}
                                 </div>
@@ -613,7 +592,7 @@ const AdvancedAnalytics = () => {
                             </CardHeader>
                             <CardContent>
                                 <div className="text-2xl font-bold">
-                                    {dashboardStats?.totalSales || 0}
+                                    {stats?.totalSales || 0}
                                 </div>
                                 <p className="text-xs text-gray-500 mt-1">
                                     {yearOverYearData && yearOverYearData[1]?.change ? (
@@ -635,9 +614,9 @@ const AdvancedAnalytics = () => {
                             <CardContent>
                                 <div className="text-2xl font-bold">
                                     {formatCurrency(
-                                        typeof dashboardStats?.averageOrderValue === 'string' ?
-                                            parseFloat(dashboardStats.averageOrderValue) :
-                                            dashboardStats?.averageOrderValue || 0
+                                        typeof stats?.averageOrderValue === 'string' ?
+                                            parseFloat(stats.averageOrderValue) :
+                                            stats?.averageOrderValue || 0
                                     )}
                                 </div>
                                 <p className="text-xs text-gray-500 mt-1">
@@ -675,7 +654,7 @@ const AdvancedAnalytics = () => {
                                     <CardContent className="h-80">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <AreaChart
-                                                data={salesChartData}
+                                                data={salesData}
                                                 margin={{top: 10, right: 30, left: 0, bottom: 0}}
                                             >
                                                 <defs>
@@ -744,7 +723,7 @@ const AdvancedAnalytics = () => {
                                         <ResponsiveContainer width="100%" height="100%">
                                             <PieChart>
                                                 <Pie
-                                                    data={categoryChartData}
+                                                    data={categoryData}
                                                     cx="50%"
                                                     cy="50%"
                                                     labelLine={false}
@@ -757,7 +736,7 @@ const AdvancedAnalytics = () => {
                                                                 percent
                                                             }) => `${name}: ${(percent * 100).toFixed(0)}%`}
                                                 >
-                                                    {categoryChartData.map((entry, index) => (
+                                                    {categoryData.map((entry, index) => (
                                                         <Cell key={`cell-${index}`}
                                                               fill={COLORS[index % COLORS.length]}/>
                                                     ))}
@@ -770,7 +749,7 @@ const AdvancedAnalytics = () => {
                                     <div className="w-full md:w-1/2 mt-6 md:mt-0">
                                         <h3 className="text-lg font-medium mb-4">Category Breakdown</h3>
                                         <div className="space-y-4">
-                                            {categoryChartData.map((category, index) => {
+                                            {categoryData.map((category, index) => {
                                                 const categoryTotal = categoryRevenue.get(category.id) || 0;
                                                 return (
                                                     <div key={category.id} className="flex items-center gap-2">
@@ -1215,12 +1194,12 @@ const AdvancedAnalytics = () => {
                         </CardHeader>
                         <CardContent>
                             <div className="space-y-4">
-                                {dashboardStats?.lowStockCount ? (
+                                {stats?.lowStockCount ? (
                                     <Alert className="bg-amber-50 text-amber-800 border-amber-200">
                                         <AlertCircle className="h-4 w-4"/>
                                         <AlertTitle>Low Stock Alert</AlertTitle>
                                         <AlertDescription>
-                                            {dashboardStats.lowStockCount} products are low on stock. Review the
+                                            {stats.lowStockCount} products are low on stock. Review the
                                             Inventory tab for details.
                                         </AlertDescription>
                                     </Alert>

@@ -80,6 +80,26 @@ const ReportGenerator = () => {
   const [calendarOpen, setCalendarOpen] = useState(false);
 
   // Fetch data based on report type
+  const { data: stats = {}, isLoading: isStatsLoading } = useQuery({
+    queryKey: ['/api/dashboard/stats/'],
+    queryFn: () => apiRequest('/api/dashboard/stats/')
+  });
+
+  const { data: salesChartData = [], isLoading: isSalesDataLoading } = useQuery({
+    queryKey: ['/api/dashboard/sales-chart/'],
+    queryFn: () => apiRequest('/api/dashboard/sales-chart/')
+  });
+
+  const { data: categoryChartData = [], isLoading: isCategoryDataLoading } = useQuery({
+    queryKey: ['/api/dashboard/category-chart/'],
+    queryFn: () => apiRequest('/api/dashboard/category-chart/')
+  });
+
+  const { data: lowStockData = { items: [], summary: { total: 0, outOfStock: 0, lowStock: 0 } }, isLoading: isLowStockLoading } = useQuery({
+    queryKey: ['/api/products/low-stock/'],
+    queryFn: () => apiRequest('/api/products/low-stock/')
+  });
+
   const { data: products = [], isLoading: isProductsLoading } = useQuery<Product[]>({
     queryKey: ['/api/products'],
     queryFn: async () => {
@@ -126,7 +146,27 @@ const ReportGenerator = () => {
     }
   });
 
-  const isLoading = isProductsLoading || isCategoriesLoading || isSalesLoading || isSaleItemsLoading || isProfitLoading;
+  // Calculate loading state
+  const isLoading = isStatsLoading || isSalesDataLoading || isCategoryDataLoading || isLowStockLoading || isProductsLoading || isCategoriesLoading || isSalesLoading || isSaleItemsLoading || isProfitLoading;
+
+  // Transform data for reports
+  const inventoryReportData = lowStockData.items.map(product => ({
+    name: product.name,
+    category: categories.find(cat => cat.id === product.category_id)?.name || 'Unknown',
+    quantity: product.quantity,
+    reorderLevel: product.reorder_level,
+    status: product.quantity <= 0 ? 'Out of Stock' : product.quantity <= product.reorder_level ? 'Low Stock' : 'In Stock'
+  }));
+
+  const salesReportData = salesChartData.map(item => ({
+    date: format(new Date(item.date), 'MMM dd, yyyy'),
+    amount: item.amount
+  }));
+
+  const profitReportData = categoryChartData.map(item => ({
+    category: item.name,
+    percentage: item.percentage
+  }));
 
   // Transform categories array to an object for easier lookup
   const categoryMap = categories.reduce((acc, category) => {
@@ -166,7 +206,7 @@ const ReportGenerator = () => {
     return acc;
   }, {} as Record<string, { date: string, revenue: number, transactions: number }>);
 
-  const salesChartData = Object.values(salesByDate).sort((a, b) =>
+  const salesChartDataForChart = Object.values(salesByDate).sort((a, b) =>
     new Date(a.date).getTime() - new Date(b.date).getTime()
   );
 
@@ -314,12 +354,7 @@ const ReportGenerator = () => {
               <h3 className="font-semibold mb-2">Inventory Value</h3>
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart
-                  data={categories.map(cat => ({
-                    name: cat.name,
-                    value: products
-                      .filter(p => p.category_id === cat.id)
-                      .reduce((sum, p) => sum + (Number(p.price) * p.quantity), 0)
-                  }))}
+                  data={categoryChartData}
                   margin={{ top: 20, right: 30, left: 20, bottom: 50 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" />
@@ -362,7 +397,7 @@ const ReportGenerator = () => {
               <h3 className="font-semibold mb-2">Sales Trend</h3>
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart
-                  data={salesChartData}
+                  data={salesChartDataForChart}
                   margin={{ top: 20, right: 30, left: 20, bottom: 50 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" />
