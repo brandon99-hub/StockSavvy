@@ -1,3 +1,4 @@
+import React from 'react';
 import {useState, useEffect, useMemo} from 'react';
 import {useQuery} from '@tanstack/react-query';
 import {
@@ -62,7 +63,7 @@ import {
     PolarRadiusAxis
 } from 'recharts';
 import {exportInventoryToPDF, exportSalesToPDF, exportProfitToPDF, exportToCSV} from '../../lib/exportUtils';
-import {Product, Sale, Category, Activity} from '../../../../shared/schema';
+import {Product, Sale, Category, Activity} from '../../types';
 import axios from 'axios';
 
 // Custom type definitions for analytics data
@@ -310,7 +311,7 @@ const AdvancedAnalytics = () => {
 
     // Add calculation functions
     const calculateTotalRevenue = (sales: Sale[]) => {
-        return sales.reduce((sum, sale) => sum + parseFloat(sale.totalAmount), 0);
+        return sales.reduce((sum, sale) => sum + Number(sale.total_amount), 0);
     };
 
     const calculateAOV = (sales: Sale[]) => {
@@ -330,7 +331,7 @@ const AdvancedAnalytics = () => {
             const token = localStorage.getItem('token');
             const response = await axios.get('/api/reports/profit/', {
                 headers: {
-                    Authorization: token
+                    Authorization: `Bearer ${token}`
                 },
                 params: {
                     start: format(dateRange.start, 'yyyy-MM-dd'),
@@ -364,7 +365,7 @@ const AdvancedAnalytics = () => {
     // Filter sales by date range
     const filteredSales = useMemo(() => {
         return sales.filter(sale => {
-            const saleDate = new Date(sale.createdAt);
+            const saleDate = new Date(sale.created_at);
             return saleDate >= dateRange.start && saleDate <= dateRange.end;
         });
     }, [sales, dateRange]);
@@ -372,7 +373,7 @@ const AdvancedAnalytics = () => {
     // Filter activities by date range
     const filteredActivities = useMemo(() => {
         return activities.filter(activity => {
-            const activityDate = new Date(activity.createdAt);
+            const activityDate = new Date(activity.created_at);
             return activityDate >= dateRange.start && activityDate <= dateRange.end;
         });
     }, [activities, dateRange]);
@@ -388,13 +389,13 @@ const AdvancedAnalytics = () => {
 
         // Filter sales for previous period
         const previousPeriodSales = sales.filter(sale => {
-            const saleDate = new Date(sale.createdAt);
+            const saleDate = new Date(sale.created_at);
             return saleDate >= previousStart && saleDate <= previousEnd;
         });
 
         // Calculate metrics for comparison
         const calculateMetrics = (salesData: Sale[]) => {
-            const totalRevenue = salesData.reduce((sum, sale) => sum + parseFloat(sale.totalAmount || '0'), 0);
+            const totalRevenue = salesData.reduce((sum, sale) => sum + Number(sale.total_amount || '0'), 0);
             const totalItems = salesData.length;
             const avgOrderValue = totalItems > 0 ? totalRevenue / totalItems : 0;
 
@@ -451,7 +452,7 @@ const AdvancedAnalytics = () => {
 
         // Process activities to track stock movements
         filteredActivities.forEach(activity => {
-            const activityDate = format(new Date(activity.createdAt), 'yyyy-MM-dd');
+            const activityDate = format(new Date(activity.created_at), 'yyyy-MM-dd');
             const current = movementMap.get(activityDate) || {additions: 0, removals: 0};
 
             if (activity.type === 'stock_added') {
@@ -480,14 +481,17 @@ const AdvancedAnalytics = () => {
     const categoryRevenue = useMemo(() => {
         const revenueMap = new Map<number, number>();
         filteredSales.forEach(sale => {
-            const product = productsById.get(sale.productId);
-            if (product?.categoryId) {
-                const current = revenueMap.get(product.categoryId) || 0;
-                revenueMap.set(product.categoryId, current + parseFloat(sale.totalAmount));
-            }
+            const items = saleItems[sale.id] || [];
+            items.forEach(item => {
+                const product = productsById.get(item.product_id);
+                if (product?.category && typeof product.category === 'number') {
+                    const current = revenueMap.get(product.category) || 0;
+                    revenueMap.set(product.category, current + Number(item.total_price));
+                }
+            });
         });
         return revenueMap;
-    }, [filteredSales, productsById]);
+    }, [filteredSales, saleItems, productsById]);
 
     // Calculate top selling products
     const topProducts = useMemo((): TopProductData[] => {
@@ -500,29 +504,29 @@ const AdvancedAnalytics = () => {
         // Count sales for each product
         const saleItemsArray = Array.isArray(saleItems) ? saleItems : Object.values(saleItems).flat();
         saleItemsArray.forEach(item => {
-            const sale = sales.find(s => s.id === item.saleId);
-            if (!sale || !productsById.has(item.productId)) return;
+            const sale = sales.find(s => s.id === item.sale_id);
+            if (!sale || !productsById.has(item.product_id)) return;
 
-            const saleDate = new Date(sale.createdAt);
+            const saleDate = new Date(sale.created_at);
             if (saleDate < dateRange.start || saleDate > dateRange.end) return;
 
-            const product = productsById.get(item.productId)!;
-            const salesCount = productSalesMap.get(item.productId);
+            const product = productsById.get(item.product_id)!;
+            const salesCount = productSalesMap.get(item.product_id);
 
             // Use sale item price or product sell price as fallback
-            const itemPrice = parseFloat(item.price || product.sellPrice || '0');
+            const itemPrice = Number(item.unit_price || product.sell_price || '0');
             const revenue = itemPrice * item.quantity;
-            const cost = parseFloat(product.buyPrice || '0') * item.quantity;
+            const cost = Number(product.buy_price || '0') * item.quantity;
             const profit = revenue - cost;
 
             if (salesCount) {
-                productSalesMap.set(item.productId, {
+                productSalesMap.set(item.product_id, {
                     sales: salesCount.sales + item.quantity,
                     revenue: salesCount.revenue + revenue,
                     profit: salesCount.profit + profit
                 });
             } else {
-                productSalesMap.set(item.productId, {
+                productSalesMap.set(item.product_id, {
                     sales: item.quantity,
                     revenue,
                     profit
@@ -944,12 +948,15 @@ const AdvancedAnalytics = () => {
                                         <ResponsiveContainer width="100%" height="100%">
                                             <RadarChart cx="50%" cy="50%" outerRadius="80%"
                                                         data={categories.map(category => {
-                                                            const categoryProducts = products.filter(p => p.categoryId === category.id);
+                                                            const categoryProducts = products.filter(p => {
+                                                                if (!p.category || typeof p.category !== 'number') return false;
+                                                                return p.category === category.id;
+                                                            });
                                                             const totalQuantity = categoryProducts.reduce((sum, product) => sum + product.quantity, 0);
                                                             const avgPrice = categoryProducts.length > 0
-                                                                ? categoryProducts.reduce((sum, product) => sum + parseFloat(product.sellPrice || '0'), 0) / categoryProducts.length
+                                                                ? categoryProducts.reduce((sum, product) => sum + Number(product.sell_price), 0) / categoryProducts.length
                                                                 : 0;
-                                                            const lowStock = categoryProducts.filter(p => p.quantity <= p.minStockLevel).length;
+                                                            const lowStock = categoryProducts.filter(p => p.quantity <= p.min_stock_level).length;
 
                                                             return {
                                                                 category: category.name,
@@ -998,10 +1005,13 @@ const AdvancedAnalytics = () => {
                                             </thead>
                                             <tbody>
                                             {products
-                                                .filter(product => product.quantity <= product.minStockLevel)
+                                                .filter(product => product.quantity <= product.min_stock_level)
                                                 .map(product => {
-                                                    const category = categories.find(c => c.id === product.categoryId);
-                                                    const stockDiff = product.quantity - product.minStockLevel;
+                                                    const category = categories.find(c => {
+                                                        if (!product.category || typeof product.category !== 'number') return false;
+                                                        return c.id === product.category;
+                                                    });
+                                                    const stockDiff = product.quantity - product.min_stock_level;
                                                     let statusClass = "bg-green-100 text-green-800";
 
                                                     if (stockDiff < 0) {
@@ -1017,7 +1027,7 @@ const AdvancedAnalytics = () => {
                                                             <td className="px-6 py-4">{product.sku}</td>
                                                             <td className="px-6 py-4">{category?.name || 'Unknown'}</td>
                                                             <td className="px-6 py-4">{product.quantity}</td>
-                                                            <td className="px-6 py-4">{product.minStockLevel}</td>
+                                                            <td className="px-6 py-4">{product.min_stock_level}</td>
                                                             <td className="px-6 py-4">
                                   <span
                                       className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusClass}`}>
@@ -1028,7 +1038,7 @@ const AdvancedAnalytics = () => {
                                                     );
                                                 })
                                             }
-                                            {products.filter(product => product.quantity <= product.minStockLevel).length === 0 && (
+                                            {products.filter(product => product.quantity <= product.min_stock_level).length === 0 && (
                                                 <tr className="bg-white border-b">
                                                     <td colSpan={6} className="px-6 py-4 text-center text-gray-500">
                                                         No low stock products found
@@ -1141,7 +1151,11 @@ const AdvancedAnalytics = () => {
                                             </thead>
                                             <tbody>
                                             {topProducts.map(product => {
-                                                const category = categories.find(c => c.id === productsById.get(product.id)?.categoryId);
+                                                const category = categories.find(c => {
+                                                    const productCategory = productsById.get(product.id)?.category;
+                                                    if (!productCategory || typeof productCategory !== 'number') return false;
+                                                    return c.id === productCategory;
+                                                });
                                                 const margin = product.revenue > 0
                                                     ? (product.profit / product.revenue) * 100
                                                     : 0;

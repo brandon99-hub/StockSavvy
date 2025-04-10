@@ -20,7 +20,7 @@ const SalesPage = () => {
 
   // Fetch sale items
   const { data: saleItems = {}, isLoading: isSaleItemsLoading } = useQuery<Record<number, SaleItem[]>>({
-    queryKey: ['sales/items/'],
+    queryKey: ['/api/sales-items/'],
   });
 
   // Fetch products for product lookup

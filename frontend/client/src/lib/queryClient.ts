@@ -18,11 +18,17 @@ async function handleResponse(response: Response) {
     if (response.status === 401) {
       // Clear token and redirect to login
       localStorage.removeItem('token');
+      localStorage.removeItem('user');
       window.location.href = '/login';
       throw new Error('Unauthorized');
     }
+    
+    if (response.status === 403) {
+      throw new Error('Forbidden: You do not have permission to access this resource');
+    }
+    
     const error = await response.json().catch(() => ({}));
-    throw new Error(error.message || 'An error occurred');
+    throw new Error(error.message || `Error: ${response.status} ${response.statusText}`);
   }
   return response.json();
 }
@@ -35,6 +41,8 @@ export const apiRequest = async (url: string, options: RequestInit = {}) => {
   if (token && typeof token !== 'string') {
     console.error('Invalid token format:', token);
     localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    window.location.href = '/login';
     throw new Error('Invalid token format');
   }
 
@@ -44,12 +52,17 @@ export const apiRequest = async (url: string, options: RequestInit = {}) => {
     ...options.headers,
   };
   
-  const response = await fetch(`${API_BASE_URL}${url}`, {
-    ...options,
-    headers,
-  });
-  
-  return handleResponse(response);
+  try {
+    const response = await fetch(`${API_BASE_URL}${url}`, {
+      ...options,
+      headers,
+    });
+    
+    return handleResponse(response);
+  } catch (error) {
+    console.error(`API request failed: ${url}`, error);
+    throw error;
+  }
 };
 
 // Create a query client instance
@@ -58,6 +71,8 @@ export const queryClient = new QueryClient({
     queries: {
       retry: 1,
       refetchOnWindowFocus: false,
+      staleTime: 5 * 60 * 1000, // 5 minutes
+      gcTime: 30 * 60 * 1000, // 30 minutes
     },
   },
 });

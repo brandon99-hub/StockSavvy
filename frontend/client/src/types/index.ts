@@ -9,19 +9,21 @@ export interface User {
 export interface Category {
   id: number;
   name: string;
+  description: string;
   created_at: string;
+  updated_at: string;
 }
 
 export interface Product {
   id: number;
   name: string;
   sku: string;
-  description?: string;
-  category?: Category;
+  description: string;
+  category: number;
   quantity: number;
   min_stock_level: number;
-  buy_price: number;
-  sell_price: number;
+  buy_price: string;
+  sell_price: string;
   created_at: string;
   updated_at: string;
 }

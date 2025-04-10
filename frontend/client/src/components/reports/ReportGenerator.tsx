@@ -58,7 +58,7 @@ const ReportGenerator = () => {
   });
 
   const { data: profitData = [], isLoading: isProfitLoading } = useQuery<any[]>({
-    queryKey: ['/api/reports/profit', { start: dateRange.start.toISOString(), end: dateRange.end.toISOString() }],
+    queryKey: ['/api/reports/profit/', { start: dateRange.start.toISOString(), end: dateRange.end.toISOString() }],
   });
 
   const isLoading = isProductsLoading || isCategoriesLoading || isSalesLoading || isSaleItemsLoading || isProfitLoading;
