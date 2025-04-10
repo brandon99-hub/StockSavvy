@@ -74,9 +74,10 @@ const Dashboard = () => {
                     return [];
                 }
                 
+                // Ensure we have the full date-time string
                 return response.map(item => ({
-                    date: new Date(item.date).toISOString().split('T')[0],
-                    amount: Number(item.amount || 0)
+                    date: new Date(item.date).toISOString(),
+                    amount: parseFloat(item.amount) || 0
                 })).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
             } catch (error) {
                 console.error('Error fetching sales data:', error);
@@ -97,12 +98,17 @@ const Dashboard = () => {
                     return [];
                 }
                 
-                return response.map(item => ({
-                    id: item.id,
-                    name: item.name,
-                    percentage: Number(item.percentage || 0),
-                    value: Number(item.value || 0)
-                }));
+                const total = response.reduce((sum, item) => sum + (parseFloat(item.value) || 0), 0);
+                
+                return response.map(item => {
+                    const value = parseFloat(item.value) || 0;
+                    return {
+                        id: item.id,
+                        name: item.name,
+                        value: value,
+                        percentage: total > 0 ? (value / total) * 100 : 0
+                    };
+                });
             } catch (error) {
                 console.error('Error fetching category data:', error);
                 return [];
