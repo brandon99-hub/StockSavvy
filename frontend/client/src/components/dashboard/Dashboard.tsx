@@ -1,5 +1,5 @@
 // @ts-ignore
-import React from "react";
+import React, {useState} from "react";
 import {useQuery, useQueryClient} from "@tanstack/react-query";
 import {Product, Activity, Category} from "../../types";
 import StatCard from "./StatCard";
@@ -48,6 +48,7 @@ interface DashboardStats {
 
 const Dashboard = () => {
     const queryClient = useQueryClient();
+    const [view, setView] = useState<'day' | 'week' | 'month'>('day');
 
     // Dashboard stats query
     const {data: stats, isLoading: isStatsLoading} = useQuery<DashboardStats>({
@@ -95,8 +96,8 @@ const Dashboard = () => {
         queryFn: async () => {
             try {
                 const response = await apiRequest('/api/dashboard/category-chart/');
-                // Check if response is an object with a data/results property
-                const categoryArray = response?.data || response?.results || response;
+                // The API returns { items: [], summary: {} }
+                const categoryArray = response?.items || [];
                 
                 if (!Array.isArray(categoryArray)) {
                     console.error('Category data structure:', response);
@@ -105,15 +106,12 @@ const Dashboard = () => {
                 
                 const total = categoryArray.reduce((sum, item) => sum + (parseFloat(item.value) || 0), 0);
                 
-                return categoryArray.map(item => {
-                    const value = parseFloat(item.value) || 0;
-                    return {
-                        id: item.id,
-                        name: item.name,
-                        value: value,
-                        percentage: total > 0 ? (value / total) * 100 : 0
-                    };
-                });
+                return categoryArray.map(item => ({
+                    id: item.id || 0,
+                    name: item.name || 'Unknown',
+                    value: parseFloat(item.value) || 0,
+                    percentage: total > 0 ? ((parseFloat(item.value) || 0) / total) * 100 : 0
+                }));
             } catch (error) {
                 console.error('Error fetching category data:', error);
                 return [];
@@ -241,7 +239,44 @@ const Dashboard = () => {
                             <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
                         </div>
                     ) : (
-                        <SalesChart data={salesData || []}/>
+                        <>
+                            <div className="flex justify-end space-x-2 mb-4">
+                                <button 
+                                    type="button"
+                                    className={`px-3 py-1.5 text-sm font-medium rounded transition-colors ${
+                                        view === 'day' 
+                                            ? 'bg-blue-50 text-blue-600' 
+                                            : 'text-gray-600 hover:bg-gray-100'
+                                    }`}
+                                    onClick={() => setView('day')}
+                                >
+                                    Day
+                                </button>
+                                <button 
+                                    type="button"
+                                    className={`px-3 py-1.5 text-sm font-medium rounded transition-colors ${
+                                        view === 'week' 
+                                            ? 'bg-blue-50 text-blue-600' 
+                                            : 'text-gray-600 hover:bg-gray-100'
+                                    }`}
+                                    onClick={() => setView('week')}
+                                >
+                                    Week
+                                </button>
+                                <button 
+                                    type="button"
+                                    className={`px-3 py-1.5 text-sm font-medium rounded transition-colors ${
+                                        view === 'month' 
+                                            ? 'bg-blue-50 text-blue-600' 
+                                            : 'text-gray-600 hover:bg-gray-100'
+                                    }`}
+                                    onClick={() => setView('month')}
+                                >
+                                    Month
+                                </button>
+                            </div>
+                            <SalesChart data={salesData || []} view={view} />
+                        </>
                     )}
                 </div>
                 <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
@@ -250,7 +285,7 @@ const Dashboard = () => {
                             <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
                         </div>
                     ) : (
-                        <CategoryChart data={categoryData || []}/>
+                        <CategoryChart data={categoryData || []} />
                     )}
                 </div>
             </div>
