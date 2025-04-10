@@ -62,11 +62,14 @@ const Dashboard = () => {
         });
 
     // Sales chart data query
-    const {data: salesData, isLoading: isSalesDataLoading} = useQuery<
+    const {data: salesData = [], isLoading: isSalesDataLoading} = useQuery<
         SalesChartData[]
     >({
         queryKey: ["/api/dashboard/sales-chart/"],
-        queryFn: () => apiRequest('/api/dashboard/sales-chart/')
+        queryFn: async () => {
+            const response = await apiRequest('/api/dashboard/sales-chart/');
+            return Array.isArray(response) ? response : [];
+        }
     });
 
     // Category chart data query

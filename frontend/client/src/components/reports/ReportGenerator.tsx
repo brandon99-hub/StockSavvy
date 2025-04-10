@@ -82,27 +82,48 @@ const ReportGenerator = () => {
   // Fetch data based on report type
   const { data: products = [], isLoading: isProductsLoading } = useQuery<Product[]>({
     queryKey: ['/api/products'],
-    queryFn: () => apiRequest('/api/products/')
+    queryFn: async () => {
+      const response = await apiRequest('/api/products/');
+      return Array.isArray(response) ? response : [];
+    }
   });
 
   const { data: categories = [], isLoading: isCategoriesLoading } = useQuery<Category[]>({
     queryKey: ['/api/categories'],
-    queryFn: () => apiRequest('/api/categories/')
+    queryFn: async () => {
+      const response = await apiRequest('/api/categories/');
+      return Array.isArray(response) ? response : [];
+    }
   });
 
   const { data: sales = [], isLoading: isSalesLoading } = useQuery<Sale[]>({
     queryKey: ['/api/sales'],
-    queryFn: () => apiRequest('/api/sales/')
+    queryFn: async () => {
+      const response = await apiRequest('/api/sales/');
+      return Array.isArray(response) ? response : [];
+    }
   });
 
   const { data: saleItems = {}, isLoading: isSaleItemsLoading } = useQuery<Record<number, SaleItem[]>>({
     queryKey: ['/api/sales/items'],
-    queryFn: () => apiRequest('/api/sales/items/')
+    queryFn: async () => {
+      const response = await apiRequest('/api/sales/items/');
+      return typeof response === 'object' && response !== null ? response : {};
+    }
   });
 
   const { data: profitData = [], isLoading: isProfitLoading } = useQuery<ProfitData[]>({
-    queryKey: ['/api/reports/profit/', { start: dateRange.start.toISOString(), end: dateRange.end.toISOString() }],
-    queryFn: () => apiRequest(`/api/reports/profit/?start=${format(dateRange.start, 'yyyy-MM-dd')}&end=${format(dateRange.end, 'yyyy-MM-dd')}`)
+    queryKey: ['/api/reports/profit', dateRange],
+    queryFn: async () => {
+      const response = await apiRequest('/api/reports/profit/', {
+        method: 'GET',
+        params: {
+          start_date: format(dateRange.start, 'yyyy-MM-dd'),
+          end_date: format(dateRange.end, 'yyyy-MM-dd')
+        }
+      });
+      return Array.isArray(response) ? response : [];
+    }
   });
 
   const isLoading = isProductsLoading || isCategoriesLoading || isSalesLoading || isSaleItemsLoading || isProfitLoading;
