@@ -30,6 +30,7 @@ interface CategoryChartData {
     id: number;
     name: string;
     percentage: number;
+    value: number;
 }
 
 interface DashboardStats {
@@ -66,33 +67,70 @@ const Dashboard = () => {
     const {data: salesData = [], isLoading: isSalesDataLoading} = useQuery<SalesChartData[]>({
         queryKey: ["/api/dashboard/sales-chart/"],
         queryFn: async () => {
-            const response = await apiRequest('/api/dashboard/sales-chart/');
-            if (!Array.isArray(response)) return [];
-            
-            return response.map(item => ({
-                date: new Date(item.date).toISOString().split('T')[0],
-                amount: Number(item.amount || 0)
-            }));
-        }
+            try {
+                const response = await apiRequest('/api/dashboard/sales-chart/');
+                if (!Array.isArray(response)) {
+                    console.error('Sales data is not an array:', response);
+                    return [];
+                }
+                
+                return response.map(item => ({
+                    date: new Date(item.date).toISOString().split('T')[0],
+                    amount: Number(item.amount || 0)
+                })).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+            } catch (error) {
+                console.error('Error fetching sales data:', error);
+                return [];
+            }
+        },
+        refetchInterval: 60000
     });
 
     // Category chart data query
-    const {data: categoryData, isLoading: isCategoryDataLoading} = useQuery<
-        CategoryChartData[]
-    >({
+    const {data: categoryData = [], isLoading: isCategoryDataLoading} = useQuery<CategoryChartData[]>({
         queryKey: ["/api/dashboard/category-chart/"],
-        queryFn: () => apiRequest('/api/dashboard/category-chart/')
+        queryFn: async () => {
+            try {
+                const response = await apiRequest('/api/dashboard/category-chart/');
+                if (!Array.isArray(response)) {
+                    console.error('Category data is not an array:', response);
+                    return [];
+                }
+                
+                return response.map(item => ({
+                    id: item.id,
+                    name: item.name,
+                    percentage: Number(item.percentage || 0),
+                    value: Number(item.value || 0)
+                }));
+            } catch (error) {
+                console.error('Error fetching category data:', error);
+                return [];
+            }
+        },
+        refetchInterval: 60000
     });
 
     // Recent activities query
-    const {data: activities, isLoading: isActivitiesLoading} = useQuery<
-        Activity[]
-    >({
+    const {data: activities = [], isLoading: isActivitiesLoading} = useQuery<Activity[]>({
         queryKey: ["/api/activities/"],
-        queryFn: () => apiRequest('/api/activities/')
+        queryFn: async () => {
+            try {
+                const response = await apiRequest('/api/activities/');
+                if (!Array.isArray(response)) {
+                    console.error('Activities data is not an array:', response);
+                    return [];
+                }
+                return response;
+            } catch (error) {
+                console.error('Error fetching activities:', error);
+                return [];
+            }
+        },
+        refetchInterval: 30000
     });
 
-    const {data: categories} = useQuery<Category[]>({
+    const {data: categories = []} = useQuery<Category[]>({
         queryKey: ['/api/categories/'],
         queryFn: () => apiRequest('/api/categories/')
     });
@@ -212,7 +250,7 @@ const Dashboard = () => {
                     products={lowStockData?.items || []}
                     categories={categories || []}
                     onReorder={() =>
-                        queryClient.invalidateQueries({queryKey: ["/api/products"]})
+                        queryClient.invalidateQueries({ queryKey: ["/api/products"] })
                     }
                 />
                 <RecentActivityTable
