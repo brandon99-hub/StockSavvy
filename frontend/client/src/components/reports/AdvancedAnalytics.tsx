@@ -64,7 +64,7 @@ import {
 } from 'recharts';
 import {exportInventoryToPDF, exportSalesToPDF, exportProfitToPDF, exportToCSV} from '../../lib/exportUtils';
 import {Product, Sale, Category, Activity} from '../../types';
-import axios from 'axios';
+import { apiRequest } from '../../lib/queryClient';
 
 // Custom type definitions for analytics data
 interface SalesChartData {
@@ -175,67 +175,27 @@ const AdvancedAnalytics = () => {
     // Fetch data
     const {data: products = [], isLoading: isProductsLoading} = useQuery<Product[]>({
         queryKey: ['/api/products/'],
-        queryFn: async () => {
-            const token = localStorage.getItem('token');
-            const response = await axios.get('/api/products/', {
-                headers: {
-                    Authorization: token
-                }
-            });
-            return response.data;
-        }
+        queryFn: () => apiRequest('/api/products/')
     });
 
     const {data: categories = [], isLoading: isCategoriesLoading} = useQuery<Category[]>({
         queryKey: ['/api/categories/'],
-        queryFn: async () => {
-            const token = localStorage.getItem('token');
-            const response = await axios.get('/api/categories/', {
-                headers: {
-                    Authorization: token
-                }
-            });
-            return response.data;
-        }
+        queryFn: () => apiRequest('/api/categories/')
     });
 
     const {data: sales = [], isLoading: isSalesLoading} = useQuery<Sale[]>({
         queryKey: ['/api/sales/'],
-        queryFn: async () => {
-            const token = localStorage.getItem('token');
-            const response = await axios.get('/api/sales/', {
-                headers: {
-                    Authorization: token
-                }
-            });
-            return response.data;
-        }
+        queryFn: () => apiRequest('/api/sales/')
     });
 
     const {data: activities = [], isLoading: isActivitiesLoading} = useQuery<Activity[]>({
         queryKey: ['/api/activities/'],
-        queryFn: async () => {
-            const token = localStorage.getItem('token');
-            const response = await axios.get('/api/activities/', {
-                headers: {
-                    Authorization: token
-                }
-            });
-            return response.data;
-        }
+        queryFn: () => apiRequest('/api/activities/')
     });
 
     const {data: saleItems = [], isLoading: isSaleItemsLoading} = useQuery<any[]>({
         queryKey: ['/api/sales/items/'],
-        queryFn: async () => {
-            const token = localStorage.getItem('token');
-            const response = await axios.get('/api/sales/items/', {
-                headers: {
-                    Authorization: token
-                }
-            });
-            return response.data;
-        }
+        queryFn: () => apiRequest('/api/sales/items/')
     });
 
     const {data: salesChartData = [], isLoading: isSalesChartLoading} = useQuery<SalesChartData[]>({
@@ -245,19 +205,7 @@ const AdvancedAnalytics = () => {
                 end: format(dateRange.end, 'yyyy-MM-dd')
             }
         ],
-        queryFn: async () => {
-            const token = localStorage.getItem('token');
-            const response = await axios.get('/api/dashboard/sales-chart/', {
-                headers: {
-                    Authorization: token
-                },
-                params: {
-                    start: format(dateRange.start, 'yyyy-MM-dd'),
-                    end: format(dateRange.end, 'yyyy-MM-dd')
-                }
-            });
-            return response.data;
-        }
+        queryFn: () => apiRequest(`/api/dashboard/sales-chart/?start=${format(dateRange.start, 'yyyy-MM-dd')}&end=${format(dateRange.end, 'yyyy-MM-dd')}`)
     });
 
     const {data: categoryChartData = [], isLoading: isCategoryChartLoading} = useQuery<CategoryChartData[]>({
@@ -267,19 +215,7 @@ const AdvancedAnalytics = () => {
                 end: format(dateRange.end, 'yyyy-MM-dd')
             }
         ],
-        queryFn: async () => {
-            const token = localStorage.getItem('token');
-            const response = await axios.get('/api/dashboard/category-chart/', {
-                headers: {
-                    Authorization: token
-                },
-                params: {
-                    start: format(dateRange.start, 'yyyy-MM-dd'),
-                    end: format(dateRange.end, 'yyyy-MM-dd')
-                }
-            });
-            return response.data;
-        }
+        queryFn: () => apiRequest(`/api/dashboard/category-chart/?start=${format(dateRange.start, 'yyyy-MM-dd')}&end=${format(dateRange.end, 'yyyy-MM-dd')}`)
     });
 
     const {data: dashboardStats = null, isLoading: isStatsLoading} = useQuery<DashboardStats>({
@@ -289,24 +225,7 @@ const AdvancedAnalytics = () => {
                 end: format(dateRange.end, 'yyyy-MM-dd')
             }
         ],
-        queryFn: async () => {
-            const token = localStorage.getItem('token');
-            const response = await axios.get('/api/dashboard/stats/', {
-                headers: {
-                    Authorization: token
-                },
-                params: {
-                    start: format(dateRange.start, 'yyyy-MM-dd'),
-                    end: format(dateRange.end, 'yyyy-MM-dd')
-                }
-            });
-            return response.data;
-        },
-        select: (data) => ({
-            ...data,
-            totalRevenue: data?.totalRevenue || calculateTotalRevenue(filteredSales),
-            averageOrderValue: data?.averageOrderValue || calculateAOV(filteredSales)
-        })
+        queryFn: () => apiRequest(`/api/dashboard/stats/?start=${format(dateRange.start, 'yyyy-MM-dd')}&end=${format(dateRange.end, 'yyyy-MM-dd')}`)
     });
 
     // Add calculation functions
@@ -327,19 +246,7 @@ const AdvancedAnalytics = () => {
                 end: format(dateRange.end, 'yyyy-MM-dd')
             }
         ],
-        queryFn: async () => {
-            const token = localStorage.getItem('token');
-            const response = await axios.get('/api/reports/profit/', {
-                headers: {
-                    Authorization: `Bearer ${token}`
-                },
-                params: {
-                    start: format(dateRange.start, 'yyyy-MM-dd'),
-                    end: format(dateRange.end, 'yyyy-MM-dd')
-                }
-            });
-            return response.data;
-        }
+        queryFn: () => apiRequest(`/api/reports/profit/?start=${format(dateRange.start, 'yyyy-MM-dd')}&end=${format(dateRange.end, 'yyyy-MM-dd')}`)
     });
 
     // Check if all data is loaded

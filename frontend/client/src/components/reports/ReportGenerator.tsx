@@ -102,16 +102,7 @@ const ReportGenerator = () => {
 
   const { data: profitData = [], isLoading: isProfitLoading } = useQuery<ProfitData[]>({
     queryKey: ['/api/reports/profit/', { start: dateRange.start.toISOString(), end: dateRange.end.toISOString() }],
-    queryFn: () => apiRequest('/api/reports/profit/', {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        start: format(dateRange.start, 'yyyy-MM-dd'),
-        end: format(dateRange.end, 'yyyy-MM-dd')
-      })
-    })
+    queryFn: () => apiRequest(`/api/reports/profit/?start=${format(dateRange.start, 'yyyy-MM-dd')}&end=${format(dateRange.end, 'yyyy-MM-dd')}`)
   });
 
   const isLoading = isProductsLoading || isCategoriesLoading || isSalesLoading || isSaleItemsLoading || isProfitLoading;
