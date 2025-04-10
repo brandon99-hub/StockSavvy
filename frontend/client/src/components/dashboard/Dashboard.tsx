@@ -69,13 +69,15 @@ const Dashboard = () => {
         queryFn: async () => {
             try {
                 const response = await apiRequest('/api/dashboard/sales-chart/');
-                if (!Array.isArray(response)) {
-                    console.error('Sales data is not an array:', response);
+                // Check if response is an object with a data/results property
+                const salesArray = response?.data || response?.results || response;
+                
+                if (!Array.isArray(salesArray)) {
+                    console.error('Sales data structure:', response);
                     return [];
                 }
                 
-                // Ensure we have the full date-time string
-                return response.map(item => ({
+                return salesArray.map(item => ({
                     date: new Date(item.date).toISOString(),
                     amount: parseFloat(item.amount) || 0
                 })).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -93,14 +95,17 @@ const Dashboard = () => {
         queryFn: async () => {
             try {
                 const response = await apiRequest('/api/dashboard/category-chart/');
-                if (!Array.isArray(response)) {
-                    console.error('Category data is not an array:', response);
+                // Check if response is an object with a data/results property
+                const categoryArray = response?.data || response?.results || response;
+                
+                if (!Array.isArray(categoryArray)) {
+                    console.error('Category data structure:', response);
                     return [];
                 }
                 
-                const total = response.reduce((sum, item) => sum + (parseFloat(item.value) || 0), 0);
+                const total = categoryArray.reduce((sum, item) => sum + (parseFloat(item.value) || 0), 0);
                 
-                return response.map(item => {
+                return categoryArray.map(item => {
                     const value = parseFloat(item.value) || 0;
                     return {
                         id: item.id,
