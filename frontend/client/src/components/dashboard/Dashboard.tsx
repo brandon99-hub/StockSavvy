@@ -96,47 +96,23 @@ const Dashboard = () => {
         queryFn: async () => {
             try {
                 const response = await apiRequest('/api/dashboard/category-chart/');
-                console.log('Category API response:', response);
+                console.log('Raw Category API response:', JSON.stringify(response, null, 2));
                 
                 if (!Array.isArray(response)) {
                     console.error('Category data is not an array:', response);
                     return [];
                 }
                 
-                // Transform the data
-                const validCategories = response
-                    .filter(item => item && typeof item === 'object')
-                    .map(item => {
-                        // Try to get the value from different possible fields
-                        const value = parseFloat(
-                            item.sales_total || // Try sales_total first
-                            item.total || // Then try total
-                            item.value || // Then try value
-                            item.amount || // Then try amount
-                            '0' // Default to 0 if none found
-                        );
-                        
-                        console.log('Category item:', item, 'Parsed value:', value); // Debug log
-                        
-                        return {
-                            id: item.id || 0,
-                            name: item.name || 'Unnamed Category',
-                            value: value,
-                            percentage: 0 // Will be calculated below
-                        };
-                    })
-                    .filter(item => item.value > 0); // Only include categories with values > 0
-                
-                const total = validCategories.reduce((sum, item) => sum + item.value, 0);
-                
-                const result = validCategories.map(item => ({
-                    ...item,
-                    percentage: total > 0 ? (item.value / total) * 100 : 0
+                // Transform the data to match the CategoryChartData interface
+                const validCategories = response.map(item => ({
+                    id: item.id,
+                    name: item.name,
+                    value: parseFloat(item.total_value) || 0,
+                    percentage: item.percentage || 0
                 }));
 
-                console.log('Processed category data:', result); // Debug log
-                
-                return result;
+                console.log('Processed category data:', validCategories);
+                return validCategories;
             } catch (error) {
                 console.error('Error fetching category data:', error);
                 return [];
