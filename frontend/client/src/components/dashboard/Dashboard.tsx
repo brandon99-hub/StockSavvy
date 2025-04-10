@@ -8,6 +8,7 @@ import CategoryChart from "./CategoryChart";
 import LowStockTable from "./LowStockTable";
 import RecentActivityTable from "./RecentActivityTable";
 import {Skeleton} from "../ui/skeleton";
+import { apiRequest } from "../../lib/queryClient";
 
 // Response type interfaces
 interface LowStockResponse {
@@ -49,6 +50,7 @@ const Dashboard = () => {
     // Dashboard stats query
     const {data: stats, isLoading: isStatsLoading} = useQuery<DashboardStats>({
         queryKey: ["/api/dashboard/stats/"],
+        queryFn: () => apiRequest('/api/dashboard/stats/'),
         refetchInterval: 60000,
     });
 
@@ -56,6 +58,7 @@ const Dashboard = () => {
     const {data: lowStockData, isLoading: isLowStockLoading} =
         useQuery<LowStockResponse>({
             queryKey: ["/api/products/low-stock/"],
+            queryFn: () => apiRequest('/api/products/low-stock/')
         });
 
     // Sales chart data query
@@ -63,6 +66,7 @@ const Dashboard = () => {
         SalesChartData[]
     >({
         queryKey: ["/api/dashboard/sales-chart/"],
+        queryFn: () => apiRequest('/api/dashboard/sales-chart/')
     });
 
     // Category chart data query
@@ -70,6 +74,7 @@ const Dashboard = () => {
         CategoryChartData[]
     >({
         queryKey: ["/api/dashboard/category-chart/"],
+        queryFn: () => apiRequest('/api/dashboard/category-chart/')
     });
 
     // Recent activities query
@@ -77,9 +82,12 @@ const Dashboard = () => {
         Activity[]
     >({
         queryKey: ["/api/activities/"],
+        queryFn: () => apiRequest('/api/activities/')
     });
+
     const {data: categories} = useQuery<Category[]>({
         queryKey: ['/api/categories/'],
+        queryFn: () => apiRequest('/api/categories/')
     });
 
     // Loading state

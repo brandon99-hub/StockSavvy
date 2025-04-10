@@ -7,6 +7,7 @@ import SalesList from '../components/sales/SalesList';
 import CreateSaleForm from '../components/sales/CreateSaleForm';
 import { Sale, SaleItem, Product, User } from '../types';
 import { useAuth } from '../lib/auth';
+import { apiRequest } from '../lib/queryClient';
 
 const SalesPage = () => {
   const [activeTab, setActiveTab] = useState<string>('list');
@@ -16,21 +17,25 @@ const SalesPage = () => {
   // Fetch sales
   const { data: sales = [], isLoading: isSalesLoading } = useQuery<Sale[]>({
     queryKey: ['/api/sales/'],
+    queryFn: () => apiRequest('/api/sales/')
   });
 
   // Fetch sale items
   const { data: saleItems = {}, isLoading: isSaleItemsLoading } = useQuery<Record<number, SaleItem[]>>({
     queryKey: ['/api/sales-items/'],
+    queryFn: () => apiRequest('/api/sales-items/')
   });
 
   // Fetch products for product lookup
   const { data: products = [], isLoading: isProductsLoading } = useQuery<Product[]>({
     queryKey: ['/api/products/'],
+    queryFn: () => apiRequest('/api/products/')
   });
 
   // Fetch users for user lookup
   const { data: users = [], isLoading: isUsersLoading } = useQuery<User[]>({
     queryKey: ['/api/users/'],
+    queryFn: () => apiRequest('/api/users/')
   });
 
   const isLoading = isSalesLoading || isSaleItemsLoading || isProductsLoading || isUsersLoading;

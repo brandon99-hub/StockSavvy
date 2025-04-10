@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import {
@@ -30,7 +30,46 @@ import {
   ResponsiveContainer
 } from 'recharts';
 import { exportInventoryToPDF, exportSalesToPDF, exportProfitToPDF, exportToCSV } from '../../lib/exportUtils';
-import { Product, Sale, Category } from '../../../shared/schema';
+import { apiRequest } from '../../lib/queryClient';
+
+// Define types for our data
+interface Product {
+  id: number;
+  name: string;
+  category_id: number;
+  price: number;
+  cost: number;
+  quantity: number;
+  reorder_level: number;
+}
+
+interface Category {
+  id: number;
+  name: string;
+}
+
+interface Sale {
+  id: number;
+  date: string;
+  total_amount: number;
+  items: SaleItem[];
+}
+
+interface SaleItem {
+  id: number;
+  sale_id: number;
+  product_id: number;
+  quantity: number;
+  price: number;
+  cost: number;
+}
+
+interface ProfitData {
+  date: string;
+  revenue: number;
+  cost: number;
+  profit: number;
+}
 
 const ReportGenerator = () => {
   const [reportType, setReportType] = useState<'inventory' | 'sales' | 'profit'>('inventory');
@@ -43,22 +82,36 @@ const ReportGenerator = () => {
   // Fetch data based on report type
   const { data: products = [], isLoading: isProductsLoading } = useQuery<Product[]>({
     queryKey: ['/api/products'],
+    queryFn: () => apiRequest('/api/products/')
   });
 
   const { data: categories = [], isLoading: isCategoriesLoading } = useQuery<Category[]>({
     queryKey: ['/api/categories'],
+    queryFn: () => apiRequest('/api/categories/')
   });
 
   const { data: sales = [], isLoading: isSalesLoading } = useQuery<Sale[]>({
     queryKey: ['/api/sales'],
+    queryFn: () => apiRequest('/api/sales/')
   });
 
-  const { data: saleItems = {}, isLoading: isSaleItemsLoading } = useQuery<Record<number, any[]>>({
+  const { data: saleItems = {}, isLoading: isSaleItemsLoading } = useQuery<Record<number, SaleItem[]>>({
     queryKey: ['/api/sales/items'],
+    queryFn: () => apiRequest('/api/sales/items/')
   });
 
-  const { data: profitData = [], isLoading: isProfitLoading } = useQuery<any[]>({
+  const { data: profitData = [], isLoading: isProfitLoading } = useQuery<ProfitData[]>({
     queryKey: ['/api/reports/profit/', { start: dateRange.start.toISOString(), end: dateRange.end.toISOString() }],
+    queryFn: () => apiRequest('/api/reports/profit/', {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        start: format(dateRange.start, 'yyyy-MM-dd'),
+        end: format(dateRange.end, 'yyyy-MM-dd')
+      })
+    })
   });
 
   const isLoading = isProductsLoading || isCategoriesLoading || isSalesLoading || isSaleItemsLoading || isProfitLoading;
@@ -78,25 +131,25 @@ const ReportGenerator = () => {
   // Generate inventory report data
   const inventoryData = products.map(product => ({
     ...product,
-    categoryName: product.categoryId ? categoryMap[product.categoryId] : 'Uncategorized',
+    categoryName: product.category_id ? categoryMap[product.category_id] : 'Uncategorized',
     status: product.quantity <= 0 ? 'Out of Stock' :
-            product.quantity <= product.minStockLevel ? 'Low Stock' : 'In Stock',
-    value: Number(product.buyPrice) * product.quantity
+            product.quantity <= product.reorder_level ? 'Low Stock' : 'In Stock',
+    value: Number(product.price) * product.quantity
   }));
 
   // Generate sales report data for chart
   const filteredSales = sales.filter(sale => {
-    const saleDate = new Date(sale.saleDate);
+    const saleDate = new Date(sale.date);
     return saleDate >= dateRange.start && saleDate <= dateRange.end;
   });
 
   // Group sales by date for chart
   const salesByDate = filteredSales.reduce((acc, sale) => {
-    const dateStr = format(new Date(sale.saleDate), 'yyyy-MM-dd');
+    const dateStr = format(new Date(sale.date), 'yyyy-MM-dd');
     if (!acc[dateStr]) {
       acc[dateStr] = { date: dateStr, revenue: 0, transactions: 0 };
     }
-    acc[dateStr].revenue += Number(sale.totalAmount);
+    acc[dateStr].revenue += Number(sale.total_amount);
     acc[dateStr].transactions += 1;
     return acc;
   }, {} as Record<string, { date: string, revenue: number, transactions: number }>);
@@ -128,29 +181,29 @@ const ReportGenerator = () => {
     switch (reportType) {
       case 'inventory':
         data = inventoryData.map(item => ({
-          SKU: item.sku,
+          SKU: item.id,
           Name: item.name,
           Category: item.categoryName,
           Quantity: item.quantity,
-          'Min Stock': item.minStockLevel,
-          'Buy Price': Number(item.buyPrice).toFixed(2),
-          'Sell Price': Number(item.sellPrice).toFixed(2),
+          'Min Stock': item.reorder_level,
+          'Buy Price': Number(item.price).toFixed(2),
+          'Sell Price': Number(item.price).toFixed(2),
           Status: item.status,
-          Value: (Number(item.buyPrice) * item.quantity).toFixed(2)
+          Value: (Number(item.price) * item.quantity).toFixed(2)
         }));
         filename = 'inventory_report';
         break;
       case 'sales':
         data = filteredSales.map(sale => {
-          const saleDate = new Date(sale.saleDate);
+          const saleDate = new Date(sale.date);
           const itemCount = saleItems[sale.id]?.reduce((sum, item) => sum + item.quantity, 0) || 0;
 
           return {
             'Sale ID': sale.id,
             Date: format(saleDate, 'yyyy-MM-dd HH:mm:ss'),
-            'Total Amount': Number(sale.totalAmount).toFixed(2),
+            'Total Amount': Number(sale.total_amount).toFixed(2),
             'Items Sold': itemCount,
-            'User ID': sale.userId
+            'User ID': sale.id
           };
         });
         filename = 'sales_report';
@@ -231,7 +284,7 @@ const ReportGenerator = () => {
                 <div className="bg-white p-4 rounded-md shadow-sm">
                   <p className="text-sm text-gray-500">Low Stock Items</p>
                   <p className="text-xl font-bold text-amber-600">
-                    {products.filter(p => p.quantity > 0 && p.quantity <= p.minStockLevel).length}
+                    {products.filter(p => p.quantity > 0 && p.quantity <= p.reorder_level).length}
                   </p>
                 </div>
                 <div className="bg-white p-4 rounded-md shadow-sm">
@@ -252,8 +305,8 @@ const ReportGenerator = () => {
                   data={categories.map(cat => ({
                     name: cat.name,
                     value: products
-                      .filter(p => p.categoryId === cat.id)
-                      .reduce((sum, p) => sum + (Number(p.buyPrice) * p.quantity), 0)
+                      .filter(p => p.category_id === cat.id)
+                      .reduce((sum, p) => sum + (Number(p.price) * p.quantity), 0)
                   }))}
                   margin={{ top: 20, right: 30, left: 20, bottom: 50 }}
                 >
@@ -274,7 +327,7 @@ const ReportGenerator = () => {
                 <div className="bg-white p-4 rounded-md shadow-sm">
                   <p className="text-sm text-gray-500">Total Sales</p>
                   <p className="text-xl font-bold">
-                    KSh {filteredSales.reduce((sum, sale) => sum + Number(sale.totalAmount), 0).toFixed(2)}
+                    KSh {filteredSales.reduce((sum, sale) => sum + Number(sale.total_amount), 0).toFixed(2)}
                   </p>
                 </div>
                 <div className="bg-white p-4 rounded-md shadow-sm">
@@ -284,7 +337,7 @@ const ReportGenerator = () => {
                 <div className="bg-white p-4 rounded-md shadow-sm">
                   <p className="text-sm text-gray-500">Average Sale</p>
                   <p className="text-xl font-bold">
-                    KSh {(filteredSales.reduce((sum, sale) => sum + Number(sale.totalAmount), 0) /
+                    KSh {(filteredSales.reduce((sum, sale) => sum + Number(sale.total_amount), 0) /
                       (filteredSales.length || 1)).toFixed(2)}
                   </p>
                 </div>
