@@ -248,9 +248,19 @@ const AdvancedAnalytics = () => {
         });
     }, [activities, dateRange]);
 
+    // Calculate category revenue data with safety checks
+    const categoryRevenueData = useMemo(() => {
+        if (!Array.isArray(categoryChartData)) return [];
+        
+        return categoryChartData.map(item => ({
+            name: String(item.name || 'Unknown'),
+            value: Number(item.value || 0),
+            percentage: Number(item.percentage || 0)
+        }));
+    }, [categoryChartData]);
+
     // Format currency values
-    const formatCurrency = (value: number | undefined | null): string => {
-        if (value === undefined || value === null || isNaN(value)) return 'KSh 0.00';
+    const formatCurrency = (value: number): string => {
         return `KSh ${value.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     };
 
@@ -604,7 +614,7 @@ const AdvancedAnalytics = () => {
                                 <CardTitle>Total Revenue</CardTitle>
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-bold">{formatCurrency(metrics.totalRevenue)}</div>
+                                <div className="text-2xl font-bold">{formatCurrency(Number(stats?.totalRevenue || 0))}</div>
                             </CardContent>
                         </Card>
                         <Card>
@@ -612,7 +622,7 @@ const AdvancedAnalytics = () => {
                                 <CardTitle>Total Sales</CardTitle>
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-bold">{metrics.totalSales}</div>
+                                <div className="text-2xl font-bold">{Number(stats?.totalSales || 0)}</div>
                             </CardContent>
                         </Card>
                         <Card>
@@ -620,7 +630,11 @@ const AdvancedAnalytics = () => {
                                 <CardTitle>Average Order Value</CardTitle>
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-bold">{formatCurrency(metrics.averageOrderValue)}</div>
+                                <div className="text-2xl font-bold">
+                                    {formatCurrency(Number(stats?.totalSales || 0) > 0 
+                                        ? Number(stats?.totalRevenue || 0) / Number(stats?.totalSales || 1) 
+                                        : 0)}
+                                </div>
                             </CardContent>
                         </Card>
                     </div>
@@ -657,7 +671,7 @@ const AdvancedAnalytics = () => {
                                                 </defs>
                                                 <CartesianGrid strokeDasharray="3 3"/>
                                                 <XAxis dataKey="date"/>
-                                                <YAxis tickFormatter={(value) => `KSh ${value}`}/>
+                                                <YAxis tickFormatter={(value) => formatCurrency(value)}/>
                                                 <RechartsTooltip content={<CustomTooltip/>}/>
                                                 <Area
                                                     type="monotone"
@@ -742,7 +756,7 @@ const AdvancedAnalytics = () => {
                                         <h3 className="text-lg font-medium mb-4">Category Breakdown</h3>
                                         <div className="space-y-4">
                                             {categoryData.map((category, index) => {
-                                                const categoryTotal = categoryRevenue.get(category.id) || 0;
+                                                const categoryTotal = categoryRevenueData.find(c => c.name === category.name)?.value || 0;
                                                 return (
                                                     <div key={category.id} className="flex items-center gap-2">
                                                         <div className="w-4 h-4"
@@ -948,7 +962,7 @@ const AdvancedAnalytics = () => {
                                             >
                                                 <CartesianGrid strokeDasharray="3 3"/>
                                                 <XAxis dataKey="date"/>
-                                                <YAxis tickFormatter={(value) => `KSh ${value}`}/>
+                                                <YAxis tickFormatter={(value) => formatCurrency(value)}/>
                                                 <RechartsTooltip content={<CustomTooltip/>}/>
                                                 <Legend/>
                                                 <Line
@@ -990,7 +1004,7 @@ const AdvancedAnalytics = () => {
                                                 margin={{top: 5, right: 30, left: 20, bottom: 5}}
                                             >
                                                 <CartesianGrid strokeDasharray="3 3"/>
-                                                <XAxis type="number" tickFormatter={(value) => `KSh ${value}`}/>
+                                                <XAxis type="number" tickFormatter={(value) => formatCurrency(value)}/>
                                                 <YAxis type="category" dataKey="name" width={100}/>
                                                 <RechartsTooltip content={<CustomTooltip/>}/>
                                                 <Legend/>
