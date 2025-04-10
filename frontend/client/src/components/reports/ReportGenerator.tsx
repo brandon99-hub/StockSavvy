@@ -124,30 +124,8 @@ const ReportGenerator = () => {
     }
   });
 
-  const { data: saleItems = {}, isLoading: isSaleItemsLoading } = useQuery<Record<number, SaleItem[]>>({
-    queryKey: ['/api/sales/items'],
-    queryFn: async () => {
-      const response = await apiRequest('/api/sales/items/');
-      return typeof response === 'object' && response !== null ? response : {};
-    }
-  });
-
-  const { data: profitData = [], isLoading: isProfitLoading } = useQuery<ProfitData[]>({
-    queryKey: ['/api/reports/profit', dateRange],
-    queryFn: async () => {
-      const response = await apiRequest('/api/reports/profit/', {
-        method: 'GET',
-        params: {
-          start_date: format(dateRange.start, 'yyyy-MM-dd'),
-          end_date: format(dateRange.end, 'yyyy-MM-dd')
-        }
-      });
-      return Array.isArray(response) ? response : [];
-    }
-  });
-
   // Calculate loading state
-  const isLoading = isStatsLoading || isSalesDataLoading || isCategoryDataLoading || isLowStockLoading || isProductsLoading || isCategoriesLoading || isSalesLoading || isSaleItemsLoading || isProfitLoading;
+  const isLoading = isStatsLoading || isSalesDataLoading || isCategoryDataLoading || isLowStockLoading || isProductsLoading || isCategoriesLoading || isSalesLoading;
 
   // Transform data for reports
   const inventoryReportData = lowStockData.items.map(product => ({
@@ -217,10 +195,11 @@ const ReportGenerator = () => {
         exportInventoryToPDF(products, categoryMap);
         break;
       case 'sales':
-        exportSalesToPDF(sales, saleItems, productMap);
+        exportSalesToPDF(sales, {}, productMap);
         break;
       case 'profit':
-        exportProfitToPDF(profitData, dateRange);
+        // Use category chart data for profit report
+        exportProfitToPDF(profitReportData, dateRange);
         break;
     }
   };
@@ -248,25 +227,20 @@ const ReportGenerator = () => {
       case 'sales':
         data = filteredSales.map(sale => {
           const saleDate = new Date(sale.date);
-          const itemCount = saleItems[sale.id]?.reduce((sum, item) => sum + item.quantity, 0) || 0;
-
           return {
             'Sale ID': sale.id,
             Date: format(saleDate, 'yyyy-MM-dd HH:mm:ss'),
             'Total Amount': Number(sale.total_amount).toFixed(2),
-            'Items Sold': itemCount,
+            'Items Sold': sale.items?.length || 0,
             'User ID': sale.id
           };
         });
         filename = 'sales_report';
         break;
       case 'profit':
-        data = profitData.map(item => ({
-          Date: item.date,
-          Revenue: item.revenue.toFixed(2),
-          Cost: item.cost.toFixed(2),
-          Profit: (item.revenue - item.cost).toFixed(2),
-          'Profit Margin (%)': ((item.revenue - item.cost) / item.revenue * 100).toFixed(2)
+        data = profitReportData.map(item => ({
+          Category: item.category,
+          'Percentage': item.percentage.toFixed(2) + '%'
         }));
         filename = 'profit_report';
         break;
@@ -435,26 +409,26 @@ const ReportGenerator = () => {
                 <div className="bg-white p-4 rounded-md shadow-sm">
                   <p className="text-sm text-gray-500">Total Revenue</p>
                   <p className="text-xl font-bold">
-                    KSh {profitData.reduce((sum, day) => sum + day.revenue, 0).toFixed(2)}
+                    KSh {profitReportData.reduce((sum, day) => sum + day.revenue, 0).toFixed(2)}
                   </p>
                 </div>
                 <div className="bg-white p-4 rounded-md shadow-sm">
                   <p className="text-sm text-gray-500">Total Cost</p>
                   <p className="text-xl font-bold">
-                    KSh {profitData.reduce((sum, day) => sum + day.cost, 0).toFixed(2)}
+                    KSh {profitReportData.reduce((sum, day) => sum + day.cost, 0).toFixed(2)}
                   </p>
                 </div>
                 <div className="bg-white p-4 rounded-md shadow-sm">
                   <p className="text-sm text-gray-500">Total Profit</p>
                   <p className="text-xl font-bold text-green-600">
-                    KSh {profitData.reduce((sum, day) => sum + (day.revenue - day.cost), 0).toFixed(2)}
+                    KSh {profitReportData.reduce((sum, day) => sum + (day.revenue - day.cost), 0).toFixed(2)}
                   </p>
                 </div>
                 <div className="bg-white p-4 rounded-md shadow-sm">
                   <p className="text-sm text-gray-500">Profit Margin</p>
                   <p className="text-xl font-bold">
-                    {(profitData.reduce((sum, day) => sum + (day.revenue - day.cost), 0) /
-                      profitData.reduce((sum, day) => sum + day.revenue, 0) * 100 || 0).toFixed(2)}%
+                    {(profitReportData.reduce((sum, day) => sum + (day.revenue - day.cost), 0) /
+                      profitReportData.reduce((sum, day) => sum + day.revenue, 0) * 100 || 0).toFixed(2)}%
                   </p>
                 </div>
               </div>
@@ -466,17 +440,15 @@ const ReportGenerator = () => {
               <h3 className="font-semibold mb-2">Profit Trend</h3>
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart
-                  data={profitData}
+                  data={profitReportData}
                   margin={{ top: 20, right: 30, left: 20, bottom: 50 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" angle={-45} textAnchor="end" height={70} />
+                  <XAxis dataKey="category" angle={-45} textAnchor="end" height={70} />
                   <YAxis />
-                  <Tooltip formatter={(value) => [`KSh ${(typeof value === 'number' ? value.toFixed(2) : value)}`, 'Amount']} />
+                  <Tooltip formatter={(value) => [`${value.toFixed(2)}%`, 'Percentage']} />
                   <Legend />
-                  <Bar dataKey="revenue" fill="#3b82f6" name="Revenue" />
-                  <Bar dataKey="cost" fill="#ef4444" name="Cost" />
-                  <Bar dataKey="profit" fill="#10b981" name="Profit" />
+                  <Bar dataKey="percentage" fill="#3b82f6" name="Percentage" />
                 </BarChart>
               </ResponsiveContainer>
             </div>

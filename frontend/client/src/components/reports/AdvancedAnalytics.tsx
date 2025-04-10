@@ -172,50 +172,45 @@ const AdvancedAnalytics = () => {
     // Format date range for display
     const formattedDateRange = `${format(dateRange.start, 'MMM d, yyyy')} - ${format(dateRange.end, 'MMM d, yyyy')}`;
 
-    // Fetch data
-    const {data: products = [], isLoading: isProductsLoading} = useQuery<Product[]>({
-        queryKey: ['/api/products/'],
-        queryFn: () => apiRequest('/api/products/')
-    });
-
-    const {data: categories = [], isLoading: isCategoriesLoading} = useQuery<Category[]>({
-        queryKey: ['/api/categories/'],
-        queryFn: () => apiRequest('/api/categories/')
-    });
-
-    const {data: sales = [], isLoading: isSalesLoading} = useQuery<Sale[]>({
-        queryKey: ['/api/sales/'],
-        queryFn: () => apiRequest('/api/sales/')
-    });
-
-    const {data: activities = [], isLoading: isActivitiesLoading} = useQuery<Activity[]>({
-        queryKey: ['/api/activities/'],
-        queryFn: () => apiRequest('/api/activities/')
-    });
-
-    const {data: saleItems = [], isLoading: isSaleItemsLoading} = useQuery<any[]>({
-        queryKey: ['/api/sales/items/'],
-        queryFn: () => apiRequest('/api/sales/items/')
-    });
-
-    const {data: stats = {}, isLoading: isStatsLoading} = useQuery({
+    // Fetch dashboard data
+    const { data: stats = {}, isLoading: isStatsLoading } = useQuery({
         queryKey: ['/api/dashboard/stats/'],
         queryFn: () => apiRequest('/api/dashboard/stats/')
     });
 
-    const {data: salesChartData = [], isLoading: isSalesDataLoading} = useQuery({
+    const { data: salesChartData = [], isLoading: isSalesDataLoading } = useQuery({
         queryKey: ['/api/dashboard/sales-chart/'],
         queryFn: () => apiRequest('/api/dashboard/sales-chart/')
     });
 
-    const {data: categoryChartData = [], isLoading: isCategoryDataLoading} = useQuery({
+    const { data: categoryChartData = [], isLoading: isCategoryDataLoading } = useQuery({
         queryKey: ['/api/dashboard/category-chart/'],
         queryFn: () => apiRequest('/api/dashboard/category-chart/')
     });
 
-    const {data: lowStockData = {items: [], summary: {total: 0, outOfStock: 0, lowStock: 0}}, isLoading: isLowStockLoading} = useQuery({
+    const { data: lowStockData = { items: [], summary: { total: 0, outOfStock: 0, lowStock: 0 } }, isLoading: isLowStockLoading } = useQuery({
         queryKey: ['/api/products/low-stock/'],
         queryFn: () => apiRequest('/api/products/low-stock/')
+    });
+
+    const { data: products = [], isLoading: isProductsLoading } = useQuery<Product[]>({
+        queryKey: ['/api/products/'],
+        queryFn: () => apiRequest('/api/products/')
+    });
+
+    const { data: categories = [], isLoading: isCategoriesLoading } = useQuery<Category[]>({
+        queryKey: ['/api/categories/'],
+        queryFn: () => apiRequest('/api/categories/')
+    });
+
+    const { data: sales = [], isLoading: isSalesLoading } = useQuery<Sale[]>({
+        queryKey: ['/api/sales/'],
+        queryFn: () => apiRequest('/api/sales/')
+    });
+
+    const { data: activities = [], isLoading: isActivitiesLoading } = useQuery<Activity[]>({
+        queryKey: ['/api/activities/'],
+        queryFn: () => apiRequest('/api/activities/')
     });
 
     // Calculate loading state
@@ -223,7 +218,6 @@ const AdvancedAnalytics = () => {
         isCategoriesLoading ||
         isSalesLoading ||
         isActivitiesLoading ||
-        isSaleItemsLoading ||
         isStatsLoading ||
         isSalesDataLoading ||
         isCategoryDataLoading ||
@@ -323,13 +317,13 @@ const AdvancedAnalytics = () => {
         for (let i = 0; i < daysInRange; i++) {
             const date = addDays(dateRange.start, i);
             const dateStr = format(date, 'yyyy-MM-dd');
-            movementMap.set(dateStr, {additions: 0, removals: 0});
+            movementMap.set(dateStr, { additions: 0, removals: 0 });
         }
 
         // Process activities to track stock movements
         filteredActivities.forEach(activity => {
             const activityDate = format(new Date(activity.created_at), 'yyyy-MM-dd');
-            const current = movementMap.get(activityDate) || {additions: 0, removals: 0};
+            const current = movementMap.get(activityDate) || { additions: 0, removals: 0 };
 
             if (activity.type === 'stock_added') {
                 movementMap.set(activityDate, {
@@ -357,7 +351,7 @@ const AdvancedAnalytics = () => {
     const categoryRevenue = useMemo(() => {
         const revenueMap = new Map<number, number>();
         filteredSales.forEach(sale => {
-            const items = saleItems[sale.id] || [];
+            const items = sale.items || [];
             items.forEach(item => {
                 const product = productsById.get(item.product_id);
                 if (product?.category && typeof product.category === 'number') {
@@ -367,7 +361,7 @@ const AdvancedAnalytics = () => {
             });
         });
         return revenueMap;
-    }, [filteredSales, saleItems, productsById]);
+    }, [filteredSales, productsById]);
 
     // Calculate top selling products
     const topProducts = useMemo((): TopProductData[] => {
@@ -378,36 +372,34 @@ const AdvancedAnalytics = () => {
         }>();
 
         // Count sales for each product
-        const saleItemsArray = Array.isArray(saleItems) ? saleItems : Object.values(saleItems).flat();
-        saleItemsArray.forEach(item => {
-            const sale = sales.find(s => s.id === item.sale_id);
-            if (!sale || !productsById.has(item.product_id)) return;
+        filteredSales.forEach(sale => {
+            const items = sale.items || [];
+            items.forEach(item => {
+                const product = productsById.get(item.product_id);
+                if (!product) return;
 
-            const saleDate = new Date(sale.created_at);
-            if (saleDate < dateRange.start || saleDate > dateRange.end) return;
+                const salesCount = productSalesMap.get(item.product_id);
 
-            const product = productsById.get(item.product_id)!;
-            const salesCount = productSalesMap.get(item.product_id);
+                // Use sale item price or product sell price as fallback
+                const itemPrice = Number(item.unit_price || product.sell_price || '0');
+                const revenue = itemPrice * item.quantity;
+                const cost = Number(product.buy_price || '0') * item.quantity;
+                const profit = revenue - cost;
 
-            // Use sale item price or product sell price as fallback
-            const itemPrice = Number(item.unit_price || product.sell_price || '0');
-            const revenue = itemPrice * item.quantity;
-            const cost = Number(product.buy_price || '0') * item.quantity;
-            const profit = revenue - cost;
-
-            if (salesCount) {
-                productSalesMap.set(item.product_id, {
-                    sales: salesCount.sales + item.quantity,
-                    revenue: salesCount.revenue + revenue,
-                    profit: salesCount.profit + profit
-                });
-            } else {
-                productSalesMap.set(item.product_id, {
-                    sales: item.quantity,
-                    revenue,
-                    profit
-                });
-            }
+                if (salesCount) {
+                    productSalesMap.set(item.product_id, {
+                        sales: salesCount.sales + item.quantity,
+                        revenue: salesCount.revenue + revenue,
+                        profit: salesCount.profit + profit
+                    });
+                } else {
+                    productSalesMap.set(item.product_id, {
+                        sales: item.quantity,
+                        revenue,
+                        profit
+                    });
+                }
+            });
         });
 
         // Convert to array and sort by sales
@@ -424,12 +416,12 @@ const AdvancedAnalytics = () => {
             })
             .sort((a, b) => b.sales - a.sales)
             .slice(0, 5);
-    }, [saleItems, sales, productsById, dateRange]);
+    }, [filteredSales, productsById]);
 
     // Format currency values
     const formatCurrency = (value: number | undefined | null): string => {
         if (value === undefined || value === null || isNaN(value)) return 'KSh 0.00';
-        return `KSh ${value.toLocaleString('en-KE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+        return `KSh ${value.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     };
 
     // Format percentage values
@@ -448,26 +440,27 @@ const AdvancedAnalytics = () => {
                 exportInventoryToPDF(products, {});
                 break;
             case 'profit':
-                exportProfitToPDF(profitData, dateRange);
+                // Use category chart data for profit report
+                exportProfitToPDF(categoryChartData, dateRange);
                 break;
             default:
-                exportToCSV(profitData, `${activeTab}_report_${format(new Date(), 'yyyy-MM-dd')}`);
+                exportToCSV(categoryChartData, `${activeTab}_report_${format(new Date(), 'yyyy-MM-dd')}`);
         }
     };
 
     // Custom tooltip formatter for charts
-    const CustomTooltip = ({active, payload, label}: any) => {
+    const CustomTooltip = ({ active, payload, label }: any) => {
         if (active && payload && payload.length) {
             return (
                 <div className="bg-white p-4 border border-gray-200 shadow-md rounded-md">
                     <p className="font-semibold">{label}</p>
                     {payload.map((entry: any, index: number) => (
-                        <p key={index} style={{color: entry.color}}>
+                        <p key={index} style={{ color: entry.color }}>
                             {entry.name}: {entry.name === 'Discount' ? `-${formatCurrency(entry.value)}` :
-                            typeof entry.value === 'number' ?
-                                (entry.name.includes('Revenue') || entry.name.includes('Profit') || entry.name.includes('Cost') ?
-                                    formatCurrency(entry.value) : entry.value.toLocaleString()) :
-                                entry.value}
+                                typeof entry.value === 'number' ?
+                                    (entry.name.includes('Revenue') || entry.name.includes('Profit') || entry.name.includes('Cost') ?
+                                        formatCurrency(entry.value) : entry.value.toLocaleString()) :
+                                    entry.value}
                         </p>
                     ))}
                 </div>
@@ -475,12 +468,6 @@ const AdvancedAnalytics = () => {
         }
         return null;
     };
-
-    // Correct discount calculation
-    const profitDataWithDiscount = profitData.map(day => ({
-        ...day,
-        discount: Number(day.discount) || 0
-    }));
 
     // Transform data for analytics
     const salesData = salesChartData.map(item => ({
