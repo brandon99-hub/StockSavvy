@@ -248,6 +248,65 @@ const AdvancedAnalytics = () => {
         });
     }, [activities, dateRange]);
 
+    // Format currency values
+    const formatCurrency = (value: number | undefined | null): string => {
+        if (value === undefined || value === null || isNaN(value)) return 'KSh 0.00';
+        return `KSh ${value.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    };
+
+    // Format percentage values
+    const formatPercentage = (value: number | undefined | null): string => {
+        if (value === undefined || value === null || isNaN(value)) return '0.00%';
+        return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
+    };
+
+    // Calculate total revenue from sales
+    const calculateTotalRevenue = (sales: Sale[]): number => {
+        if (!Array.isArray(sales)) return 0;
+        return sales.reduce((total, sale) => {
+            return total + Number(sale.total_amount || '0');
+        }, 0);
+    };
+
+    // Export data to various formats
+    const exportData = () => {
+        switch (activeTab) {
+            case 'sales':
+                exportSalesToPDF(sales, {}, {});
+                break;
+            case 'inventory':
+                exportInventoryToPDF(products, {});
+                break;
+            case 'profit':
+                // Use category chart data for profit report
+                exportProfitToPDF(categoryChartData, dateRange);
+                break;
+            default:
+                exportToCSV(categoryChartData, `${activeTab}_report_${format(new Date(), 'yyyy-MM-dd')}`);
+        }
+    };
+
+    // Custom tooltip formatter for charts
+    const CustomTooltip = ({ active, payload, label }: any) => {
+        if (active && payload && payload.length) {
+            return (
+                <div className="bg-white p-4 border border-gray-200 shadow-md rounded-md">
+                    <p className="font-semibold">{label}</p>
+                    {payload.map((entry: any, index: number) => (
+                        <p key={index} style={{ color: entry.color }}>
+                            {entry.name}: {entry.name === 'Discount' ? `-${formatCurrency(entry.value)}` :
+                                typeof entry.value === 'number' ?
+                                    (entry.name.includes('Revenue') || entry.name.includes('Profit') || entry.name.includes('Cost') ?
+                                        formatCurrency(entry.value) : entry.value.toLocaleString()) :
+                                    entry.value}
+                        </p>
+                    ))}
+                </div>
+            );
+        }
+        return null;
+    };
+
     // Transform data for analytics
     const salesData = useMemo(() => {
         if (!Array.isArray(salesChartData)) return [];
@@ -261,9 +320,63 @@ const AdvancedAnalytics = () => {
         if (!Array.isArray(categoryChartData)) return [];
         return categoryChartData.map(item => ({
             name: item.name,
-            percentage: item.percentage
+            percentage: item.percentage,
+            value: item.value || 0
         }));
     }, [categoryChartData]);
+
+    // Create profit data from sales data
+    const profitData = useMemo(() => {
+        if (!Array.isArray(sales)) return [];
+        
+        // Group sales by date
+        const salesByDate = new Map<string, {
+            revenue: number,
+            cost: number,
+            profit: number,
+            discount: number
+        }>();
+        
+        sales.forEach(sale => {
+            const saleDate = format(new Date(sale.created_at), 'yyyy-MM-dd');
+            const current = salesByDate.get(saleDate) || { revenue: 0, cost: 0, profit: 0, discount: 0 };
+            
+            // Calculate revenue
+            const revenue = Number(sale.total_amount || '0');
+            
+            // Calculate cost and profit
+            let cost = 0;
+            let profit = 0;
+            
+            if (Array.isArray(sale.items)) {
+                sale.items.forEach(item => {
+                    const product = productsById.get(item.product_id);
+                    if (product) {
+                        const itemCost = Number(product.buy_price || '0') * item.quantity;
+                        cost += itemCost;
+                    }
+                });
+            }
+            
+            profit = revenue - cost;
+            
+            // Update the map
+            salesByDate.set(saleDate, {
+                revenue: current.revenue + revenue,
+                cost: current.cost + cost,
+                profit: current.profit + profit,
+                discount: current.discount + Number(sale.discount || '0')
+            });
+        });
+        
+        // Convert to array and sort by date
+        return Array.from(salesByDate.entries())
+            .map(([date, data]) => ({
+                date,
+                ...data
+            }))
+            .sort((a, b) => a.date.localeCompare(b.date));
+    }, [sales, productsById]);
 
     // Calculate year-over-year comparison data
     const yearOverYearData = useMemo((): ComparisonData[] => {
@@ -441,57 +554,6 @@ const AdvancedAnalytics = () => {
             .sort((a, b) => b.sales - a.sales)
             .slice(0, 5);
     }, [sales, productsById]);
-
-    // Format currency values
-    const formatCurrency = (value: number | undefined | null): string => {
-        if (value === undefined || value === null || isNaN(value)) return 'KSh 0.00';
-        return `KSh ${value.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    };
-
-    // Format percentage values
-    const formatPercentage = (value: number | undefined | null): string => {
-        if (value === undefined || value === null || isNaN(value)) return '0.00%';
-        return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
-    };
-
-    // Export data to various formats
-    const exportData = () => {
-        switch (activeTab) {
-            case 'sales':
-                exportSalesToPDF(sales, {}, {});
-                break;
-            case 'inventory':
-                exportInventoryToPDF(products, {});
-                break;
-            case 'profit':
-                // Use category chart data for profit report
-                exportProfitToPDF(categoryChartData, dateRange);
-                break;
-            default:
-                exportToCSV(categoryChartData, `${activeTab}_report_${format(new Date(), 'yyyy-MM-dd')}`);
-        }
-    };
-
-    // Custom tooltip formatter for charts
-    const CustomTooltip = ({ active, payload, label }: any) => {
-        if (active && payload && payload.length) {
-            return (
-                <div className="bg-white p-4 border border-gray-200 shadow-md rounded-md">
-                    <p className="font-semibold">{label}</p>
-                    {payload.map((entry: any, index: number) => (
-                        <p key={index} style={{ color: entry.color }}>
-                            {entry.name}: {entry.name === 'Discount' ? `-${formatCurrency(entry.value)}` :
-                                typeof entry.value === 'number' ?
-                                    (entry.name.includes('Revenue') || entry.name.includes('Profit') || entry.name.includes('Cost') ?
-                                        formatCurrency(entry.value) : entry.value.toLocaleString()) :
-                                    entry.value}
-                        </p>
-                    ))}
-                </div>
-            );
-        }
-        return null;
-    };
 
     return (
         <div className="space-y-6">
@@ -951,7 +1013,7 @@ const AdvancedAnalytics = () => {
                                     <CardContent className="h-80">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <LineChart
-                                                data={Array.isArray(profitData) ? profitData : []}
+                                                data={profitData}
                                                 margin={{top: 5, right: 30, left: 20, bottom: 5}}
                                             >
                                                 <CartesianGrid strokeDasharray="3 3"/>
