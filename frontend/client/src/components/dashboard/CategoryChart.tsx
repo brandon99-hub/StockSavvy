@@ -62,14 +62,7 @@ const CategoryChart: React.FC<CategoryChartProps> = ({ data }) => {
         maintainAspectRatio: false,
         plugins: {
           legend: {
-            position: 'bottom',
-            labels: {
-              usePointStyle: true,
-              padding: 20,
-              font: {
-                size: 12
-              }
-            }
+            display: false // Hide default legend
           },
           tooltip: {
             callbacks: {
@@ -99,15 +92,41 @@ const CategoryChart: React.FC<CategoryChartProps> = ({ data }) => {
 
   return (
     <div className="w-full">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex justify-between items-center mb-4">
         <h3 className="text-lg font-semibold text-gray-800">Category Distribution</h3>
       </div>
-      <div className="h-64">
+      <div className="relative" style={{ height: '200px' }}>
         <canvas ref={chartRef} />
       </div>
-      {(!data || data.length === 0) && (
+      {(!data || data.length === 0) ? (
         <div className="h-64 flex items-center justify-center text-gray-500">
           No category data available
+        </div>
+      ) : (
+        <div className="mt-4 space-y-2">
+          {data.map((category, index) => (
+            <div key={category.id} className="flex items-center justify-between py-1">
+              <div className="flex items-center">
+                <div 
+                  className="w-3 h-3 rounded-full mr-2" 
+                  style={{ 
+                    backgroundColor: [
+                      'rgba(59, 130, 246, 0.8)',   // Blue
+                      'rgba(16, 185, 129, 0.8)',   // Green
+                      'rgba(245, 158, 11, 0.8)',   // Yellow
+                      'rgba(239, 68, 68, 0.8)',    // Red
+                      'rgba(139, 92, 246, 0.8)',   // Purple
+                    ][index % 5]
+                  }}
+                />
+                <span className="text-sm text-gray-600">{category.name}</span>
+              </div>
+              <div className="flex items-center space-x-4">
+                <span className="text-sm font-medium text-gray-900">{formatCurrency(category.value)}</span>
+                <span className="text-sm text-gray-500">({category.percentage.toFixed(1)}%)</span>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

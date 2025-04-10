@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Card, CardContent } from "../ui/card";
 import Chart from 'chart.js/auto';
 
 interface SalesChartProps {
@@ -22,7 +21,7 @@ const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
   const chartRef = useRef<HTMLCanvasElement>(null);
   const chartInstance = useRef<Chart | null>(null);
   const [view, setView] = useState<'day' | 'week' | 'month'>('day');
-  
+
   useEffect(() => {
     if (!chartRef.current || !data) return;
 
@@ -31,10 +30,15 @@ const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
       chartInstance.current.destroy();
     }
 
-    // Sort data by date
-    const sortedData = [...data].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    const ctx = chartRef.current.getContext('2d');
+    if (!ctx) return;
 
-    // Filter and format data based on view
+    // Ensure data is sorted by date
+    const sortedData = [...data].sort((a, b) => 
+      new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
+
+    // Filter data based on view
     const now = new Date();
     const filteredData = sortedData.filter(item => {
       const itemDate = new Date(item.date);
@@ -54,7 +58,15 @@ const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
       }
     });
 
-    // Format dates based on view
+    // If no data, show empty state with proper axes
+    if (filteredData.length === 0) {
+      filteredData.push({
+        date: new Date().toISOString(),
+        amount: 0
+      });
+    }
+
+    // Format dates for display
     const formatDate = (dateStr: string) => {
       const date = new Date(dateStr);
       switch (view) {
@@ -69,8 +81,9 @@ const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
       }
     };
 
-    const ctx = chartRef.current.getContext('2d');
-    if (!ctx) return;
+    // Find max amount for y-axis scaling
+    const maxAmount = Math.max(...filteredData.map(item => item.amount));
+    const yAxisMax = maxAmount === 0 ? 1000 : maxAmount * 1.2;
 
     chartInstance.current = new Chart(ctx, {
       type: 'line',
@@ -83,6 +96,8 @@ const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
           backgroundColor: 'rgba(59, 130, 246, 0.1)',
           fill: true,
           tension: 0.4,
+          pointRadius: 4,
+          pointBackgroundColor: '#3b82f6',
         }]
       },
       options: {
@@ -105,19 +120,30 @@ const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
           x: {
             grid: {
               display: false
+            },
+            ticks: {
+              maxRotation: 0,
+              autoSkip: true,
+              maxTicksLimit: 8
             }
           },
           y: {
             beginAtZero: true,
+            max: yAxisMax,
             ticks: {
-              callback: (value) => formatCurrency(value as number)
+              callback: (value) => formatCurrency(value as number),
+              stepSize: Math.ceil(yAxisMax / 5)
             }
           }
+        },
+        interaction: {
+          intersect: false,
+          mode: 'index'
         }
       }
     });
   }, [data, view]);
-  
+
   return (
     <div className="w-full">
       <div className="flex justify-between items-center mb-6">
@@ -125,21 +151,33 @@ const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
         <div className="flex space-x-2">
           <button 
             type="button"
-            className={`px-3 py-1.5 text-sm rounded ${view === 'day' ? 'bg-blue-50 text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
+            className={`px-3 py-1.5 text-sm font-medium rounded transition-colors ${
+              view === 'day' 
+                ? 'bg-blue-50 text-blue-600' 
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
             onClick={() => setView('day')}
           >
             Day
           </button>
           <button 
             type="button"
-            className={`px-3 py-1.5 text-sm rounded ${view === 'week' ? 'bg-blue-50 text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
+            className={`px-3 py-1.5 text-sm font-medium rounded transition-colors ${
+              view === 'week' 
+                ? 'bg-blue-50 text-blue-600' 
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
             onClick={() => setView('week')}
           >
             Week
           </button>
           <button 
             type="button"
-            className={`px-3 py-1.5 text-sm rounded ${view === 'month' ? 'bg-blue-50 text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
+            className={`px-3 py-1.5 text-sm font-medium rounded transition-colors ${
+              view === 'month' 
+                ? 'bg-blue-50 text-blue-600' 
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
             onClick={() => setView('month')}
           >
             Month
