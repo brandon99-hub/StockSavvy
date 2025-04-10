@@ -14,17 +14,17 @@ import {
     FormItem,
     FormLabel,
     FormMessage
-} from '../../components/ui/form';
-import {Input} from '../../components/ui/input';
-import {Button} from '../../components/ui/button';
-import {Card, CardContent, CardHeader, CardTitle, CardFooter} from '../../components/ui/card';
+} from '../ui/form';
+import {Input} from '../ui/input';
+import {Button} from '../ui/button';
+import {Card, CardContent, CardHeader, CardTitle, CardFooter} from '../ui/card';
 import {
     Select,
     SelectContent,
     SelectItem,
     SelectTrigger,
     SelectValue,
-} from '../../components/ui/select';
+} from '../ui/select';
 import {
     Table,
     TableBody,
@@ -32,14 +32,14 @@ import {
     TableHead,
     TableHeader,
     TableRow,
-} from '../../components/ui/table';
-import {Badge} from '../../components/ui/badge';
+} from '../ui/table';
+import {Badge} from '../ui/badge';
 import {
     Label
-} from '../../components/ui/label';
+} from '../ui/label';
 import {
     Separator
-} from '../../components/ui/separator';
+} from '../ui/separator';
 import {
     X
 } from 'lucide-react';

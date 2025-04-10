@@ -1,486 +1,404 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import axios from 'axios';
-import { format } from 'date-fns';
+import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  LineChart, Line, Area, AreaChart
-} from 'recharts';
-import { Box, Card, CardContent, Typography, CircularProgress, Alert, Tabs, Tab, AlertTitle } from '@mui/material';
-import { DateRangePicker } from '@mui/x-date-pickers-pro/DateRangePicker';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardFooter
+} from '../ui/card';
 import { Button } from '../ui/button';
-import { Download, FileDown, FileText } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
+import { Separator } from '../ui/separator';
+import { Calendar } from '../ui/calendar';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '../ui/popover';
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer
+} from 'recharts';
+import { exportInventoryToPDF, exportSalesToPDF, exportProfitToPDF, exportToCSV } from '../../lib/exportUtils';
+import { Product, Sale, Category } from '../../../shared/schema';
 
-// Define interfaces for the data
-interface Product {
-  id: number;
-  name: string;
-  sku: string;
-  categoryId: number;
-  quantity: number;
-  minStockLevel: number;
-  buyPrice: string;
-  sellPrice: string;
-  category_name?: string;
-  status?: string;
-}
+const ReportGenerator = () => {
+  const [reportType, setReportType] = useState<'inventory' | 'sales' | 'profit'>('inventory');
+  const [dateRange, setDateRange] = useState({
+    start: startOfDay(subDays(new Date(), 30)),
+    end: endOfDay(new Date())
+  });
+  const [calendarOpen, setCalendarOpen] = useState(false);
 
-interface Category {
-  id: number;
-  name: string;
-  product_count: number;
-  total_quantity: number;
-  value: number;
-}
-
-interface InventoryData {
-  summary: {
-    totalProducts: number;
-    lowStock: number;
-    outOfStock: number;
-    totalValue: string;
-  };
-  categories: Array<{
-    name: string;
-    product_count: number;
-    total_quantity: number;
-    value: string;
-  }>;
-  products: Array<{
-    id: number;
-    name: string;
-    sku: string;
-    quantity: number;
-    min_stock_level: number;
-    buy_price: string;
-    sell_price: string;
-    category_name: string;
-    status: string;
-  }>;
-}
-
-interface ProfitData {
-  summary: {
-    totalRevenue: string;
-    totalCost: string;
-    totalProfit: string;
-    totalTransactions: number;
-    profitMargin: number;
-  };
-  monthly: Array<{
-    month: string;
-    revenue: string;
-    cost: string;
-    profit: string;
-    transaction_count: number;
-    unique_products: number;
-    profit_margin: string;
-  }>;
-}
-
-interface SalesData {
-  items: Array<{
-    id: number;
-    sale_id: number;
-    product_id: number;
-    quantity: number;
-    unit_price: string;
-    total_price: string;
-    product_name: string;
-    product_sku: string;
-    category_name: string;
-    sale_date: string;
-    sale_total: string;
-    sold_by: string;
-  }>;
-  summary: {
-    totalItems: number;
-    totalValue: string;
-  };
-}
-
-const ReportGenerator: React.FC = () => {
-  const [dateRange, setDateRange] = useState<[Date | null, Date | null]>([null, null]);
-  const [startDate, endDate] = dateRange;
-  const [activeTab, setActiveTab] = useState(0);
-
-  const formatDate = (date: Date) => {
-    return format(date, 'yyyy-MM-dd');
-  };
-
-  // Inventory query
-  const inventoryQuery = useQuery<InventoryData, Error>({
-    queryKey: ['inventory'],
-    queryFn: async () => {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('No authentication token found');
-      }
-      const response = await axios.get('/api/reports/inventory/', {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-      return response.data;
-    },
-    retry: 1
+  // Fetch data based on report type
+  const { data: products = [], isLoading: isProductsLoading } = useQuery<Product[]>({
+    queryKey: ['/api/products'],
   });
 
-  // Profit query
-  const profitQuery = useQuery<ProfitData, Error>({
-    queryKey: ['profit', startDate, endDate],
-    queryFn: async () => {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('No authentication token found');
-      }
-      if (!startDate || !endDate) {
-        throw new Error('Date range is required');
-      }
-      const response = await axios.get('/api/reports/profit/', {
-        headers: {
-          Authorization: `Bearer ${token}`
-        },
-        params: {
-          start: formatDate(startDate),
-          end: formatDate(endDate),
-        },
-      });
-      return response.data;
-    },
-    enabled: !!startDate && !!endDate,
-    retry: 1
+  const { data: categories = [], isLoading: isCategoriesLoading } = useQuery<Category[]>({
+    queryKey: ['/api/categories'],
   });
 
-  // Sales query
-  const salesQuery = useQuery<SalesData, Error>({
-    queryKey: ['sales'],
-    queryFn: async () => {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('No authentication token found');
-      }
-      const response = await axios.get('/api/reports/sales_chart/', {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-      return response.data;
-    },
-    retry: 1
+  const { data: sales = [], isLoading: isSalesLoading } = useQuery<Sale[]>({
+    queryKey: ['/api/sales'],
   });
 
-  const formatCurrency = (value: string | number) => {
-    const numValue = typeof value === 'string' ? parseFloat(value) : value;
-    return new Intl.NumberFormat('en-KE', {
-      style: 'currency',
-      currency: 'KES',
-    }).format(numValue);
-  };
+  const { data: saleItems = {}, isLoading: isSaleItemsLoading } = useQuery<Record<number, any[]>>({
+    queryKey: ['/api/sales/items'],
+  });
 
-  const formatPercent = (value: string | number) => {
-    const numValue = typeof value === 'string' ? parseFloat(value) : value;
-    return `${numValue.toFixed(2)}%`;
-  };
+  const { data: profitData = [], isLoading: isProfitLoading } = useQuery<any[]>({
+    queryKey: ['/api/reports/profit', { start: dateRange.start.toISOString(), end: dateRange.end.toISOString() }],
+  });
 
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
-    setActiveTab(newValue);
-  };
+  const isLoading = isProductsLoading || isCategoriesLoading || isSalesLoading || isSaleItemsLoading || isProfitLoading;
 
+  // Transform categories array to an object for easier lookup
+  const categoryMap = categories.reduce((acc, category) => {
+    acc[category.id] = category.name;
+    return acc;
+  }, {} as Record<number, string>);
+
+  // Transform products array to an object for easier lookup
+  const productMap = products.reduce((acc, product) => {
+    acc[product.id] = product;
+    return acc;
+  }, {} as Record<number, Product>);
+
+  // Generate inventory report data
+  const inventoryData = products.map(product => ({
+    ...product,
+    categoryName: product.categoryId ? categoryMap[product.categoryId] : 'Uncategorized',
+    status: product.quantity <= 0 ? 'Out of Stock' :
+            product.quantity <= product.minStockLevel ? 'Low Stock' : 'In Stock',
+    value: Number(product.buyPrice) * product.quantity
+  }));
+
+  // Generate sales report data for chart
+  const filteredSales = sales.filter(sale => {
+    const saleDate = new Date(sale.saleDate);
+    return saleDate >= dateRange.start && saleDate <= dateRange.end;
+  });
+
+  // Group sales by date for chart
+  const salesByDate = filteredSales.reduce((acc, sale) => {
+    const dateStr = format(new Date(sale.saleDate), 'yyyy-MM-dd');
+    if (!acc[dateStr]) {
+      acc[dateStr] = { date: dateStr, revenue: 0, transactions: 0 };
+    }
+    acc[dateStr].revenue += Number(sale.totalAmount);
+    acc[dateStr].transactions += 1;
+    return acc;
+  }, {} as Record<string, { date: string, revenue: number, transactions: number }>);
+
+  const salesChartData = Object.values(salesByDate).sort((a, b) =>
+    new Date(a.date).getTime() - new Date(b.date).getTime()
+  );
+
+  // Handle export to PDF
   const handleExportPDF = () => {
-    // ... existing PDF export logic ...
+    switch (reportType) {
+      case 'inventory':
+        exportInventoryToPDF(products, categoryMap);
+        break;
+      case 'sales':
+        exportSalesToPDF(sales, saleItems, productMap);
+        break;
+      case 'profit':
+        exportProfitToPDF(profitData, dateRange);
+        break;
+    }
   };
 
+  // Handle export to CSV
   const handleExportCSV = () => {
-    // ... existing CSV export logic ...
+    let data: any[] = [];
+    let filename = '';
+
+    switch (reportType) {
+      case 'inventory':
+        data = inventoryData.map(item => ({
+          SKU: item.sku,
+          Name: item.name,
+          Category: item.categoryName,
+          Quantity: item.quantity,
+          'Min Stock': item.minStockLevel,
+          'Buy Price': Number(item.buyPrice).toFixed(2),
+          'Sell Price': Number(item.sellPrice).toFixed(2),
+          Status: item.status,
+          Value: (Number(item.buyPrice) * item.quantity).toFixed(2)
+        }));
+        filename = 'inventory_report';
+        break;
+      case 'sales':
+        data = filteredSales.map(sale => {
+          const saleDate = new Date(sale.saleDate);
+          const itemCount = saleItems[sale.id]?.reduce((sum, item) => sum + item.quantity, 0) || 0;
+
+          return {
+            'Sale ID': sale.id,
+            Date: format(saleDate, 'yyyy-MM-dd HH:mm:ss'),
+            'Total Amount': Number(sale.totalAmount).toFixed(2),
+            'Items Sold': itemCount,
+            'User ID': sale.userId
+          };
+        });
+        filename = 'sales_report';
+        break;
+      case 'profit':
+        data = profitData.map(item => ({
+          Date: item.date,
+          Revenue: item.revenue.toFixed(2),
+          Cost: item.cost.toFixed(2),
+          Profit: (item.revenue - item.cost).toFixed(2),
+          'Profit Margin (%)': ((item.revenue - item.cost) / item.revenue * 100).toFixed(2)
+        }));
+        filename = 'profit_report';
+        break;
+    }
+
+    exportToCSV(data, filename);
   };
-
-  const renderInventorySummary = () => {
-    if (!inventoryQuery.data?.summary) return null;
-
-    const { totalProducts, lowStock, outOfStock, totalValue } = inventoryQuery.data.summary;
-
-    return (
-      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 2 }}>
-        <Card>
-          <CardContent>
-            <Typography color="textSecondary" gutterBottom>Total Products</Typography>
-            <Typography variant="h4">{totalProducts}</Typography>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <Typography color="textSecondary" gutterBottom>Low Stock Items</Typography>
-            <Typography variant="h4" color="warning.main">{lowStock}</Typography>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <Typography color="textSecondary" gutterBottom>Out of Stock</Typography>
-            <Typography variant="h4" color="error.main">{outOfStock}</Typography>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <Typography color="textSecondary" gutterBottom>Total Value</Typography>
-            <Typography variant="h4">{formatCurrency(totalValue)}</Typography>
-          </CardContent>
-        </Card>
-      </Box>
-    );
-  };
-
-  const renderInventoryCharts = () => {
-    if (!inventoryQuery.data?.categories) return null;
-
-    return (
-      <Card>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>Stock by Category</Typography>
-          <Box sx={{ height: 400 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={inventoryQuery.data.categories}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="total_quantity" fill="#82ca9d" />
-              </BarChart>
-            </ResponsiveContainer>
-          </Box>
-        </CardContent>
-      </Card>
-    );
-  };
-
-  const renderProfitSummary = () => {
-    if (!profitQuery.data?.summary) return null;
-
-    const { totalRevenue, totalCost, totalProfit, profitMargin } = profitQuery.data.summary;
-
-    return (
-      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 2 }}>
-        <Card>
-          <CardContent>
-            <Typography color="textSecondary" gutterBottom>Total Revenue</Typography>
-            <Typography variant="h4">{formatCurrency(totalRevenue)}</Typography>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <Typography color="textSecondary" gutterBottom>Total Cost</Typography>
-            <Typography variant="h4">{formatCurrency(totalCost)}</Typography>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <Typography color="textSecondary" gutterBottom>Total Profit</Typography>
-            <Typography variant="h4" color="success.main">{formatCurrency(totalProfit)}</Typography>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <Typography color="textSecondary" gutterBottom>Profit Margin</Typography>
-            <Typography variant="h4" color="success.main">{formatPercent(profitMargin)}</Typography>
-          </CardContent>
-        </Card>
-      </Box>
-    );
-  };
-
-  const renderProfitCharts = () => {
-    if (!profitQuery.data?.monthly) return null;
-
-    return (
-      <Card>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>Monthly Profit Trend</Typography>
-          <Box sx={{ height: 400 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={profitQuery.data.monthly}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
-                <YAxis />
-                <Tooltip 
-                  formatter={(value: any) => formatCurrency(value)}
-                  labelFormatter={(label) => `Month: ${label}`}
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="profit" 
-                  stroke="#82ca9d" 
-                  strokeWidth={2}
-                  dot={{ r: 4 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </Box>
-        </CardContent>
-      </Card>
-    );
-  };
-
-  const renderSalesSummary = () => {
-    if (!salesQuery.data?.summary) return null;
-
-    const { totalItems, totalValue } = salesQuery.data.summary;
-
-    return (
-      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 2 }}>
-        <Card>
-          <CardContent>
-            <Typography color="textSecondary" gutterBottom>Total Items Sold</Typography>
-            <Typography variant="h4">{totalItems}</Typography>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <Typography color="textSecondary" gutterBottom>Total Sales Value</Typography>
-            <Typography variant="h4">{formatCurrency(totalValue)}</Typography>
-          </CardContent>
-        </Card>
-      </Box>
-    );
-  };
-
-  const renderSalesCharts = () => {
-    if (!salesQuery.data?.items) return null;
-
-    // Group sales by date
-    const dateData = salesQuery.data.items.reduce((acc, item) => {
-      const date = item.sale_date.split('T')[0];
-      if (!acc[date]) {
-        acc[date] = {
-          date,
-          amount: 0,
-          items: 0
-        };
-      }
-      acc[date].amount += parseFloat(item.total_price);
-      acc[date].items += item.quantity;
-      return acc;
-    }, {} as Record<string, { date: string; amount: number; items: number }>);
-
-    const chartData = Object.values(dateData).sort((a, b) => a.date.localeCompare(b.date));
-
-    return (
-      <Card>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>Sales Trend</Typography>
-          <Box sx={{ height: 400 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip 
-                  formatter={(value: any) => formatCurrency(value)}
-                  labelFormatter={(label) => `Date: ${label}`}
-                />
-                <Area 
-                  type="monotone" 
-                  dataKey="amount" 
-                  stroke="#8884d8" 
-                  fill="#8884d8" 
-                  fillOpacity={0.3}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </Box>
-        </CardContent>
-      </Card>
-    );
-  };
-
-  if (inventoryQuery.error || profitQuery.error || salesQuery.error) {
-    const error = inventoryQuery.error || profitQuery.error || salesQuery.error;
-    return (
-      <Box sx={{ p: 3 }}>
-        <Alert severity="error" sx={{ mb: 2 }}>
-          <AlertTitle>Error Loading Reports</AlertTitle>
-          {error instanceof Error ? error.message : 'An unexpected error occurred'}
-        </Alert>
-        <Button 
-          variant="outline" 
-          onClick={() => {
-            inventoryQuery.refetch();
-            profitQuery.refetch();
-            salesQuery.refetch();
-          }}
-        >
-          Retry
-        </Button>
-      </Box>
-    );
-  }
-
-  if (inventoryQuery.isLoading || profitQuery.isLoading || salesQuery.isLoading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-        <CircularProgress />
-      </Box>
-    );
-  }
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h4" gutterBottom>Reports</Typography>
-          <Box sx={{ display: 'flex', gap: 2 }}>
-            <Button variant="outline" size="sm" onClick={handleExportPDF}>
-              <FileText className="mr-2 h-4 w-4" />
-              Export PDF
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleExportCSV}>
-              <FileDown className="mr-2 h-4 w-4" />
-              Export CSV
-            </Button>
-          </Box>
-        </Box>
+    <Card className="shadow-sm">
+      <CardHeader>
+        <CardTitle>Generate Reports</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <Tabs value={reportType} onValueChange={(value) => setReportType(value as any)}>
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="inventory">Inventory Report</TabsTrigger>
+            <TabsTrigger value="sales">Sales Report</TabsTrigger>
+            <TabsTrigger value="profit">Profit Report</TabsTrigger>
+          </TabsList>
 
-        <LocalizationProvider dateAdapter={AdapterDateFns}>
-          <DateRangePicker
-            value={dateRange}
-            onChange={(newValue) => setDateRange(newValue)}
-            sx={{ mb: 3 }}
-          />
-        </LocalizationProvider>
-
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          <Tabs value={activeTab} onChange={handleTabChange} sx={{ borderBottom: 1, borderColor: 'divider' }}>
-            <Tab label="Sales Report" />
-            <Tab label="Inventory Report" />
-            <Tab label="Profit Report" />
-          </Tabs>
-
-          <Box sx={{ mt: 2 }}>
-            {activeTab === 0 && (
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                {renderSalesSummary()}
-                {renderSalesCharts()}
-              </Box>
+          <div className="mt-4">
+            {(reportType === 'sales' || reportType === 'profit') && (
+              <div className="mb-4">
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm font-medium">Date Range:</span>
+                  <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className="justify-start text-left font-normal">
+                        <i className="fas fa-calendar-alt mr-2 text-gray-400"></i>
+                        {format(dateRange.start, 'PPP')} - {format(dateRange.end, 'PPP')}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="range"
+                        selected={{
+                          from: dateRange.start,
+                          to: dateRange.end
+                        }}
+                        onSelect={(range) => {
+                          if (range?.from && range?.to) {
+                            setDateRange({
+                              start: startOfDay(range.from),
+                              end: endOfDay(range.to)
+                            });
+                            setCalendarOpen(false);
+                          }
+                        }}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </div>
             )}
+          </div>
 
-            {activeTab === 1 && (
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                {renderInventorySummary()}
-                {renderInventoryCharts()}
-              </Box>
-            )}
+          <TabsContent value="inventory" className="space-y-4">
+            <div className="bg-gray-50 p-4 rounded-md">
+              <h3 className="font-semibold mb-2">Inventory Status Summary</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-white p-4 rounded-md shadow-sm">
+                  <p className="text-sm text-gray-500">Total Products</p>
+                  <p className="text-xl font-bold">{products.length}</p>
+                </div>
+                <div className="bg-white p-4 rounded-md shadow-sm">
+                  <p className="text-sm text-gray-500">Low Stock Items</p>
+                  <p className="text-xl font-bold text-amber-600">
+                    {products.filter(p => p.quantity > 0 && p.quantity <= p.minStockLevel).length}
+                  </p>
+                </div>
+                <div className="bg-white p-4 rounded-md shadow-sm">
+                  <p className="text-sm text-gray-500">Out of Stock</p>
+                  <p className="text-xl font-bold text-red-600">
+                    {products.filter(p => p.quantity <= 0).length}
+                  </p>
+                </div>
+              </div>
+            </div>
 
-            {activeTab === 2 && (
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                {renderProfitSummary()}
-                {renderProfitCharts()}
-              </Box>
-            )}
-          </Box>
-        </Box>
-      </Box>
-    </Box>
+            <Separator />
+
+            <div>
+              <h3 className="font-semibold mb-2">Inventory Value</h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart
+                  data={categories.map(cat => ({
+                    name: cat.name,
+                    value: products
+                      .filter(p => p.categoryId === cat.id)
+                      .reduce((sum, p) => sum + (Number(p.buyPrice) * p.quantity), 0)
+                  }))}
+                  margin={{ top: 20, right: 30, left: 20, bottom: 50 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" angle={-45} textAnchor="end" height={70} />
+                  <YAxis />
+                  <Tooltip formatter={(value) => [`KSh ${typeof value === 'number' ? value.toFixed(2) : value}`, 'Value']} />
+                  <Bar dataKey="value" fill="#3b82f6" name="Value (KSh)" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="sales" className="space-y-4">
+            <div className="bg-gray-50 p-4 rounded-md">
+              <h3 className="font-semibold mb-2">Sales Summary</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-white p-4 rounded-md shadow-sm">
+                  <p className="text-sm text-gray-500">Total Sales</p>
+                  <p className="text-xl font-bold">
+                    KSh {filteredSales.reduce((sum, sale) => sum + Number(sale.totalAmount), 0).toFixed(2)}
+                  </p>
+                </div>
+                <div className="bg-white p-4 rounded-md shadow-sm">
+                  <p className="text-sm text-gray-500">Number of Transactions</p>
+                  <p className="text-xl font-bold">{filteredSales.length}</p>
+                </div>
+                <div className="bg-white p-4 rounded-md shadow-sm">
+                  <p className="text-sm text-gray-500">Average Sale</p>
+                  <p className="text-xl font-bold">
+                    KSh {(filteredSales.reduce((sum, sale) => sum + Number(sale.totalAmount), 0) /
+                      (filteredSales.length || 1)).toFixed(2)}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            <div>
+              <h3 className="font-semibold mb-2">Sales Trend</h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart
+                  data={salesChartData}
+                  margin={{ top: 20, right: 30, left: 20, bottom: 50 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" angle={-45} textAnchor="end" height={70} />
+                  <YAxis yAxisId="left" />
+                  <YAxis yAxisId="right" orientation="right" />
+                  <Tooltip formatter={(value, name) => [
+                    name === 'revenue' && typeof value === 'number' ? `KSh ${value.toFixed(2)}` : value,
+                    name === 'revenue' ? 'Revenue' : 'Transactions'
+                  ]} />
+                  <Legend />
+                  <Line
+                    yAxisId="left"
+                    type="monotone"
+                    dataKey="revenue"
+                    stroke="#3b82f6"
+                    name="Revenue (KSh)"
+                  />
+                  <Line
+                    yAxisId="right"
+                    type="monotone"
+                    dataKey="transactions"
+                    stroke="#10b981"
+                    name="Transactions"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="profit" className="space-y-4">
+            <div className="bg-gray-50 p-4 rounded-md">
+              <h3 className="font-semibold mb-2">Profit Summary</h3>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="bg-white p-4 rounded-md shadow-sm">
+                  <p className="text-sm text-gray-500">Total Revenue</p>
+                  <p className="text-xl font-bold">
+                    KSh {profitData.reduce((sum, day) => sum + day.revenue, 0).toFixed(2)}
+                  </p>
+                </div>
+                <div className="bg-white p-4 rounded-md shadow-sm">
+                  <p className="text-sm text-gray-500">Total Cost</p>
+                  <p className="text-xl font-bold">
+                    KSh {profitData.reduce((sum, day) => sum + day.cost, 0).toFixed(2)}
+                  </p>
+                </div>
+                <div className="bg-white p-4 rounded-md shadow-sm">
+                  <p className="text-sm text-gray-500">Total Profit</p>
+                  <p className="text-xl font-bold text-green-600">
+                    KSh {profitData.reduce((sum, day) => sum + (day.revenue - day.cost), 0).toFixed(2)}
+                  </p>
+                </div>
+                <div className="bg-white p-4 rounded-md shadow-sm">
+                  <p className="text-sm text-gray-500">Profit Margin</p>
+                  <p className="text-xl font-bold">
+                    {(profitData.reduce((sum, day) => sum + (day.revenue - day.cost), 0) /
+                      profitData.reduce((sum, day) => sum + day.revenue, 0) * 100 || 0).toFixed(2)}%
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            <div>
+              <h3 className="font-semibold mb-2">Profit Trend</h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart
+                  data={profitData}
+                  margin={{ top: 20, right: 30, left: 20, bottom: 50 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" angle={-45} textAnchor="end" height={70} />
+                  <YAxis />
+                  <Tooltip formatter={(value) => [`KSh ${(typeof value === 'number' ? value.toFixed(2) : value)}`, 'Amount']} />
+                  <Legend />
+                  <Bar dataKey="revenue" fill="#3b82f6" name="Revenue" />
+                  <Bar dataKey="cost" fill="#ef4444" name="Cost" />
+                  <Bar dataKey="profit" fill="#10b981" name="Profit" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </TabsContent>
+        </Tabs>
+      </CardContent>
+      <CardFooter className="flex justify-end space-x-2">
+        <Button
+          variant="outline"
+          onClick={handleExportCSV}
+          disabled={isLoading}
+        >
+          <i className="fas fa-file-csv mr-2"></i> Export CSV
+        </Button>
+        <Button
+          onClick={handleExportPDF}
+          disabled={isLoading}
+        >
+          <i className="fas fa-file-pdf mr-2"></i> Export PDF
+        </Button>
+      </CardFooter>
+    </Card>
   );
 };
 
