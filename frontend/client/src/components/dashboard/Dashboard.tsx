@@ -96,33 +96,19 @@ const Dashboard = () => {
         queryFn: async () => {
             try {
                 const response = await apiRequest('/api/dashboard/category-chart/');
-                console.log('Category API response:', response); // Debug log
+                console.log('Category API response:', response);
                 
-                // Handle different response formats
-                let categoryArray;
-                if (response?.items) {
-                    categoryArray = response.items;
-                } else if (Array.isArray(response)) {
-                    categoryArray = response;
-                } else if (typeof response === 'object' && response !== null) {
-                    // If response is an object, try to extract array data
-                    categoryArray = Object.values(response).filter(Array.isArray)[0] || [];
-                } else {
-                    console.error('Unexpected category data structure:', response);
+                if (!Array.isArray(response)) {
+                    console.error('Category data is not an array:', response);
                     return [];
                 }
                 
-                if (!Array.isArray(categoryArray)) {
-                    console.error('Category data is not an array:', categoryArray);
-                    return [];
-                }
-                
-                // Filter out any invalid entries and transform the data
-                const validCategories = categoryArray
-                    .filter(item => item && typeof item === 'object' && item.name)
+                // Transform the data
+                const validCategories = response
+                    .filter(item => item && typeof item === 'object')
                     .map(item => ({
                         id: item.id || 0,
-                        name: item.name,
+                        name: item.name || 'Unnamed Category',
                         value: parseFloat(item.value || item.total || '0') || 0,
                         percentage: 0 // Will be calculated below
                     }));
