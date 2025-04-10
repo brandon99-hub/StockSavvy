@@ -9,6 +9,7 @@ import LowStockTable from "./LowStockTable";
 import RecentActivityTable from "./RecentActivityTable";
 import {Skeleton} from "../ui/skeleton";
 import { apiRequest } from "../../lib/queryClient";
+import { Loader2 } from "lucide-react";
 
 // Response type interfaces
 interface LowStockResponse {
@@ -62,13 +63,16 @@ const Dashboard = () => {
         });
 
     // Sales chart data query
-    const {data: salesData = [], isLoading: isSalesDataLoading} = useQuery<
-        SalesChartData[]
-    >({
+    const {data: salesData = [], isLoading: isSalesDataLoading} = useQuery<SalesChartData[]>({
         queryKey: ["/api/dashboard/sales-chart/"],
         queryFn: async () => {
             const response = await apiRequest('/api/dashboard/sales-chart/');
-            return Array.isArray(response) ? response : [];
+            if (!Array.isArray(response)) return [];
+            
+            return response.map(item => ({
+                date: new Date(item.date).toISOString().split('T')[0],
+                amount: Number(item.amount || 0)
+            }));
         }
     });
 
@@ -183,10 +187,22 @@ const Dashboard = () => {
             {/* Charts Row */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
                 <div className="lg:col-span-2 bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-                    <SalesChart data={salesData || []}/>
+                    {isSalesDataLoading ? (
+                        <div className="h-80 flex items-center justify-center">
+                            <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+                        </div>
+                    ) : (
+                        <SalesChart data={salesData || []}/>
+                    )}
                 </div>
                 <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-                    <CategoryChart data={categoryData || []}/>
+                    {isCategoryDataLoading ? (
+                        <div className="h-80 flex items-center justify-center">
+                            <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+                        </div>
+                    ) : (
+                        <CategoryChart data={categoryData || []}/>
+                    )}
                 </div>
             </div>
 

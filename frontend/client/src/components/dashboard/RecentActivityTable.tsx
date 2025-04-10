@@ -1,4 +1,8 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { useQuery, useQueryClient, QueryClient } from '@tanstack/react-query';
+import { Activity } from '../../types';
+import { apiRequest } from '../../lib/queryClient';
+import { Loader2 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useToast } from "../../hooks/use-toast";
 import { 
@@ -24,69 +28,71 @@ import {
   PaginationPrevious,
 } from "../ui/pagination";
 import { Badge } from '../ui/badge';
-import { Activity } from '../../types';
 
 interface RecentActivityTableProps {
   activities: Activity[];
-  queryClient?: any; // Optional QueryClient for refetching
+  queryClient: QueryClient;
 }
 
-const RecentActivityTable = ({ activities, queryClient }: RecentActivityTableProps) => {
-  const [page, setPage] = useState(1);
-  const itemsPerPage = 4;
+const RecentActivityTable: React.FC<RecentActivityTableProps> = ({
+  activities,
+  queryClient,
+}) => {
+  const { data: recentActivities, isLoading } = useQuery<Activity[]>({
+    queryKey: ['/api/activities/'],
+    queryFn: () => apiRequest('/api/activities/'),
+    refetchInterval: 30000, // Refetch every 30 seconds
+  });
+
   const { toast } = useToast();
-  
-  // Sort activities by created_at in descending order
-  const sortedActivities = [...activities].sort((a, b) => 
-    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  );
-  
-  const totalPages = Math.ceil(sortedActivities.length / itemsPerPage);
-  const startIndex = (page - 1) * itemsPerPage;
-  const displayActivities = sortedActivities.slice(startIndex, startIndex + itemsPerPage);
   
   const getActivityIcon = (type: string) => {
     switch (type) {
-      case 'stock_added':
-        return { icon: 'fas fa-plus', bg: 'bg-blue-100', color: 'text-blue-500' };
-      case 'stock_removed':
-        return { icon: 'fas fa-minus', bg: 'bg-red-100', color: 'text-red-500' };
-      case 'sale':
-        return { icon: 'fas fa-shopping-cart', bg: 'bg-green-100', color: 'text-green-500' };
-      case 'order':
-        return { icon: 'fas fa-truck', bg: 'bg-purple-100', color: 'text-purple-500' };
+      case 'product_added':
+        return '📦';
+      case 'product_updated':
+        return '🔄';
+      case 'product_deleted':
+        return '🗑️';
+      case 'sale_created':
+        return '💰';
+      case 'stock_updated':
+        return '📊';
       default:
-        return { icon: 'fas fa-info-circle', bg: 'bg-gray-100', color: 'text-gray-500' };
+        return '📝';
     }
   };
-  
-  const getActivityTitle = (type: string) => {
-    switch (type) {
-      case 'stock_added':
-        return 'Stock Added';
-      case 'stock_removed':
-        return 'Stock Removed';
-      case 'sale':
-        return 'Sale Completed';
-      case 'order':
-        return 'Order Placed';
+
+  const getActivityMessage = (activity: Activity) => {
+    if (activity.message) return activity.message;
+    
+    switch (activity.type) {
+      case 'product_added':
+        return `Added new product: ${activity.product?.name || 'Unknown product'}`;
+      case 'product_updated':
+        return `Updated product: ${activity.product?.name || 'Unknown product'}`;
+      case 'product_deleted':
+        return `Deleted product: ${activity.details?.product_name || 'Unknown product'}`;
+      case 'sale_created':
+        return `New sale: ${activity.details?.amount || 0} KES`;
+      case 'stock_updated':
+        return `Stock updated for: ${activity.product?.name || 'Unknown product'}`;
       default:
-        return 'Activity';
+        return activity.description;
     }
   };
-  
-  const handlePreviousPage = () => {
-    if (page > 1) {
-      setPage(page - 1);
-    }
-  };
-  
-  const handleNextPage = () => {
-    if (page < totalPages) {
-      setPage(page + 1);
-    }
-  };
-  
+
+  if (isLoading) {
+    return (
+      <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+        <h3 className="text-lg font-semibold text-gray-800 mb-4">Recent Activity</h3>
+        <div className="h-96 flex items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <Card className="lg:col-span-2">
       <CardHeader className="border-b border-gray-200 px-6 py-4 flex justify-between items-center">
@@ -135,44 +141,45 @@ const RecentActivityTable = ({ activities, queryClient }: RecentActivityTablePro
             </TableRow>
           </TableHeader>
           <TableBody>
-            {displayActivities.map((activity) => {
-              const { icon, bg, color } = getActivityIcon(activity.type);
-              
-              return (
-                <TableRow key={activity.id} className="hover:bg-gray-50">
-                  <TableCell>
-                    <div className="flex items-center">
-                      <div className={`rounded-full h-8 w-8 flex items-center justify-center ${bg} ${color} mr-3`}>
-                        <i className={icon}></i>
-                      </div>
-                      <span className="text-sm font-medium text-gray-900">
-                        {getActivityTitle(activity.type)}
-                      </span>
+            {recentActivities?.map((activity) => (
+              <TableRow key={activity.id} className="hover:bg-gray-50">
+                <TableCell>
+                  <div className="flex items-center">
+                    <div className="text-2xl">{getActivityIcon(activity.type)}</div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-gray-800">{getActivityMessage(activity)}</p>
                     </div>
-                  </TableCell>
-                  <TableCell className="text-sm text-gray-500">
-                    {activity.description}
-                  </TableCell>
-                  <TableCell className="text-sm text-gray-500">
-                    {activity.user.name}
-                  </TableCell>
-                  <TableCell className="text-sm text-gray-500">
-                    {formatDistanceToNow(new Date(activity.created_at), { addSuffix: true })}
-                  </TableCell>
-                  <TableCell>
-                    <Badge 
-                      variant="outline" 
-                      className={`px-2 text-xs leading-5 font-semibold rounded-full 
-                        ${activity.status === 'completed' ? 'bg-green-100 text-green-800' : 
-                          activity.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 
-                          'bg-gray-100 text-gray-800'}`}
-                    >
-                      {activity.status.charAt(0).toUpperCase() + activity.status.slice(1)}
-                    </Badge>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
+                  </div>
+                </TableCell>
+                <TableCell className="text-sm text-gray-500">
+                  {activity.description}
+                </TableCell>
+                <TableCell className="text-sm text-gray-500">
+                  {activity.user.name}
+                </TableCell>
+                <TableCell className="text-sm text-gray-500">
+                  {formatDistanceToNow(new Date(activity.created_at), { addSuffix: true })}
+                </TableCell>
+                <TableCell>
+                  <Badge 
+                    variant="outline" 
+                    className={`px-2 text-xs leading-5 font-semibold rounded-full 
+                      ${activity.status === 'completed' ? 'bg-green-100 text-green-800' : 
+                        activity.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 
+                        'bg-gray-100 text-gray-800'}`}
+                  >
+                    {activity.status.charAt(0).toUpperCase() + activity.status.slice(1)}
+                  </Badge>
+                </TableCell>
+              </TableRow>
+            ))}
+            {(!recentActivities || recentActivities.length === 0) && (
+              <TableRow>
+                <TableCell colSpan={5} className="text-center text-gray-500 py-8">
+                  No recent activity
+                </TableCell>
+              </TableRow>
+            )}
           </TableBody>
         </Table>
       </CardContent>
@@ -191,41 +198,10 @@ const RecentActivityTable = ({ activities, queryClient }: RecentActivityTablePro
               description: "Displaying the most recent system activities.",
               variant: "default",
             });
-            
-            // Refresh the current page data
-            setPage(1);
           }}
         >
           View all activity
         </Button>
-        <Pagination>
-          <PaginationContent>
-            <PaginationItem>
-              <PaginationPrevious 
-                onClick={handlePreviousPage} 
-                className={page === 1 ? 'opacity-50 cursor-not-allowed' : ''} 
-              />
-            </PaginationItem>
-            {Array.from({ length: Math.min(totalPages, 3) }).map((_, index) => (
-              <PaginationItem key={index}>
-                <Button 
-                  variant={page === index + 1 ? 'outline' : 'ghost'}
-                  size="sm" 
-                  className={`px-3 py-1 text-sm rounded ${page === index + 1 ? 'bg-blue-50 text-blue-600 border-gray-300' : ''}`}
-                  onClick={() => setPage(index + 1)}
-                >
-                  {index + 1}
-                </Button>
-              </PaginationItem>
-            ))}
-            <PaginationItem>
-              <PaginationNext 
-                onClick={handleNextPage} 
-                className={page === totalPages ? 'opacity-50 cursor-not-allowed' : ''} 
-              />
-            </PaginationItem>
-          </PaginationContent>
-        </Pagination>
       </CardFooter>
     </Card>
   );

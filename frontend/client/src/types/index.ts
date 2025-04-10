@@ -66,6 +66,12 @@ export interface Activity {
   id: number;
   type: string;
   description: string;
+  message: string;
+  details: {
+    product_name?: string;
+    amount?: number;
+    [key: string]: any;
+  };
   product?: Product;
   user: User;
   created_at: string;
