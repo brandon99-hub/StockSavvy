@@ -50,9 +50,19 @@ export const apiRequest = async (url: string, options: RequestInit = {}) => {
 
     const contentType = response.headers.get('content-type');
     if (contentType && contentType.includes('application/json')) {
-      return await response.json();
+      const data = await response.json();
+      // Ensure we're returning an array if the response is expected to be an array
+      if (Array.isArray(data)) {
+        return data;
+      }
+      // If it's an object with a 'results' property (common in Django REST Framework)
+      if (data && typeof data === 'object' && 'results' in data) {
+        return data.results;
+      }
+      return data;
     } else {
-      return await response.text();
+      const text = await response.text();
+      return text;
     }
   } catch (error) {
     console.error('API request failed:', error);
