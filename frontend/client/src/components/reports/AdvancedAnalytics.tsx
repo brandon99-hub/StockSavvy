@@ -311,72 +311,55 @@ const AdvancedAnalytics = () => {
     const salesData = useMemo(() => {
         if (!Array.isArray(salesChartData)) return [];
         return salesChartData.map(item => ({
-            date: new Date(item.date),
-            amount: item.amount
+            date: format(new Date(item.date), 'yyyy-MM-dd'),
+            amount: Number(item.amount) || 0,
+            count: Number(item.count) || 0  // Add count for total sales
         }));
     }, [salesChartData]);
 
     const categoryData = useMemo(() => {
         if (!Array.isArray(categoryChartData)) return [];
         return categoryChartData.map(item => ({
-            name: item.name,
-            percentage: item.percentage,
-            value: item.value || 0
+            name: item.category_name || 'Unknown',
+            value: Number(item.total_sales) || 0,
+            percentage: Number(item.percentage) || 0,
+            productCount: Number(item.product_count) || 0,
+            totalQuantity: Number(item.total_quantity) || 0,
+            lowStockItems: Number(item.low_stock_count) || 0
         }));
     }, [categoryChartData]);
 
-    // Create profit data from sales data
+    // Create profit data directly from dashboard stats
     const profitData = useMemo(() => {
-        if (!Array.isArray(sales)) return [];
+        if (!stats || typeof stats !== 'object') return [];
         
-        // Group sales by date
-        const salesByDate = new Map<string, {
-            revenue: number,
-            cost: number,
-            profit: number,
-            discount: number
-        }>();
-        
-        sales.forEach(sale => {
-            const saleDate = format(new Date(sale.created_at), 'yyyy-MM-dd');
-            const current = salesByDate.get(saleDate) || { revenue: 0, cost: 0, profit: 0, discount: 0 };
-            
-            // Calculate revenue
-            const revenue = Number(sale.total_amount || '0');
-            
-            // Calculate cost and profit
-            let cost = 0;
-            let profit = 0;
-            
-            if (Array.isArray(sale.items)) {
-                sale.items.forEach(item => {
-                    const product = productsById.get(item.product_id);
-                    if (product) {
-                        const itemCost = Number(product.buy_price || '0') * item.quantity;
-                        cost += itemCost;
-                    }
-                });
-            }
-            
-            profit = revenue - cost;
-            
-            // Update the map
-            salesByDate.set(saleDate, {
-                revenue: current.revenue + revenue,
-                cost: current.cost + cost,
-                profit: current.profit + profit,
-                discount: current.discount + Number(sale.discount || '0')
-            });
-        });
-        
-        // Convert to array and sort by date
-        return Array.from(salesByDate.entries())
-            .map(([date, data]) => ({
-                date,
-                ...data
-            }))
-            .sort((a, b) => a.date.localeCompare(b.date));
-    }, [sales, productsById]);
+        const today = new Date();
+        return [{
+            date: format(today, 'yyyy-MM-dd'),
+            revenue: Number(stats.totalRevenue) || 0,
+            cost: Number(stats.totalCost) || 0,
+            profit: Number(stats.profit) || 0
+        }];
+    }, [stats]);
+
+    // Calculate metrics
+    const metrics = useMemo(() => {
+        if (!stats || typeof stats !== 'object') return {
+            totalRevenue: 0,
+            totalSales: 0,
+            averageOrderValue: 0
+        };
+
+        const totalRevenue = Number(stats.totalRevenue) || 0;
+        const totalSales = Number(stats.totalSales) || 0;
+        const averageOrderValue = totalSales > 0 ? totalRevenue / totalSales : 0;
+
+        return {
+            totalRevenue,
+            totalSales,
+            averageOrderValue
+        };
+    }, [stats]);
 
     // Calculate year-over-year comparison data
     const yearOverYearData = useMemo((): ComparisonData[] => {
@@ -623,74 +606,29 @@ const AdvancedAnalytics = () => {
             ) : (
                 <>
                     {/* Key Performance Indicators */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="grid gap-4 md:grid-cols-3">
                         <Card>
-                            <CardHeader className="pb-2">
-                                <CardTitle className="text-sm font-medium text-gray-500">Total Revenue</CardTitle>
+                            <CardHeader>
+                                <CardTitle>Total Revenue</CardTitle>
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-bold">
-                                    {formatCurrency(
-                                        stats?.totalRevenue ||
-                                        calculateTotalRevenue(filteredSales)
-                                    )}
-                                </div>
-                                <p className="text-xs text-gray-500 mt-1">
-                                    {yearOverYearData && yearOverYearData[0]?.change ? (
-                                        <span
-                                            className={`flex items-center ${yearOverYearData[0].change > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {yearOverYearData[0].change > 0 ? <TrendingUp className="h-3 w-3 mr-1"/> :
-                          <TrendingDown className="h-3 w-3 mr-1"/>}
-                                            {formatPercentage(yearOverYearData[0].change)} vs previous year
-                    </span>
-                                    ) : null}
-                                </p>
+                                <div className="text-2xl font-bold">{formatCurrency(metrics.totalRevenue)}</div>
                             </CardContent>
                         </Card>
-
                         <Card>
-                            <CardHeader className="pb-2">
-                                <CardTitle className="text-sm font-medium text-gray-500">Total Sales</CardTitle>
+                            <CardHeader>
+                                <CardTitle>Total Sales</CardTitle>
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-bold">
-                                    {stats?.totalSales || 0}
-                                </div>
-                                <p className="text-xs text-gray-500 mt-1">
-                                    {yearOverYearData && yearOverYearData[1]?.change ? (
-                                        <span
-                                            className={`flex items-center ${yearOverYearData[1].change > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {yearOverYearData[1].change > 0 ? <TrendingUp className="h-3 w-3 mr-1"/> :
-                          <TrendingDown className="h-3 w-3 mr-1"/>}
-                                            {formatPercentage(yearOverYearData[1].change)} vs previous year
-                    </span>
-                                    ) : null}
-                                </p>
+                                <div className="text-2xl font-bold">{metrics.totalSales}</div>
                             </CardContent>
                         </Card>
-
                         <Card>
-                            <CardHeader className="pb-2">
-                                <CardTitle className="text-sm font-medium text-gray-500">Average Order Value</CardTitle>
+                            <CardHeader>
+                                <CardTitle>Average Order Value</CardTitle>
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-bold">
-                                    {formatCurrency(
-                                        typeof stats?.averageOrderValue === 'string' ?
-                                            parseFloat(stats.averageOrderValue) :
-                                            stats?.averageOrderValue || 0
-                                    )}
-                                </div>
-                                <p className="text-xs text-gray-500 mt-1">
-                                    {yearOverYearData && yearOverYearData[2]?.change ? (
-                                        <span
-                                            className={`flex items-center ${yearOverYearData[2].change > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {yearOverYearData[2].change > 0 ? <TrendingUp className="h-3 w-3 mr-1"/> :
-                          <TrendingDown className="h-3 w-3 mr-1"/>}
-                                            {formatPercentage(yearOverYearData[2].change)} vs previous year
-                    </span>
-                                    ) : null}
-                                </p>
+                                <div className="text-2xl font-bold">{formatCurrency(metrics.averageOrderValue)}</div>
                             </CardContent>
                         </Card>
                     </div>
