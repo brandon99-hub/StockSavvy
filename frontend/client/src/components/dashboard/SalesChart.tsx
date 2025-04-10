@@ -21,14 +21,17 @@ const SalesChart = ({ data }: SalesChartProps) => {
         chartInstance.current.destroy();
       }
       
+      // Ensure data is an array
+      const safeData = Array.isArray(data) ? data : [];
+      
       // Filter data based on selected view
-      let filteredData = data;
+      let filteredData = safeData;
       if (view === 'day') {
-        filteredData = data.slice(-7); // Last 7 days
+        filteredData = safeData.slice(-7); // Last 7 days
       } else if (view === 'week') {
-        filteredData = data.slice(-4); // Last 4 weeks
+        filteredData = safeData.slice(-4); // Last 4 weeks
       } else if (view === 'month') {
-        filteredData = data.slice(-12); // Last 12 months
+        filteredData = safeData.slice(-12); // Last 12 months
       }
       
       // Format labels based on view
