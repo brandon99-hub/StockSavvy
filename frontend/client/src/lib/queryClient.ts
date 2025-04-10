@@ -12,55 +12,50 @@ import { QueryClient } from "@tanstack/react-query";
 // Base URL for API requests
 const API_BASE_URL = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 
-// Helper function to handle API responses
-async function handleResponse(response: Response) {
-  if (!response.ok) {
-    if (response.status === 401) {
-      // Clear token and redirect to login
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
-      throw new Error('Unauthorized');
-    }
-    
-    if (response.status === 403) {
-      throw new Error('Forbidden: You do not have permission to access this resource');
-    }
-    
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.message || `Error: ${response.status} ${response.statusText}`);
-  }
-  return response.json();
-}
+// Helper function to handle unauthorized responses
+const handleUnauthorized = () => {
+  localStorage.removeItem('token');
+  window.location.href = '/login';
+};
 
 // API request function
 export const apiRequest = async (url: string, options: RequestInit = {}) => {
   const token = localStorage.getItem('token');
   
-  // Ensure token is a string
-  if (token && typeof token !== 'string') {
-    console.error('Invalid token format:', token);
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    window.location.href = '/login';
-    throw new Error('Invalid token format');
+  if (!token) {
+    handleUnauthorized();
+    throw new Error('No authentication token found');
   }
 
-  const headers: HeadersInit = {
+  const headers = {
     'Content-Type': 'application/json',
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    'Authorization': `Bearer ${token}`,
     ...options.headers,
   };
-  
+
   try {
     const response = await fetch(`${API_BASE_URL}${url}`, {
       ...options,
       headers,
     });
-    
-    return handleResponse(response);
+
+    if (response.status === 401) {
+      handleUnauthorized();
+      throw new Error('Unauthorized');
+    }
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      return await response.json();
+    } else {
+      return await response.text();
+    }
   } catch (error) {
-    console.error(`API request failed: ${url}`, error);
+    console.error('API request failed:', error);
     throw error;
   }
 };
