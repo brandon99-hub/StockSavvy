@@ -248,10 +248,32 @@ const AdvancedAnalytics = () => {
         });
     }, [activities, dateRange]);
 
+    // Transform data for analytics
+    const salesData = useMemo(() => {
+        if (!Array.isArray(salesChartData)) return [];
+        return salesChartData.map(item => ({
+            date: new Date(item.date),
+            amount: item.amount
+        }));
+    }, [salesChartData]);
+
+    const categoryData = useMemo(() => {
+        if (!Array.isArray(categoryChartData)) return [];
+        return categoryChartData.map(item => ({
+            name: item.name,
+            percentage: item.percentage
+        }));
+    }, [categoryChartData]);
+
     // Calculate year-over-year comparison data
     const yearOverYearData = useMemo((): ComparisonData[] => {
+        if (!Array.isArray(sales)) return [];
+        
         // Get current period data
-        const currentPeriodSales = filteredSales;
+        const currentPeriodSales = sales.filter(sale => {
+            const saleDate = new Date(sale.created_at);
+            return saleDate >= dateRange.start && saleDate <= dateRange.end;
+        });
 
         // Calculate previous period date range (1 year before)
         const previousStart = subYears(dateRange.start, 1);
@@ -306,7 +328,7 @@ const AdvancedAnalytics = () => {
                     : 0
             }
         ];
-    }, [filteredSales, sales, dateRange]);
+    }, [sales, dateRange]);
 
     // Calculate stock movement data
     const stockMovementData = useMemo((): StockMovementData[] => {
@@ -365,6 +387,8 @@ const AdvancedAnalytics = () => {
 
     // Calculate top selling products
     const topProducts = useMemo((): TopProductData[] => {
+        if (!Array.isArray(products) || !Array.isArray(sales)) return [];
+        
         const productSalesMap = new Map<number, {
             sales: number,
             revenue: number,
@@ -372,7 +396,7 @@ const AdvancedAnalytics = () => {
         }>();
 
         // Count sales for each product
-        filteredSales.forEach(sale => {
+        sales.forEach(sale => {
             const items = sale.items || [];
             items.forEach(item => {
                 const product = productsById.get(item.product_id);
@@ -416,7 +440,7 @@ const AdvancedAnalytics = () => {
             })
             .sort((a, b) => b.sales - a.sales)
             .slice(0, 5);
-    }, [filteredSales, productsById]);
+    }, [sales, productsById]);
 
     // Format currency values
     const formatCurrency = (value: number | undefined | null): string => {
@@ -468,17 +492,6 @@ const AdvancedAnalytics = () => {
         }
         return null;
     };
-
-    // Transform data for analytics
-    const salesData = salesChartData.map(item => ({
-        date: new Date(item.date),
-        amount: item.amount
-    }));
-
-    const categoryData = categoryChartData.map(item => ({
-        name: item.name,
-        percentage: item.percentage
-    }));
 
     return (
         <div className="space-y-6">
