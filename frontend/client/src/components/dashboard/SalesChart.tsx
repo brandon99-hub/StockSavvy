@@ -1,194 +1,77 @@
-import React, { useState, useEffect, useRef } from 'react';
-import Chart from 'chart.js/auto';
+import React from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
-interface SalesChartProps {
-  data: {
+interface SalesDataPoint {
     date: string;
     amount: number;
-  }[];
+}
+
+interface SalesChartProps {
+    data: SalesDataPoint[];
+    view: 'day' | 'week' | 'month';
 }
 
 const formatCurrency = (amount: number): string => {
-  return new Intl.NumberFormat('en-KE', {
-    style: 'currency',
-    currency: 'KES',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
+    return new Intl.NumberFormat('en-KE', {
+        style: 'currency',
+        currency: 'KES',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0
+    }).format(amount);
 };
 
-const SalesChart: React.FC<SalesChartProps> = ({ data }) => {
-  const chartRef = useRef<HTMLCanvasElement>(null);
-  const chartInstance = useRef<Chart | null>(null);
-  const [view, setView] = useState<'day' | 'week' | 'month'>('day');
+const SalesChart: React.FC<SalesChartProps> = ({ data = [], view }) => {
+    const getFilteredData = () => {
+        if (!Array.isArray(data)) {
+            console.error('Invalid data format:', data);
+            return [];
+        }
 
-  useEffect(() => {
-    if (!chartRef.current || !data) return;
+        const now = new Date();
+        const filteredData = [...data].sort((a, b) => 
+            new Date(a.date).getTime() - new Date(b.date).getTime()
+        );
 
-    // Destroy existing chart
-    if (chartInstance.current) {
-      chartInstance.current.destroy();
-    }
-
-    const ctx = chartRef.current.getContext('2d');
-    if (!ctx) return;
-
-    // Ensure data is sorted by date
-    const sortedData = [...data].sort((a, b) => 
-      new Date(a.date).getTime() - new Date(b.date).getTime()
-    );
-
-    // Filter data based on view
-    const now = new Date();
-    const filteredData = sortedData.filter(item => {
-      const itemDate = new Date(item.date);
-      switch (view) {
-        case 'day':
-          return itemDate.getDate() === now.getDate() &&
-                 itemDate.getMonth() === now.getMonth() &&
-                 itemDate.getFullYear() === now.getFullYear();
-        case 'week':
-          const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-          return itemDate >= weekAgo;
-        case 'month':
-          return itemDate.getMonth() === now.getMonth() &&
-                 itemDate.getFullYear() === now.getFullYear();
-        default:
-          return true;
-      }
-    });
-
-    // If no data, show empty state with proper axes
-    if (filteredData.length === 0) {
-      filteredData.push({
-        date: new Date().toISOString(),
-        amount: 0
-      });
-    }
-
-    // Format dates for display
-    const formatDate = (dateStr: string) => {
-      const date = new Date(dateStr);
-      switch (view) {
-        case 'day':
-          return date.toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' });
-        case 'week':
-          return date.toLocaleDateString('en-KE', { weekday: 'short', day: 'numeric' });
-        case 'month':
-          return date.toLocaleDateString('en-KE', { day: 'numeric', month: 'short' });
-        default:
-          return date.toLocaleDateString('en-KE');
-      }
+        switch (view) {
+            case 'day':
+                return filteredData.slice(-24);
+            case 'week':
+                return filteredData.slice(-7);
+            case 'month':
+            default:
+                return filteredData.slice(-30);
+        }
     };
 
-    // Find max amount for y-axis scaling
-    const maxAmount = Math.max(...filteredData.map(item => item.amount));
-    const yAxisMax = maxAmount === 0 ? 1000 : maxAmount * 1.2;
+    const chartData = getFilteredData();
 
-    chartInstance.current = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: filteredData.map(item => formatDate(item.date)),
-        datasets: [{
-          label: 'Sales',
-          data: filteredData.map(item => item.amount),
-          borderColor: '#3b82f6',
-          backgroundColor: 'rgba(59, 130, 246, 0.1)',
-          fill: true,
-          tension: 0.4,
-          pointRadius: 4,
-          pointBackgroundColor: '#3b82f6',
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          tooltip: {
-            callbacks: {
-              label: (context) => {
-                const value = context.parsed.y;
-                return `Sales: ${formatCurrency(value)}`;
-              }
-            }
-          },
-          legend: {
-            display: false
-          }
-        },
-        scales: {
-          x: {
-            grid: {
-              display: false
-            },
-            ticks: {
-              maxRotation: 0,
-              autoSkip: true,
-              maxTicksLimit: 8
-            }
-          },
-          y: {
-            beginAtZero: true,
-            max: yAxisMax,
-            ticks: {
-              callback: (value) => formatCurrency(value as number),
-              stepSize: Math.ceil(yAxisMax / 5)
-            }
-          }
-        },
-        interaction: {
-          intersect: false,
-          mode: 'index'
-        }
-      }
-    });
-  }, [data, view]);
-
-  return (
-    <div className="w-full">
-      <div className="flex justify-between items-center mb-6">
-        <h3 className="text-lg font-semibold text-gray-800">Sales Overview</h3>
-        <div className="flex space-x-2">
-          <button 
-            type="button"
-            className={`px-3 py-1.5 text-sm font-medium rounded transition-colors ${
-              view === 'day' 
-                ? 'bg-blue-50 text-blue-600' 
-                : 'text-gray-600 hover:bg-gray-100'
-            }`}
-            onClick={() => setView('day')}
-          >
-            Day
-          </button>
-          <button 
-            type="button"
-            className={`px-3 py-1.5 text-sm font-medium rounded transition-colors ${
-              view === 'week' 
-                ? 'bg-blue-50 text-blue-600' 
-                : 'text-gray-600 hover:bg-gray-100'
-            }`}
-            onClick={() => setView('week')}
-          >
-            Week
-          </button>
-          <button 
-            type="button"
-            className={`px-3 py-1.5 text-sm font-medium rounded transition-colors ${
-              view === 'month' 
-                ? 'bg-blue-50 text-blue-600' 
-                : 'text-gray-600 hover:bg-gray-100'
-            }`}
-            onClick={() => setView('month')}
-          >
-            Month
-          </button>
+    return (
+        <div style={{ width: '100%', height: 300 }}>
+            <ResponsiveContainer>
+                <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis 
+                        dataKey="date" 
+                        tickFormatter={(date) => new Date(date).toLocaleDateString()}
+                    />
+                    <YAxis 
+                        tickFormatter={(value) => formatCurrency(value)}
+                    />
+                    <Tooltip 
+                        formatter={(value) => [formatCurrency(Number(value)), 'Sales']}
+                        labelFormatter={(label) => new Date(label).toLocaleDateString()}
+                    />
+                    <Line 
+                        type="monotone" 
+                        dataKey="amount" 
+                        stroke="#8884d8" 
+                        strokeWidth={2}
+                        dot={false}
+                    />
+                </LineChart>
+            </ResponsiveContainer>
         </div>
-      </div>
-      <div className="h-64">
-        <canvas ref={chartRef} />
-      </div>
-    </div>
-  );
+    );
 };
 
 export default SalesChart;

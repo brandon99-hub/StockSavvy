@@ -69,8 +69,8 @@ const Dashboard = () => {
         queryFn: async () => {
             try {
                 const response = await apiRequest('/api/dashboard/sales-chart/');
-                // Check if response is an object with a data/results property
-                const salesArray = response?.data || response?.results || response;
+                // The API returns { items: [], summary: {} }
+                const salesArray = response?.items || [];
                 
                 if (!Array.isArray(salesArray)) {
                     console.error('Sales data structure:', response);
