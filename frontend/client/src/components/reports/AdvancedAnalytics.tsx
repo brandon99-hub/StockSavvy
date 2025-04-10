@@ -307,51 +307,53 @@ const AdvancedAnalytics = () => {
         return null;
     };
 
-    // Transform data for analytics
+    // Transform data for analytics with safety checks
     const salesData = useMemo(() => {
-        if (!Array.isArray(salesChartData)) return [];
+        if (!salesChartData || !Array.isArray(salesChartData)) return [];
         return salesChartData.map(item => ({
-            date: format(new Date(item.date), 'yyyy-MM-dd'),
-            amount: Number(item.amount) || 0,
-            count: Number(item.count) || 0  // Add count for total sales
+            date: format(new Date(item.date || new Date()), 'yyyy-MM-dd'),
+            amount: Number(item.amount || 0),
+            count: Number(item.count || 0)
         }));
     }, [salesChartData]);
 
     const categoryData = useMemo(() => {
-        if (!Array.isArray(categoryChartData)) return [];
+        if (!categoryChartData || !Array.isArray(categoryChartData)) return [];
         return categoryChartData.map(item => ({
-            name: item.category_name || 'Unknown',
-            value: Number(item.total_sales) || 0,
-            percentage: Number(item.percentage) || 0,
-            productCount: Number(item.product_count) || 0,
-            totalQuantity: Number(item.total_quantity) || 0,
-            lowStockItems: Number(item.low_stock_count) || 0
+            id: Number(item.id || 0),
+            name: String(item.name || 'Unknown'),
+            value: Number(item.value || 0),
+            percentage: Number(item.percentage || 0)
         }));
     }, [categoryChartData]);
 
-    // Create profit data directly from dashboard stats
+    // Create profit data with safety checks
     const profitData = useMemo(() => {
         if (!stats || typeof stats !== 'object') return [];
         
         const today = new Date();
-        return [{
+        const data = {
             date: format(today, 'yyyy-MM-dd'),
-            revenue: Number(stats.totalRevenue) || 0,
-            cost: Number(stats.totalCost) || 0,
-            profit: Number(stats.profit) || 0
-        }];
+            revenue: Number(stats.totalRevenue || 0),
+            cost: Number(stats.totalCost || 0),
+            profit: Number(stats.profit || 0)
+        };
+        
+        return [data];
     }, [stats]);
 
-    // Calculate metrics
+    // Calculate metrics with safety checks
     const metrics = useMemo(() => {
-        if (!stats || typeof stats !== 'object') return {
-            totalRevenue: 0,
-            totalSales: 0,
-            averageOrderValue: 0
-        };
+        if (!stats || typeof stats !== 'object') {
+            return {
+                totalRevenue: 0,
+                totalSales: 0,
+                averageOrderValue: 0
+            };
+        }
 
-        const totalRevenue = Number(stats.totalRevenue) || 0;
-        const totalSales = Number(stats.totalSales) || 0;
+        const totalRevenue = Number(stats.totalRevenue || 0);
+        const totalSales = Number(stats.totalSales || 0);
         const averageOrderValue = totalSales > 0 ? totalRevenue / totalSales : 0;
 
         return {
@@ -426,8 +428,10 @@ const AdvancedAnalytics = () => {
         ];
     }, [sales, dateRange]);
 
-    // Calculate stock movement data
-    const stockMovementData = useMemo((): StockMovementData[] => {
+    // Calculate stock movement data with safety checks
+    const stockMovementData = useMemo(() => {
+        if (!Array.isArray(activities)) return [];
+        
         const movementMap = new Map<string, { additions: number, removals: number }>();
 
         // Initialize with the date range
@@ -438,8 +442,10 @@ const AdvancedAnalytics = () => {
             movementMap.set(dateStr, { additions: 0, removals: 0 });
         }
 
-        // Process activities to track stock movements
+        // Process activities
         filteredActivities.forEach(activity => {
+            if (!activity || !activity.created_at) return;
+            
             const activityDate = format(new Date(activity.created_at), 'yyyy-MM-dd');
             const current = movementMap.get(activityDate) || { additions: 0, removals: 0 };
 
@@ -456,33 +462,18 @@ const AdvancedAnalytics = () => {
             }
         });
 
-        // Convert map to array for chart
-        return Array.from(movementMap.entries()).map(([date, data]) => ({
-            date,
-            additions: data.additions,
-            removals: data.removals,
-            net: data.additions - data.removals
-        })).sort((a, b) => a.date.localeCompare(b.date));
+        return Array.from(movementMap.entries())
+            .map(([date, data]) => ({
+                date,
+                additions: data.additions,
+                removals: data.removals,
+                net: data.additions - data.removals
+            }))
+            .sort((a, b) => a.date.localeCompare(b.date));
     }, [filteredActivities, dateRange]);
 
-    // Calculate category revenue for sales by category chart
-    const categoryRevenue = useMemo(() => {
-        const revenueMap = new Map<number, number>();
-        filteredSales.forEach(sale => {
-            const items = sale.items || [];
-            items.forEach(item => {
-                const product = productsById.get(item.product_id);
-                if (product?.category && typeof product.category === 'number') {
-                    const current = revenueMap.get(product.category) || 0;
-                    revenueMap.set(product.category, current + Number(item.total_price));
-                }
-            });
-        });
-        return revenueMap;
-    }, [filteredSales, productsById]);
-
-    // Calculate top selling products
-    const topProducts = useMemo((): TopProductData[] => {
+    // Calculate top products with safety checks
+    const topProducts = useMemo(() => {
         if (!Array.isArray(products) || !Array.isArray(sales)) return [];
         
         const productSalesMap = new Map<number, {
@@ -491,52 +482,53 @@ const AdvancedAnalytics = () => {
             profit: number
         }>();
 
-        // Count sales for each product
+        // Process sales data
         sales.forEach(sale => {
-            const items = sale.items || [];
-            items.forEach(item => {
+            if (!sale || !Array.isArray(sale.items)) return;
+            
+            sale.items.forEach(item => {
+                if (!item || !item.product_id) return;
+                
                 const product = productsById.get(item.product_id);
                 if (!product) return;
 
-                const salesCount = productSalesMap.get(item.product_id);
-
-                // Use sale item price or product sell price as fallback
-                const itemPrice = Number(item.unit_price || product.sell_price || '0');
-                const revenue = itemPrice * item.quantity;
-                const cost = Number(product.buy_price || '0') * item.quantity;
+                const quantity = Number(item.quantity || 0);
+                const itemPrice = Number(item.unit_price || product.sell_price || 0);
+                const revenue = itemPrice * quantity;
+                const cost = Number(product.buy_price || 0) * quantity;
                 const profit = revenue - cost;
 
-                if (salesCount) {
-                    productSalesMap.set(item.product_id, {
-                        sales: salesCount.sales + item.quantity,
-                        revenue: salesCount.revenue + revenue,
-                        profit: salesCount.profit + profit
-                    });
-                } else {
-                    productSalesMap.set(item.product_id, {
-                        sales: item.quantity,
-                        revenue,
-                        profit
-                    });
-                }
+                const existing = productSalesMap.get(item.product_id) || {
+                    sales: 0,
+                    revenue: 0,
+                    profit: 0
+                };
+
+                productSalesMap.set(item.product_id, {
+                    sales: existing.sales + quantity,
+                    revenue: existing.revenue + revenue,
+                    profit: existing.profit + profit
+                });
             });
         });
 
-        // Convert to array and sort by sales
         return Array.from(productSalesMap.entries())
             .map(([productId, data]) => {
-                const product = productsById.get(productId)!;
+                const product = productsById.get(productId);
+                if (!product) return null;
+                
                 return {
                     id: productId,
-                    name: product.name,
+                    name: product.name || 'Unknown Product',
                     sales: data.sales,
                     revenue: data.revenue,
                     profit: data.profit
                 };
             })
+            .filter((item): item is NonNullable<typeof item> => item !== null)
             .sort((a, b) => b.sales - a.sales)
             .slice(0, 5);
-    }, [sales, productsById]);
+    }, [sales, productsById, products]);
 
     return (
         <div className="space-y-6">

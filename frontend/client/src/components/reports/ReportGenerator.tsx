@@ -127,24 +127,44 @@ const ReportGenerator = () => {
   // Calculate loading state
   const isLoading = isStatsLoading || isSalesDataLoading || isCategoryDataLoading || isLowStockLoading || isProductsLoading || isCategoriesLoading || isSalesLoading;
 
-  // Transform data for reports
-  const inventoryReportData = lowStockData.items.map(product => ({
-    name: product.name,
-    category: categories.find(cat => cat.id === product.category_id)?.name || 'Unknown',
-    quantity: product.quantity,
-    reorderLevel: product.reorder_level,
-    status: product.quantity <= 0 ? 'Out of Stock' : product.quantity <= product.reorder_level ? 'Low Stock' : 'In Stock'
-  }));
+  // Transform data for reports with safety checks
+  const inventoryReportData = React.useMemo(() => {
+    if (!Array.isArray(lowStockData?.items)) return [];
+    
+    return lowStockData.items.map(product => ({
+      name: String(product.name || ''),
+      category: String(product.category_name || 'Unknown'),
+      quantity: Number(product.quantity || 0),
+      reorderLevel: Number(product.reorder_level || 0),
+      status: Number(product.quantity || 0) <= 0 ? 'Out of Stock' : 
+              Number(product.quantity || 0) <= Number(product.reorder_level || 0) ? 'Low Stock' : 'In Stock'
+    }));
+  }, [lowStockData]);
 
-  const salesReportData = salesChartData.map(item => ({
-    date: format(new Date(item.date), 'MMM dd, yyyy'),
-    amount: item.amount
-  }));
+  const salesReportData = React.useMemo(() => {
+    if (!Array.isArray(salesChartData)) return [];
+    
+    return salesChartData.map(item => ({
+      date: format(new Date(item.date || new Date()), 'MMM dd, yyyy'),
+      amount: Number(item.amount || 0),
+      count: Number(item.count || 0)
+    }));
+  }, [salesChartData]);
 
-  const profitReportData = categoryChartData.map(item => ({
-    category: item.name,
-    percentage: item.percentage
-  }));
+  const profitReportData = React.useMemo(() => {
+    if (!Array.isArray(categoryChartData)) return [];
+    
+    return categoryChartData.map(item => ({
+      category: String(item.name || 'Unknown'),
+      revenue: Number(item.value || 0),
+      percentage: Number(item.percentage || 0)
+    }));
+  }, [categoryChartData]);
+
+  // Format currency values
+  const formatCurrency = (value: number): string => {
+    return `KSh ${value.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
 
   // Transform categories array to an object for easier lookup
   const categoryMap = categories.reduce((acc, category) => {
@@ -250,227 +270,200 @@ const ReportGenerator = () => {
   };
 
   return (
-    <Card className="shadow-sm">
-      <CardHeader>
-        <CardTitle>Generate Reports</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        <Tabs value={reportType} onValueChange={(value) => setReportType(value as any)}>
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="inventory">Inventory Report</TabsTrigger>
-            <TabsTrigger value="sales">Sales Report</TabsTrigger>
-            <TabsTrigger value="profit">Profit Report</TabsTrigger>
-          </TabsList>
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold">Reports</h2>
+        <div className="flex space-x-4">
+          <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline">
+                {format(dateRange.start, 'MMM d, yyyy')} - {format(dateRange.end, 'MMM d, yyyy')}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="end">
+              <Calendar
+                mode="range"
+                selected={{
+                  from: dateRange.start,
+                  to: dateRange.end
+                }}
+                onSelect={(range) => {
+                  if (range?.from && range?.to) {
+                    setDateRange({
+                      start: startOfDay(range.from),
+                      end: endOfDay(range.to)
+                    });
+                  }
+                  setCalendarOpen(false);
+                }}
+                initialFocus
+              />
+            </PopoverContent>
+          </Popover>
+          <Button onClick={() => exportToCSV(reportType === 'inventory' ? inventoryReportData : 
+                                          reportType === 'sales' ? salesReportData : 
+                                          profitReportData, 
+                                          `${reportType}_report_${format(new Date(), 'yyyy-MM-dd')}`)}>
+            Export to CSV
+          </Button>
+        </div>
+      </div>
 
-          <div className="mt-4">
-            {(reportType === 'sales' || reportType === 'profit') && (
-              <div className="mb-4">
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm font-medium">Date Range:</span>
-                  <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" className="justify-start text-left font-normal">
-                        <i className="fas fa-calendar-alt mr-2 text-gray-400"></i>
-                        {format(dateRange.start, 'PPP')} - {format(dateRange.end, 'PPP')}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="range"
-                        selected={{
-                          from: dateRange.start,
-                          to: dateRange.end
-                        }}
-                        onSelect={(range) => {
-                          if (range?.from && range?.to) {
-                            setDateRange({
-                              start: startOfDay(range.from),
-                              end: endOfDay(range.to)
-                            });
-                            setCalendarOpen(false);
-                          }
-                        }}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-              </div>
-            )}
-          </div>
+      <Tabs value={reportType} onValueChange={(value: 'inventory' | 'sales' | 'profit') => setReportType(value)}>
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="inventory">Inventory Report</TabsTrigger>
+          <TabsTrigger value="sales">Sales Report</TabsTrigger>
+          <TabsTrigger value="profit">Profit Report</TabsTrigger>
+        </TabsList>
 
-          <TabsContent value="inventory" className="space-y-4">
-            <div className="bg-gray-50 p-4 rounded-md">
-              <h3 className="font-semibold mb-2">Inventory Status Summary</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-white p-4 rounded-md shadow-sm">
-                  <p className="text-sm text-gray-500">Total Products</p>
-                  <p className="text-xl font-bold">{products.length}</p>
+        <TabsContent value="inventory">
+          <Card>
+            <CardHeader>
+              <CardTitle>Inventory Status</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {isLoading ? (
+                <div className="flex justify-center items-center h-64">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
                 </div>
-                <div className="bg-white p-4 rounded-md shadow-sm">
-                  <p className="text-sm text-gray-500">Low Stock Items</p>
-                  <p className="text-xl font-bold text-amber-600">
-                    {products.filter(p => p.quantity > 0 && p.quantity <= p.reorder_level).length}
-                  </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reorder Level</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {inventoryReportData.map((item, index) => (
+                        <tr key={index}>
+                          <td className="px-6 py-4 whitespace-nowrap">{item.name}</td>
+                          <td className="px-6 py-4 whitespace-nowrap">{item.category}</td>
+                          <td className="px-6 py-4 whitespace-nowrap">{item.quantity}</td>
+                          <td className="px-6 py-4 whitespace-nowrap">{item.reorderLevel}</td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
+                              ${item.status === 'In Stock' ? 'bg-green-100 text-green-800' : 
+                                item.status === 'Low Stock' ? 'bg-yellow-100 text-yellow-800' : 
+                                'bg-red-100 text-red-800'}`}>
+                              {item.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-                <div className="bg-white p-4 rounded-md shadow-sm">
-                  <p className="text-sm text-gray-500">Out of Stock</p>
-                  <p className="text-xl font-bold text-red-600">
-                    {products.filter(p => p.quantity <= 0).length}
-                  </p>
-                </div>
-              </div>
-            </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-            <Separator />
-
-            <div>
-              <h3 className="font-semibold mb-2">Inventory Value</h3>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart
-                  data={categoryChartData}
-                  margin={{ top: 20, right: 30, left: 20, bottom: 50 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" angle={-45} textAnchor="end" height={70} />
-                  <YAxis />
-                  <Tooltip formatter={(value) => [`KSh ${typeof value === 'number' ? value.toFixed(2) : value}`, 'Value']} />
-                  <Bar dataKey="value" fill="#3b82f6" name="Value (KSh)" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="sales" className="space-y-4">
-            <div className="bg-gray-50 p-4 rounded-md">
-              <h3 className="font-semibold mb-2">Sales Summary</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-white p-4 rounded-md shadow-sm">
-                  <p className="text-sm text-gray-500">Total Sales</p>
-                  <p className="text-xl font-bold">
-                    KSh {filteredSales.reduce((sum, sale) => sum + Number(sale.total_amount), 0).toFixed(2)}
-                  </p>
+        <TabsContent value="sales">
+          <Card>
+            <CardHeader>
+              <CardTitle>Sales Overview</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {isLoading ? (
+                <div className="flex justify-center items-center h-64">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
                 </div>
-                <div className="bg-white p-4 rounded-md shadow-sm">
-                  <p className="text-sm text-gray-500">Number of Transactions</p>
-                  <p className="text-xl font-bold">{filteredSales.length}</p>
+              ) : (
+                <div className="space-y-8">
+                  <div className="h-[400px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={salesReportData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="date" />
+                        <YAxis tickFormatter={(value) => formatCurrency(value)} />
+                        <Tooltip formatter={(value) => formatCurrency(Number(value))} />
+                        <Legend />
+                        <Line type="monotone" dataKey="amount" name="Sales Amount" stroke="#8884d8" />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Items Sold</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {salesReportData.map((item, index) => (
+                          <tr key={index}>
+                            <td className="px-6 py-4 whitespace-nowrap">{item.date}</td>
+                            <td className="px-6 py-4 whitespace-nowrap">{formatCurrency(item.amount)}</td>
+                            <td className="px-6 py-4 whitespace-nowrap">{item.count}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-                <div className="bg-white p-4 rounded-md shadow-sm">
-                  <p className="text-sm text-gray-500">Average Sale</p>
-                  <p className="text-xl font-bold">
-                    KSh {(filteredSales.reduce((sum, sale) => sum + Number(sale.total_amount), 0) /
-                      (filteredSales.length || 1)).toFixed(2)}
-                  </p>
-                </div>
-              </div>
-            </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-            <Separator />
-
-            <div>
-              <h3 className="font-semibold mb-2">Sales Trend</h3>
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart
-                  data={salesChartDataForChart}
-                  margin={{ top: 20, right: 30, left: 20, bottom: 50 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" angle={-45} textAnchor="end" height={70} />
-                  <YAxis yAxisId="left" />
-                  <YAxis yAxisId="right" orientation="right" />
-                  <Tooltip formatter={(value, name) => [
-                    name === 'revenue' && typeof value === 'number' ? `KSh ${value.toFixed(2)}` : value,
-                    name === 'revenue' ? 'Revenue' : 'Transactions'
-                  ]} />
-                  <Legend />
-                  <Line
-                    yAxisId="left"
-                    type="monotone"
-                    dataKey="revenue"
-                    stroke="#3b82f6"
-                    name="Revenue (KSh)"
-                  />
-                  <Line
-                    yAxisId="right"
-                    type="monotone"
-                    dataKey="transactions"
-                    stroke="#10b981"
-                    name="Transactions"
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="profit" className="space-y-4">
-            <div className="bg-gray-50 p-4 rounded-md">
-              <h3 className="font-semibold mb-2">Profit Summary</h3>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="bg-white p-4 rounded-md shadow-sm">
-                  <p className="text-sm text-gray-500">Total Revenue</p>
-                  <p className="text-xl font-bold">
-                    KSh {profitReportData.reduce((sum, day) => sum + day.revenue, 0).toFixed(2)}
-                  </p>
+        <TabsContent value="profit">
+          <Card>
+            <CardHeader>
+              <CardTitle>Profit Analysis</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {isLoading ? (
+                <div className="flex justify-center items-center h-64">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
                 </div>
-                <div className="bg-white p-4 rounded-md shadow-sm">
-                  <p className="text-sm text-gray-500">Total Cost</p>
-                  <p className="text-xl font-bold">
-                    KSh {profitReportData.reduce((sum, day) => sum + day.cost, 0).toFixed(2)}
-                  </p>
+              ) : (
+                <div className="space-y-8">
+                  <div className="h-[400px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={profitReportData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="category" />
+                        <YAxis tickFormatter={(value) => formatCurrency(value)} />
+                        <Tooltip formatter={(value) => formatCurrency(Number(value))} />
+                        <Legend />
+                        <Bar dataKey="revenue" name="Revenue" fill="#8884d8" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Revenue</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Percentage</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {profitReportData.map((item, index) => (
+                          <tr key={index}>
+                            <td className="px-6 py-4 whitespace-nowrap">{item.category}</td>
+                            <td className="px-6 py-4 whitespace-nowrap">{formatCurrency(item.revenue)}</td>
+                            <td className="px-6 py-4 whitespace-nowrap">{item.percentage.toFixed(2)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-                <div className="bg-white p-4 rounded-md shadow-sm">
-                  <p className="text-sm text-gray-500">Total Profit</p>
-                  <p className="text-xl font-bold text-green-600">
-                    KSh {profitReportData.reduce((sum, day) => sum + (day.revenue - day.cost), 0).toFixed(2)}
-                  </p>
-                </div>
-                <div className="bg-white p-4 rounded-md shadow-sm">
-                  <p className="text-sm text-gray-500">Profit Margin</p>
-                  <p className="text-xl font-bold">
-                    {(profitReportData.reduce((sum, day) => sum + (day.revenue - day.cost), 0) /
-                      profitReportData.reduce((sum, day) => sum + day.revenue, 0) * 100 || 0).toFixed(2)}%
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <Separator />
-
-            <div>
-              <h3 className="font-semibold mb-2">Profit Trend</h3>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart
-                  data={profitReportData}
-                  margin={{ top: 20, right: 30, left: 20, bottom: 50 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="category" angle={-45} textAnchor="end" height={70} />
-                  <YAxis />
-                  <Tooltip formatter={(value) => [`${value.toFixed(2)}%`, 'Percentage']} />
-                  <Legend />
-                  <Bar dataKey="percentage" fill="#3b82f6" name="Percentage" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </TabsContent>
-        </Tabs>
-      </CardContent>
-      <CardFooter className="flex justify-end space-x-2">
-        <Button
-          variant="outline"
-          onClick={handleExportCSV}
-          disabled={isLoading}
-        >
-          <i className="fas fa-file-csv mr-2"></i> Export CSV
-        </Button>
-        <Button
-          onClick={handleExportPDF}
-          disabled={isLoading}
-        >
-          <i className="fas fa-file-pdf mr-2"></i> Export PDF
-        </Button>
-      </CardFooter>
-    </Card>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
   );
 };
 
