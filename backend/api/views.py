@@ -278,7 +278,8 @@ class ProductViewSet(viewsets.ModelViewSet):
                 if row:
                     is_staff, is_superuser, role = row
                     # Allow access if user is staff, superuser, admin, or manager
-                    return True, role, is_staff or is_superuser or role in ['admin', 'manager']
+                    is_authorized = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager', 'staff'])
+                    return True, role, is_authorized
         except (ValueError, IndexError, Exception):
             return False, None, False
 
@@ -308,19 +309,24 @@ class ProductViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    def list(self, request, *args, **kwargs):
-        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response(
-                {"detail": "Authentication required"},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-        if not is_authorized:
-            return Response(
-                {"detail": "Permission denied"},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        return super().list(request, *args, **kwargs)
+    def list(self, request):
+        is_authenticated, role, is_authorized = self.check_token_auth(request)
+        if not is_authenticated or not is_authorized:
+            return Response({"detail": "Authentication failed"}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    SELECT p.*, c.name as category_name
+                    FROM products p
+                    LEFT JOIN categories c ON p.category_id = c.id
+                    ORDER BY p.name
+                """)
+                columns = [col[0] for col in cursor.description]
+                products = [dict(zip(columns, row)) for row in cursor.fetchall()]
+                return Response(products)
+        except Exception as e:
+            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def retrieve(self, request, *args, **kwargs):
         is_authenticated, user_id, is_authorized = self.check_token_auth(request)

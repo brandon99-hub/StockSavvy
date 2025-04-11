@@ -57,6 +57,15 @@ import {
   Alert,
 } from '@mui/material';
 import { Search as SearchIcon } from '@mui/icons-material';
+import {
+    Edit, 
+    Trash2, 
+    Plus, 
+    Search, 
+    AlertTriangle, 
+    CheckCircle, 
+    XCircle 
+} from 'lucide-react';
 
 interface InventoryListProps {
   products: Product[];
@@ -166,6 +175,18 @@ const InventoryList: React.FC<InventoryListProps> = ({
     return categories.find(c => c.id === categoryId)?.name || 'Uncategorized';
   };
 
+  const getStockStatus = (quantity: number, minStockLevel: number) => {
+    if (quantity === 0) return { status: 'Out of Stock', color: 'bg-red-100 text-red-800' };
+    if (quantity <= minStockLevel) return { status: 'Low Stock', color: 'bg-yellow-100 text-yellow-800' };
+    return { status: 'In Stock', color: 'bg-green-100 text-green-800' };
+  };
+
+  const getStockIcon = (quantity: number, minStockLevel: number) => {
+    if (quantity === 0) return <XCircle className="w-4 h-4 text-red-500" />;
+    if (quantity <= minStockLevel) return <AlertTriangle className="w-4 h-4 text-yellow-500" />;
+    return <CheckCircle className="w-4 h-4 text-green-500" />;
+  };
+
   return (
     <Card>
       <CardHeader className="border-b border-gray-200 px-6 py-4">
@@ -187,6 +208,7 @@ const InventoryList: React.FC<InventoryListProps> = ({
               >
                 SKU {sortField === 'sku' && (sortDirection === 'asc' ? '↑' : '↓')}
               </TableHead>
+              <TableHead>Category</TableHead>
               <TableHead 
                 className="cursor-pointer hover:bg-gray-100 text-right"
                 onClick={() => handleSort('quantity')}
@@ -199,69 +221,69 @@ const InventoryList: React.FC<InventoryListProps> = ({
               >
                 Price {sortField === 'sell_price' && (sortDirection === 'asc' ? '↑' : '↓')}
               </TableHead>
-              <TableHead>Category</TableHead>
               <TableHead>Status</TableHead>
               {canEdit && <TableHead className="text-right">Actions</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {paginatedProducts.map((product) => (
-              <TableRow key={product.id} className="hover:bg-gray-50">
-                <TableCell className="font-medium">{product.name}</TableCell>
-                <TableCell className="text-gray-600">{product.sku}</TableCell>
-                <TableCell className="text-right">
-                  <div className="flex items-center justify-end gap-2">
-                    <span className="font-mono">{product.quantity}</span>
-                    {product.quantity <= (product.min_stock_level || 0) && (
-                      <Badge variant={product.quantity === 0 ? "destructive" : "secondary"} className="text-xs">
-                        {product.quantity === 0 ? "Out of Stock" : "Low Stock"}
-                      </Badge>
-                    )}
-                  </div>
-                </TableCell>
-                <TableCell className="text-right font-mono">
-                  ${product.sell_price?.toFixed(2)}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="outline" className="text-xs">
-                    {getCategoryName(product.category_id)}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  <Badge 
-                    variant={
-                      product.quantity === 0 ? "destructive" : 
-                      product.quantity <= (product.min_stock_level || 0) ? "secondary" : "default"
-                    }
-                    className="text-xs"
-                  >
-                    {product.quantity === 0 ? "Out of Stock" : 
-                     product.quantity <= (product.min_stock_level || 0) ? "Low Stock" : "In Stock"}
-                  </Badge>
-                </TableCell>
-                {canEdit && (
+            {paginatedProducts.map((product) => {
+              const stockStatus = getStockStatus(product.quantity, product.min_stock_level);
+              const category = categories.find(c => c.id === product.category_id);
+              
+              return (
+                <TableRow key={product.id} className="hover:bg-gray-50">
+                  <TableCell className="font-medium">{product.name}</TableCell>
+                  <TableCell className="text-gray-600">{product.sku}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="text-xs">
+                      {category?.name || 'Uncategorized'}
+                    </Badge>
+                  </TableCell>
                   <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => onEdit(product)}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => deleteMutation.mutate(product.id)}
-                        disabled={deleteMutation.isPending}
-                      >
-                        Delete
-                      </Button>
+                    <div className="flex items-center justify-end gap-2">
+                      <span className="font-mono">{product.quantity}</span>
+                      {product.quantity <= (product.min_stock_level || 0) && (
+                        <Badge variant={product.quantity === 0 ? "destructive" : "secondary"} className="text-xs">
+                          {product.quantity === 0 ? "Out of Stock" : "Low Stock"}
+                        </Badge>
+                      )}
                     </div>
                   </TableCell>
-                )}
-              </TableRow>
-            ))}
+                  <TableCell className="text-right font-mono">
+                    ${product.sell_price?.toFixed(2)}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      {getStockIcon(product.quantity, product.min_stock_level)}
+                      <Badge className={stockStatus.color}>
+                        {stockStatus.status}
+                      </Badge>
+                    </div>
+                  </TableCell>
+                  {canEdit && (
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => onEdit(product)}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => deleteMutation.mutate(product.id)}
+                          disabled={deleteMutation.isPending}
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    </TableCell>
+                  )}
+                </TableRow>
+              );
+            })}
             {paginatedProducts.length === 0 && (
               <TableRow>
                 <TableCell colSpan={canEdit ? 7 : 6} className="text-center text-gray-500 py-8">
