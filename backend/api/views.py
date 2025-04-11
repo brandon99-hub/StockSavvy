@@ -155,7 +155,7 @@ class UserViewSet(viewsets.ModelViewSet):
                 # Create activity log
                 Activity.objects.create(
                     user=user,
-                    action_type='login',
+                    type='login',
                     description=f'User {username} logged in'
                 )
 
