@@ -102,7 +102,7 @@ interface StockMovementData {
 }
 
 interface TopProductData {
-    id: number;
+    id: string;
     name: string;
     sales: number;
     revenue: number;
@@ -119,24 +119,16 @@ interface DashboardStats {
 }
 
 // API Response Types
-interface ApiSaleItem {
-    product: number;
-    product_name: string;
-    quantity: number;
-    unit_price: number;
-}
-
 interface ApiSale {
-    id: number;
-    created_at: string;
     date: string;
-    amount: string | number;
-    items: ApiSaleItem[];
+    amount: string;
+    transaction_count: number;
+    unique_products: number;
 }
 
 interface ApiResponse {
     items: ApiSale[];
-    summary: {
+    summary?: {
         total_sales: number;
         total_items: number;
     };
@@ -375,9 +367,9 @@ const AdvancedAnalytics = () => {
             }
             
             const transformedData = salesArray.map(item => {
-                const date = format(new Date(item.date || item.created_at), 'yyyy-MM-dd');
-                const amount = parseFloat(String(item.amount || '0'));
-                return { date, amount } as SalesChartData;
+                const date = format(new Date(item.date), 'yyyy-MM-dd');
+                const amount = parseFloat(item.amount);
+                return { date, amount } satisfies SalesChartData;
             });
             
             return transformedData.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -411,12 +403,12 @@ const AdvancedAnalytics = () => {
         }
         
         return salesArray.map(item => {
-            const revenue = parseFloat(String(item.amount || '0'));
+            const revenue = parseFloat(item.amount);
             const cost = revenue * 0.7; // Assuming 30% profit margin
-            const profit = revenue - cost;
+            const profit = revenue * 0.3;
             
             return {
-                date: format(new Date(item.date || item.created_at), 'yyyy-MM-dd'),
+                date: format(new Date(item.date), 'yyyy-MM-dd'),
                 revenue,
                 cost,
                 profit
@@ -445,35 +437,94 @@ const AdvancedAnalytics = () => {
         };
     }, [stats]);
 
+    // Calculate stock movement data with safety checks
+    const stockMovementData = useMemo(() => {
+        if (!Array.isArray(activities)) return [];
+        
+        const movementMap = new Map<string, { additions: number, removals: number }>();
+
+        // Initialize with the date range
+        const daysInRange = differenceInDays(dateRange.end, dateRange.start) + 1;
+        for (let i = 0; i < daysInRange; i++) {
+            const date = format(addDays(dateRange.start, i), 'yyyy-MM-dd');
+            movementMap.set(date, { additions: 0, removals: 0 });
+        }
+
+        // Process activities
+        activities.forEach(activity => {
+            if (!activity?.created_at) return;
+            
+            const activityDate = format(new Date(activity.created_at), 'yyyy-MM-dd');
+            const current = movementMap.get(activityDate) || { additions: 0, removals: 0 };
+
+            if (activity.type === 'stock_added') {
+                movementMap.set(activityDate, {
+                    ...current,
+                    additions: current.additions + (activity.quantity || 1)
+                });
+            } else if (activity.type === 'stock_removed') {
+                movementMap.set(activityDate, {
+                    ...current,
+                    removals: current.removals + (activity.quantity || 1)
+                });
+            }
+        });
+
+        return Array.from(movementMap.entries())
+            .map(([date, data]) => ({
+                date,
+                additions: data.additions,
+                removals: data.removals,
+                net: data.additions - data.removals
+            }))
+            .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    }, [activities, dateRange]);
+
+    // Calculate inventory status data
+    const inventoryStatusData = useMemo(() => {
+        return categories.map(category => {
+            const categoryProducts = products.filter(p => p.category === category.id);
+            const totalQuantity = categoryProducts.reduce((sum, p) => sum + (p.quantity || 0), 0);
+            const lowStockCount = categoryProducts.filter(p => (p.quantity || 0) <= (p.min_stock_level || 0)).length;
+
+            return {
+                category: category.name,
+                "Product Count": categoryProducts.length,
+                "Total Quantity": totalQuantity,
+                "Low Stock Items": lowStockCount
+            };
+        });
+    }, [categories, products]);
+
     // Calculate year-over-year comparison data
-    const yearOverYearData = useMemo((): ComparisonData[] => {
+    const yearOverYearData = useMemo(() => {
         if (!salesQuery.data?.items) return [];
         
         // Get current period data
         const currentPeriodSales = salesQuery.data.items.filter(sale => {
-            const saleDate = new Date(sale.created_at);
+            const saleDate = new Date(sale.date);
             return saleDate >= dateRange.start && saleDate <= dateRange.end;
         });
 
-        // Calculate previous period date range (1 year before)
+        // Calculate previous period date range
         const previousStart = subYears(dateRange.start, 1);
         const previousEnd = subYears(dateRange.end, 1);
 
         // Filter sales for previous period
         const previousPeriodSales = salesQuery.data.items.filter(sale => {
-            const saleDate = new Date(sale.created_at);
+            const saleDate = new Date(sale.date);
             return saleDate >= previousStart && saleDate <= previousEnd;
         });
 
-        // Calculate metrics for comparison
-        const calculateMetrics = (salesData: SalesChartData[]) => {
-            const totalRevenue = salesData.reduce((sum, sale) => sum + Number(sale.amount || 0), 0);
-            const totalItems = salesData.length;
-            const avgOrderValue = totalItems > 0 ? totalRevenue / totalItems : 0;
+        // Calculate metrics
+        const calculateMetrics = (sales: ApiSale[]) => {
+            const totalRevenue = sales.reduce((sum, sale) => sum + parseFloat(sale.amount), 0);
+            const totalOrders = sales.reduce((sum, sale) => sum + sale.transaction_count, 0);
+            const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 
             return {
                 revenue: totalRevenue,
-                orders: totalItems,
+                orders: totalOrders,
                 avgValue: avgOrderValue
             };
         };
@@ -481,7 +532,6 @@ const AdvancedAnalytics = () => {
         const currentMetrics = calculateMetrics(currentPeriodSales);
         const previousMetrics = calculateMetrics(previousPeriodSales);
 
-        // Create comparison data
         return [
             {
                 period: 'Revenue',
@@ -510,125 +560,42 @@ const AdvancedAnalytics = () => {
         ];
     }, [salesQuery.data, dateRange]);
 
-    // Calculate stock movement data with safety checks
-    const stockMovementData = useMemo(() => {
-        if (!Array.isArray(activities)) return [];
-        
-        const movementMap = new Map<string, { additions: number, removals: number }>();
-
-        // Initialize with the date range
-        const daysInRange = differenceInDays(dateRange.end, dateRange.start) + 1;
-        for (let i = 0; i < daysInRange; i++) {
-            const date = addDays(dateRange.start, i);
-            const dateStr = format(date, 'yyyy-MM-dd');
-            movementMap.set(dateStr, { additions: 0, removals: 0 });
-        }
-
-        // Process activities
-        filteredActivities.forEach(activity => {
-            if (!activity || !activity.created_at) return;
-            
-            const activityDate = format(new Date(activity.created_at), 'yyyy-MM-dd');
-            const current = movementMap.get(activityDate) || { additions: 0, removals: 0 };
-
-            if (activity.type === 'stock_added') {
-                movementMap.set(activityDate, {
-                    ...current,
-                    additions: current.additions + 1
-                });
-            } else if (activity.type === 'stock_removed') {
-                movementMap.set(activityDate, {
-                    ...current,
-                    removals: current.removals + 1
-                });
-            }
-        });
-
-        return Array.from(movementMap.entries())
-            .map(([date, data]) => ({
-            date,
-            additions: data.additions,
-            removals: data.removals,
-            net: data.additions - data.removals
-            }))
-            .sort((a, b) => a.date.localeCompare(b.date));
-    }, [filteredActivities, dateRange]);
-
     // Calculate top products with safety checks
-    const topProducts = useMemo(() => {
+    const topProducts = useMemo((): TopProductData[] => {
         if (!salesQuery.data?.items) {
             console.log('No sales data available for top products calculation');
             return [];
         }
         
-        // Log the raw data structure for debugging
-        console.log('Raw sales data for top products:', {
-            totalItems: salesQuery.data.items.length,
-            sampleItem: salesQuery.data.items[0]
-        });
+        const salesArray = salesQuery.data.items;
+        if (!Array.isArray(salesArray)) {
+            console.error('Sales data structure:', salesQuery.data);
+            return [];
+        }
         
-        const productSales = new Map();
-        
-        salesQuery.data.items.forEach(sale => {
-            if (!Array.isArray(sale.items)) {
-                console.log('Invalid sale items structure:', sale);
-                return;
-            }
-            
-            sale.items.forEach(item => {
-                const existing = productSales.get(item.product) || {
-                    name: item.product_name || 'Unknown Product',
-                    sales: 0,
-                    revenue: 0,
-                    profit: 0
-                };
-                
-                const quantity = Number(item.quantity || 0);
-                const unitPrice = Number(item.unit_price || 0);
-                const itemRevenue = quantity * unitPrice;
-                const itemCost = itemRevenue * 0.7; // Assuming 30% profit margin
-                const itemProfit = itemRevenue - itemCost;
-                
-                // Log individual product processing
-                console.log('Processing product sale:', {
-                    productId: item.product,
-                    productName: item.product_name,
-                    quantity,
-                    unitPrice,
-                    revenue: itemRevenue,
-                    profit: itemProfit
-                });
-                
-                productSales.set(item.product, {
-                    name: item.product_name || 'Unknown Product',
-                    sales: existing.sales + quantity,
-                    revenue: existing.revenue + itemRevenue,
-                    profit: existing.profit + itemProfit
-                });
-            });
-        });
-        
-        const result = Array.from(productSales.entries())
-            .map(([id, data]) => ({
-                id,
-                name: data.name,
-                sales: data.sales,
-                revenue: data.revenue,
-                profit: data.profit
-            }))
-            .sort((a, b) => b.profit - a.profit)
-            .slice(0, 10);
-            
-        // Log the final top products data
-        console.log('Processed top products data:', {
-            totalProducts: result.length,
-            topProduct: result[0],
-            totalRevenue: result.reduce((sum, p) => sum + p.revenue, 0),
-            totalProfit: result.reduce((sum, p) => sum + p.profit, 0)
-        });
-        
-        return result;
+        // Transform the sales data into a format suitable for the chart
+        return salesArray.map(item => {
+            const date = format(new Date(item.date), 'MMM dd, yyyy');
+            const revenue = parseFloat(item.amount);
+            return {
+                id: item.date,
+                name: date,
+                sales: item.transaction_count,
+                revenue,
+                profit: revenue * 0.3 // Assuming 30% profit margin
+            } satisfies TopProductData;
+        }).sort((a, b) => b.revenue - a.revenue);
     }, [salesQuery.data]);
+
+    // Update the profit analysis table to use the correct data
+    const profitAnalysisData = useMemo(() => {
+        return topProducts.map(product => ({
+            ...product,
+            category: 'All Categories', // Since we don't have category info in the sales data
+            cost: product.revenue * 0.7,
+            margin: 30 // Using the same 30% margin assumption
+        }));
+    }, [topProducts]);
 
     return (
         <div className="space-y-6">
@@ -929,36 +896,18 @@ const AdvancedAnalytics = () => {
                                     <CardContent className="h-80">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <RadarChart cx="50%" cy="50%" outerRadius="80%"
-                                                        data={categories.map(category => {
-                                                            const categoryProducts = products.filter(p => {
-                                                                if (!p.category || typeof p.category !== 'number') return false;
-                                                                return p.category === category.id;
-                                                            });
-                                                            const totalQuantity = categoryProducts.reduce((sum, product) => sum + product.quantity, 0);
-                                                            const avgPrice = categoryProducts.length > 0
-                                                                ? categoryProducts.reduce((sum, product) => sum + Number(product.sell_price), 0) / categoryProducts.length
-                                                                : 0;
-                                                            const lowStock = categoryProducts.filter(p => p.quantity <= p.min_stock_level).length;
-
-                                                            return {
-                                                                category: category.name,
-                                                                products: categoryProducts.length,
-                                                                quantity: totalQuantity,
-                                                                avgPrice: avgPrice,
-                                                                lowStock: lowStock
-                                                            };
-                                                        })}>
-                                                <PolarGrid/>
-                                                <PolarAngleAxis dataKey="category"/>
-                                                <PolarRadiusAxis angle={30} domain={[0, 'auto']}/>
-                                                <Radar name="Product Count" dataKey="products" stroke="#8884d8"
-                                                       fill="#8884d8" fillOpacity={0.6}/>
-                                                <Radar name="Total Quantity" dataKey="quantity" stroke="#82ca9d"
-                                                       fill="#82ca9d" fillOpacity={0.6}/>
-                                                <Radar name="Low Stock Items" dataKey="lowStock" stroke="#ff8042"
-                                                       fill="#ff8042" fillOpacity={0.6}/>
-                                                <Legend/>
-                                                <RechartsTooltip content={<CustomTooltip/>}/>
+                                                       data={inventoryStatusData}>
+                                                <PolarGrid />
+                                                <PolarAngleAxis dataKey="category" />
+                                                <PolarRadiusAxis angle={30} domain={[0, 'auto']} />
+                                                <Radar name="Product Count" dataKey="Product Count" stroke="#8884d8"
+                                                      fill="#8884d8" fillOpacity={0.6} />
+                                                <Radar name="Total Quantity" dataKey="Total Quantity" stroke="#82ca9d"
+                                                      fill="#82ca9d" fillOpacity={0.6} />
+                                                <Radar name="Low Stock Items" dataKey="Low Stock Items" stroke="#ff8042"
+                                                      fill="#ff8042" fillOpacity={0.6} />
+                                                <Legend />
+                                                <RechartsTooltip content={<CustomTooltip />} />
                                             </RadarChart>
                                         </ResponsiveContainer>
                                     </CardContent>
@@ -1132,12 +1081,7 @@ const AdvancedAnalytics = () => {
                                             </tr>
                                             </thead>
                                             <tbody>
-                                            {topProducts.map(product => {
-                                                const category = categories.find(c => {
-                                                    const productCategory = productsById.get(product.id)?.category;
-                                                    if (!productCategory || typeof productCategory !== 'number') return false;
-                                                    return c.id === productCategory;
-                                                });
+                                            {profitAnalysisData.map(product => {
                                                 const margin = product.revenue > 0
                                                     ? (product.profit / product.revenue) * 100
                                                     : 0;
@@ -1145,10 +1089,10 @@ const AdvancedAnalytics = () => {
                                                 return (
                                                     <tr key={product.id} className="bg-white border-b hover:bg-gray-50">
                                                         <td className="px-6 py-4 font-medium text-gray-900">{product.name}</td>
-                                                        <td className="px-6 py-4">{category?.name || 'Unknown'}</td>
+                                                        <td className="px-6 py-4">{product.category}</td>
                                                         <td className="px-6 py-4">{product.sales}</td>
                                                         <td className="px-6 py-4">{formatCurrency(product.revenue)}</td>
-                                                        <td className="px-6 py-4">{formatCurrency(product.revenue - product.profit)}</td>
+                                                        <td className="px-6 py-4">{formatCurrency(product.cost)}</td>
                                                         <td className="px-6 py-4">{formatCurrency(product.profit)}</td>
                                                         <td className="px-6 py-4">
                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
