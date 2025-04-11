@@ -16,6 +16,7 @@
     "@emotion/styled": "^11.14.0",
     "@hookform/resolvers": "^3.9.1",
     "@jridgewell/trace-mapping": "^0.3.25",
+    "@mui/icons-material": "^7.0.2",
     "@mui/material": "^7.0.2",
     "@mui/x-date-pickers": "^7.28.3",
     "@mui/x-date-pickers-pro": "^7.28.3",
