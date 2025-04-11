@@ -714,7 +714,8 @@ class SaleViewSet(viewsets.ModelViewSet):
                     'original_amount': request.data.get('original_amount'),
                     'discount': request.data.get('discount', 0),
                     'discount_percentage': request.data.get('discount_percentage', 0),
-                    'user_id': user_id
+                    'user_id': user_id,
+                    'created_at': timezone.now()
                 }
                 
                 # Insert sale
@@ -722,22 +723,23 @@ class SaleViewSet(viewsets.ModelViewSet):
                     cursor.execute("""
                         INSERT INTO sales (
                             sale_date, total_amount, original_amount, discount,
-                            discount_percentage, user_id
-                        ) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
+                            discount_percentage, user_id, created_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id
                     """, [
                         sale_data['sale_date'],
                         sale_data['total_amount'],
                         sale_data['original_amount'],
                         sale_data['discount'],
                         sale_data['discount_percentage'],
-                        sale_data['user_id']
+                        sale_data['user_id'],
+                        sale_data['created_at']
                     ])
                     sale_id = cursor.fetchone()[0]
                 
                 # Create sale items and update product quantities
                 for item in sale_items:
                     product_id = item.get('product_id')
-                    quantity = item.get('quantity')
+                    quantity = int(item.get('quantity', 0))
                     unit_price = item.get('unit_price')
                     total_price = item.get('total_price')
                     
@@ -746,6 +748,15 @@ class SaleViewSet(viewsets.ModelViewSet):
                     
                     # Insert sale item
                     with connection.cursor() as cursor:
+                        # First check if we have enough quantity
+                        cursor.execute("""
+                            SELECT quantity, name FROM products WHERE id = %s
+                        """, [product_id])
+                        product = cursor.fetchone()
+                        if not product or product[0] < quantity:
+                            raise ValueError(f"Insufficient quantity for product {product[1] if product else product_id}")
+                        
+                        # Insert the sale item
                         cursor.execute("""
                             INSERT INTO sale_items (
                                 sale_id, product_id, quantity, unit_price, total_price
@@ -756,23 +767,28 @@ class SaleViewSet(viewsets.ModelViewSet):
                         cursor.execute("""
                             UPDATE products 
                             SET quantity = quantity - %s 
-                            WHERE id = %s AND quantity >= %s
-                            RETURNING id
-                        """, [quantity, product_id, quantity])
-                        
-                        if not cursor.fetchone():
-                            raise ValueError(f"Insufficient quantity for product {product_id}")
+                            WHERE id = %s
+                        """, [quantity, product_id])
+                
+                # Get user information for activity log
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT username FROM users WHERE id = %s", [user_id])
+                    username = cursor.fetchone()[0]
                 
                 # Create activity log
                 Activity.objects.create(
                     type='sale',
-                    description=f'Sale created: {sale_data["total_amount"]}',
+                    description=f'Sale created by {username}: KSh {sale_data["total_amount"]}',
                     user_id=user_id,
                     created_at=timezone.now(),
                     status='completed'
                 )
                 
-                return Response({"message": "Sale created successfully", "sale_id": sale_id}, status=status.HTTP_201_CREATED)
+                return Response({
+                    "message": "Sale created successfully", 
+                    "sale_id": sale_id,
+                    "items_count": len(sale_items)
+                }, status=status.HTTP_201_CREATED)
                 
         except ValueError as e:
             return Response(
