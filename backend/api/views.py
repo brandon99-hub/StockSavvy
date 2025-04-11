@@ -702,25 +702,25 @@ def check_token_auth(request):
     if not auth_header or not auth_header.startswith('Bearer '):
         return False, None, False
 
-        token = auth_header.split(' ')[1]
+    token = auth_header.split(' ')[1]
     if not token.startswith('token_'):
         return False, None, False
 
-            try:
-                parts = token.split('_')
-                    user_id = int(parts[1])
-                    with connection.cursor() as cursor:
-                        cursor.execute(
+    try:
+        parts = token.split('_')
+        user_id = int(parts[1])
+        with connection.cursor() as cursor:
+            cursor.execute(
                 "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
-                            [user_id]
-                        )
-                        row = cursor.fetchone()
-                        if row:
+                [user_id]
+            )
+            row = cursor.fetchone()
+            if row:
                 is_staff, is_superuser, role = row
                 is_admin = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager'])
                 return True, user_id, is_admin
-            except (IndexError, ValueError) as e:
-                print(f"Token validation error: {str(e)}")
+    except (IndexError, ValueError) as e:
+        print(f"Token validation error: {str(e)}")
         return False, None, False
 
     return False, None, False
@@ -759,10 +759,11 @@ def profit_report(request):
         # Get date range from query params
         start_date = request.query_params.get('start')
         end_date = request.query_params.get('end')
-            if not start_date or not end_date:
-                return Response({"detail": "Date range required"}, status=status.HTTP_400_BAD_REQUEST)
+        if not start_date or not end_date:
+            return Response({"detail": "Date range required"}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Get profit report data with optimized query
+        # Get profit report data with optimized query
+        with connection.cursor() as cursor:
             cursor.execute("""
                 WITH monthly_data AS (
                     SELECT 
@@ -1004,26 +1005,26 @@ class ReportViewSet(viewsets.ViewSet):
     def check_token_auth(self, request):
         auth_header = request.headers.get('Authorization')
         if auth_header and auth_header.startswith('Bearer '):
-        token = auth_header.split(' ')[1]
+            token = auth_header.split(' ')[1]
             if token and token.startswith('token_'):
-        try:
-            parts = token.split('_')
+                try:
+                    parts = token.split('_')
                     if len(parts) >= 2:
-            user_id = int(parts[1])
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
-                    [user_id]
-                )
-                row = cursor.fetchone()
-                if row:
-                    is_staff, is_superuser, role = row
+                        user_id = int(parts[1])
+                        with connection.cursor() as cursor:
+                            cursor.execute(
+                                "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
+                                [user_id]
+                            )
+                            row = cursor.fetchone()
+                            if row:
+                                is_staff, is_superuser, role = row
                                 is_admin = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager'])
                                 return True, user_id, is_admin
                 except (jwt.InvalidTokenError, IndexError, ValueError, Exception) as e:
-            print(f"Token validation error: {str(e)}")
+                    print(f"Token validation error: {str(e)}")
+                    return False, None, False
             return False, None, False
-        return False, None, False
 
     @action(detail=False, methods=['get'])
     def inventory(self, request):
@@ -1036,77 +1037,77 @@ class ReportViewSet(viewsets.ViewSet):
         try:
             with connection.cursor() as cursor:
                 # Get summary statistics
-                    cursor.execute("""
-                        SELECT 
-                            COUNT(*) as total_products,
-                            COUNT(CASE WHEN quantity <= min_stock_level AND quantity > 0 THEN 1 END) as low_stock_count,
-                            COUNT(CASE WHEN quantity = 0 THEN 1 END) as out_of_stock_count,
+                cursor.execute("""
+                    SELECT 
+                        COUNT(*) as total_products,
+                        COUNT(CASE WHEN quantity <= min_stock_level AND quantity > 0 THEN 1 END) as low_stock_count,
+                        COUNT(CASE WHEN quantity = 0 THEN 1 END) as out_of_stock_count,
                         COALESCE(SUM(quantity * buy_price), 0) as total_value
-                        FROM products
-                    """)
-                    summary = dict(zip([col[0] for col in cursor.description], cursor.fetchone()))
+                    FROM products
+                """)
+                summary = dict(zip([col[0] for col in cursor.description], cursor.fetchone()))
 
-                    # Get category breakdown
-                    cursor.execute("""
-                        SELECT 
+                # Get category breakdown
+                cursor.execute("""
+                    SELECT 
                         c.name,
-                            COUNT(p.id) as product_count,
-                            COALESCE(SUM(p.quantity), 0) as total_quantity,
+                        COUNT(p.id) as product_count,
+                        COALESCE(SUM(p.quantity), 0) as total_quantity,
                         COALESCE(SUM(p.quantity * p.buy_price), 0) as value
-                        FROM categories c
-                        LEFT JOIN products p ON c.id = p.category_id
+                    FROM categories c
+                    LEFT JOIN products p ON c.id = p.category_id
                     GROUP BY c.id, c.name
                     ORDER BY value DESC
-                    """)
-                    categories = [dict(zip([col[0] for col in cursor.description], row))
-                                  for row in cursor.fetchall()]
+                """)
+                categories = [dict(zip([col[0] for col in cursor.description], row))
+                              for row in cursor.fetchall()]
 
-                    # Get product details
-                    cursor.execute("""
-                        SELECT 
-                            p.id,
-                            p.name,
-                            p.sku,
+                # Get product details
+                cursor.execute("""
+                    SELECT 
+                        p.id,
+                        p.name,
+                        p.sku,
                         p.quantity,
-                            p.min_stock_level,
-                            p.buy_price,
-                            p.sell_price,
+                        p.min_stock_level,
+                        p.buy_price,
+                        p.sell_price,
                         c.name as category_name,
-                            CASE 
-                                WHEN p.quantity = 0 THEN 'Out of Stock'
-                                WHEN p.quantity <= p.min_stock_level THEN 'Low Stock'
+                        CASE 
+                            WHEN p.quantity = 0 THEN 'Out of Stock'
+                            WHEN p.quantity <= p.min_stock_level THEN 'Low Stock'
                             ELSE 'In Stock'
-                            END as status
-                        FROM products p
-                        LEFT JOIN categories c ON p.category_id = c.id
-                        ORDER BY 
-                            CASE 
-                                WHEN p.quantity = 0 THEN 1
-                                WHEN p.quantity <= p.min_stock_level THEN 2
-                                ELSE 3
-                            END,
-                            p.name
-                    """)
-                    products = [dict(zip([col[0] for col in cursor.description], row))
-                                for row in cursor.fetchall()]
+                        END as status
+                    FROM products p
+                    LEFT JOIN categories c ON p.category_id = c.id
+                    ORDER BY 
+                        CASE 
+                            WHEN p.quantity = 0 THEN 1
+                            WHEN p.quantity <= p.min_stock_level THEN 2
+                            ELSE 3
+                        END,
+                        p.name
+                """)
+                products = [dict(zip([col[0] for col in cursor.description], row))
+                            for row in cursor.fetchall()]
 
-                    # Format decimal values
+                # Format decimal values
                 for row in products:
                     if 'buy_price' in row and row['buy_price'] is not None:
                         row['buy_price'] = str(row['buy_price'])
                     if 'sell_price' in row and row['sell_price'] is not None:
                         row['sell_price'] = str(row['sell_price'])
 
-                    return Response({
-                        'summary': {
-                            'totalProducts': summary['total_products'],
-                            'lowStock': summary['low_stock_count'],
-                            'outOfStock': summary['out_of_stock_count'],
-                            'totalValue': str(summary['total_value'])
-                        },
-                        'categories': categories,
-                        'products': products
-                    })
+                return Response({
+                    'summary': {
+                        'totalProducts': summary['total_products'],
+                        'lowStock': summary['low_stock_count'],
+                        'outOfStock': summary['out_of_stock_count'],
+                        'totalValue': str(summary['total_value'])
+                    },
+                    'categories': categories,
+                    'products': products
+                })
 
         except Exception as e:
             print(f"Error generating inventory report: {str(e)}")
