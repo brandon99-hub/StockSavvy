@@ -5,11 +5,11 @@ import { apiRequest } from '../lib/queryClient';
 import InventoryList from '../components/inventory/InventoryList';
 import { Product, Category } from '../types';
 import { Button, Container, Typography, Box, CircularProgress, Alert } from '@mui/material';
-import { useNavigate } from 'react-router-dom';
+import { useLocation } from 'wouter';
 
 const InventoryPage: React.FC = () => {
   const { user } = useAuth();
-  const navigate = useNavigate();
+  const [, navigate] = useLocation();
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
