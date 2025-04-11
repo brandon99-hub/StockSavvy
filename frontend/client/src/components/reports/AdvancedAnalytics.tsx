@@ -220,8 +220,34 @@ const AdvancedAnalytics = () => {
     });
 
     const { data: categoryChartData = [], isLoading: isCategoryDataLoading } = useQuery({
-        queryKey: ['/api/dashboard/category-chart/'],
-        queryFn: () => apiRequest('/api/dashboard/category-chart/')
+        queryKey: ['analytics', 'category-chart'],
+        queryFn: async () => {
+            try {
+                const response = await apiRequest('/api/dashboard/category-chart/');
+                console.log('Raw Category API response:', JSON.stringify(response, null, 2));
+                
+                if (!Array.isArray(response)) {
+                    console.error('Category data is not an array:', response);
+                    return [];
+                }
+                
+                // Transform the data to match the CategoryChartData interface
+                const validCategories = response.map(item => ({
+                    id: item.id,
+                    name: item.name,
+                    value: parseFloat(item.total_value) || 0,
+                    percentage: item.percentage || 0
+                }));
+
+                console.log('Processed category data:', validCategories);
+                return validCategories;
+            } catch (error) {
+                console.error('Error fetching category data:', error);
+                return [];
+            }
+        },
+        refetchInterval: 60000,
+        staleTime: 55000 // Add staleTime to prevent unnecessary refetches
     });
 
     const { data: lowStockData = { items: [], summary: { total: 0, outOfStock: 0, lowStock: 0 } }, isLoading: isLowStockLoading } = useQuery({
@@ -790,14 +816,15 @@ const AdvancedAnalytics = () => {
                                                     cx="50%"
                                                     cy="50%"
                                                     labelLine={false}
+                                                    innerRadius={60}
                                                     outerRadius={80}
                                                     fill="#8884d8"
                                                     dataKey="value"
                                                     nameKey="name"
                                                     label={({
-                                                                name,
-                                                                percent
-                                                            }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                                                        name,
+                                                        percent
+                                                    }) => `${name}: ${(percent * 100).toFixed(0)}%`}
                                                 >
                                                     {categoryData.map((entry, index) => (
                                                         <Cell key={`cell-${index}`}
@@ -812,28 +839,25 @@ const AdvancedAnalytics = () => {
                                     <div className="w-full md:w-1/2 mt-6 md:mt-0">
                                         <h3 className="text-lg font-medium mb-4">Category Breakdown</h3>
                                         <div className="space-y-4">
-                                            {categoryData.map((category, index) => {
-                                                const categoryTotal = categoryRevenueData.find(c => c.name === category.name)?.value || 0;
-                                                return (
-                                                    <div key={category.id} className="flex items-center gap-2">
-                                                        <div className="w-4 h-4"
-                                                             style={{backgroundColor: COLORS[index % COLORS.length]}}></div>
-                                                        <div className="flex-1">
-                                                            <div className="flex justify-between">
-                                                                <span>{category.name}</span>
-                                                                <span>{formatCurrency(categoryTotal)}</span>
-                                                            </div>
-                                                            <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
-                                                                <div className="h-2 rounded-full"
-                                                                     style={{
-                                                                         width: `${category.percentage}%`,
-                                                                         backgroundColor: COLORS[index % COLORS.length]
-                                                                     }}></div>
-                                                            </div>
+                                            {categoryData.map((category, index) => (
+                                                <div key={category.id} className="flex items-center gap-2">
+                                                    <div className="w-4 h-4"
+                                                         style={{backgroundColor: COLORS[index % COLORS.length]}}></div>
+                                                    <div className="flex-1">
+                                                        <div className="flex justify-between">
+                                                            <span>{category.name}</span>
+                                                            <span>{formatCurrency(category.value)}</span>
+                                                        </div>
+                                                        <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
+                                                            <div className="h-2 rounded-full"
+                                                                 style={{
+                                                                     width: `${category.percentage}%`,
+                                                                     backgroundColor: COLORS[index % COLORS.length]
+                                                                 }}></div>
                                                         </div>
                                                     </div>
-                                                );
-                                            })}
+                                                </div>
+                                            ))}
                                         </div>
                                     </div>
                                 </CardContent>

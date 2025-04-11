@@ -41,6 +41,12 @@ interface Product {
   cost: number;
   quantity: number;
   reorder_level: number;
+  category_name?: string;
+  min_stock_level?: number;
+  buy_price?: number;
+  sell_price?: number;
+  status?: string;
+  sku?: string;
 }
 
 interface Category {
@@ -80,91 +86,121 @@ const ReportGenerator = () => {
     const [calendarOpen, setCalendarOpen] = useState(false);
 
     // Fetch data based on report type
-  const { data: stats = {}, isLoading: isStatsLoading } = useQuery({
-    queryKey: ['/api/dashboard/stats/'],
-    queryFn: () => apiRequest('/api/dashboard/stats/')
-  });
+    const { data: stats = {}, isLoading: isStatsLoading } = useQuery({
+        queryKey: ["reports", "stats"],
+        queryFn: () => apiRequest('/api/dashboard/stats/'),
+        staleTime: 60000
+    });
 
-  const { data: salesChartData = [], isLoading: isSalesDataLoading } = useQuery({
-    queryKey: ['/api/dashboard/sales-chart/'],
-    queryFn: () => apiRequest('/api/dashboard/sales-chart/')
-  });
+    const { data: salesChartData = [], isLoading: isSalesDataLoading } = useQuery({
+        queryKey: ["reports", "sales-chart"],
+        queryFn: async () => {
+            const response = await apiRequest('/api/dashboard/sales-chart/');
+            if (!response?.items || !Array.isArray(response.items)) {
+                console.error('Invalid sales data format:', response);
+                return [];
+            }
+            return response.items;
+        },
+        staleTime: 60000
+    });
 
-  const { data: categoryChartData = [], isLoading: isCategoryDataLoading } = useQuery({
-    queryKey: ['/api/dashboard/category-chart/'],
-    queryFn: () => apiRequest('/api/dashboard/category-chart/')
-  });
+    const { data: categoryChartData = [], isLoading: isCategoryDataLoading } = useQuery({
+        queryKey: ["reports", "category-chart"],
+        queryFn: async () => {
+            const response = await apiRequest('/api/dashboard/category-chart/');
+            if (!Array.isArray(response)) {
+                console.error('Invalid category data format:', response);
+                return [];
+            }
+            return response;
+        },
+        staleTime: 60000
+    });
 
-  const { data: lowStockData = { items: [], summary: { total: 0, outOfStock: 0, lowStock: 0 } }, isLoading: isLowStockLoading } = useQuery({
-    queryKey: ['/api/products/low-stock/'],
-    queryFn: () => apiRequest('/api/products/low-stock/')
-  });
+    const { data: lowStockData = { items: [], summary: { total: 0, outOfStock: 0, lowStock: 0 } }, isLoading: isLowStockLoading } = useQuery({
+        queryKey: ["reports", "low-stock"],
+        queryFn: () => apiRequest('/api/products/low-stock/'),
+        staleTime: 60000
+    });
 
-  const { data: products = [], isLoading: isProductsLoading } = useQuery<Product[]>({
-    queryKey: ['/api/products'],
-    queryFn: async () => {
-      const response = await apiRequest('/api/products/');
-      return Array.isArray(response) ? response : [];
-    }
-  });
+    const { data: products = [], isLoading: isProductsLoading } = useQuery<Product[]>({
+        queryKey: ["reports", "products"],
+        queryFn: async () => {
+            const response = await apiRequest('/api/reports/inventory/');
+            if (!response?.products || !Array.isArray(response.products)) {
+                console.error('Invalid inventory data format:', response);
+                return [];
+            }
+            return response.products;
+        },
+        staleTime: 60000
+    });
 
-  const { data: categories = [], isLoading: isCategoriesLoading } = useQuery<Category[]>({
-    queryKey: ['/api/categories'],
-    queryFn: async () => {
-      const response = await apiRequest('/api/categories/');
-      return Array.isArray(response) ? response : [];
-    }
-  });
+    const { data: categories = [], isLoading: isCategoriesLoading } = useQuery<Category[]>({
+        queryKey: ["reports", "categories"],
+        queryFn: async () => {
+            const response = await apiRequest('/api/categories/');
+            return Array.isArray(response) ? response : [];
+        },
+        staleTime: 300000 // Categories don't change often
+    });
 
-  const { data: sales = [], isLoading: isSalesLoading } = useQuery<Sale[]>({
-    queryKey: ['/api/sales'],
-    queryFn: async () => {
-      const response = await apiRequest('/api/sales/');
-      return Array.isArray(response) ? response : [];
-    }
-  });
+    const { data: sales = [], isLoading: isSalesLoading } = useQuery<Sale[]>({
+        queryKey: ["reports", "sales"],
+        queryFn: async () => {
+            const response = await apiRequest('/api/sales/');
+            return Array.isArray(response) ? response : [];
+        },
+        staleTime: 60000
+    });
 
-  // Calculate loading state
-  const isLoading = isStatsLoading || isSalesDataLoading || isCategoryDataLoading || isLowStockLoading || isProductsLoading || isCategoriesLoading || isSalesLoading;
+    // Calculate loading state
+    const isLoading = isStatsLoading || isSalesDataLoading || isCategoryDataLoading || isLowStockLoading || isProductsLoading || isCategoriesLoading || isSalesLoading;
 
-  // Transform data for reports with safety checks
-  const inventoryReportData = React.useMemo(() => {
-    if (!Array.isArray(lowStockData?.items)) return [];
-    
-    return lowStockData.items.map(product => ({
-      name: String(product.name || ''),
-      category: String(product.category_name || 'Unknown'),
-      quantity: Number(product.quantity || 0),
-      reorderLevel: Number(product.reorder_level || 0),
-      status: Number(product.quantity || 0) <= 0 ? 'Out of Stock' : 
-              Number(product.quantity || 0) <= Number(product.reorder_level || 0) ? 'Low Stock' : 'In Stock'
-    }));
-  }, [lowStockData]);
+    // Transform data for reports with safety checks
+    const inventoryReportData = React.useMemo(() => {
+        if (!Array.isArray(products)) return [];
+        
+        return products.map(product => {
+            return {
+                name: String(product.name || ''),
+                category: String(product.category_name || 'Unknown'),
+                quantity: Number(product.quantity || 0),
+                reorderLevel: Number(product.min_stock_level || 0),
+                value: Number(product.sell_price || 0) * Number(product.quantity || 0),
+                status: product.status || 'Unknown',
+                sku: product.sku || '',
+                buyPrice: Number(product.buy_price || 0),
+                sellPrice: Number(product.sell_price || 0)
+            };
+        });
+    }, [products]);
 
-  const salesReportData = React.useMemo(() => {
-    if (!Array.isArray(salesChartData)) return [];
-    
-    return salesChartData.map(item => ({
-      date: format(new Date(item.date || new Date()), 'MMM dd, yyyy'),
-      amount: Number(item.amount || 0),
-      count: Number(item.count || 0)
-    }));
-  }, [salesChartData]);
+    const salesReportData = React.useMemo(() => {
+        if (!Array.isArray(salesChartData)) return [];
+        
+        return salesChartData.map(item => ({
+            date: format(new Date(item.date), 'MMM dd, yyyy'),
+            amount: parseFloat(item.amount),
+            count: item.transaction_count || 0
+        }));
+    }, [salesChartData]);
 
-  const profitReportData = React.useMemo(() => {
-    if (!Array.isArray(categoryChartData)) return [];
-    
-    return categoryChartData.map(item => ({
-      category: String(item.name || 'Unknown'),
-      revenue: Number(item.value || 0),
-      percentage: Number(item.percentage || 0)
-    }));
-  }, [categoryChartData]);
+    const profitReportData = React.useMemo(() => {
+        if (!Array.isArray(categoryChartData)) return [];
+        
+        return categoryChartData.map(item => ({
+            category: String(item.name || 'Unknown'),
+            revenue: parseFloat(item.total_value || '0'),
+            percentage: Number(item.percentage || 0)
+        }));
+    }, [categoryChartData]);
 
-  // Format currency values
-  const formatCurrency = (value: number): string => {
-    return `KSh ${value.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  };
+    // Format currency values
+    const formatCurrency = (value: number): string => {
+        return `KSh ${value.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    };
 
     // Transform categories array to an object for easier lookup
     const categoryMap = categories.reduce((acc, category) => {
@@ -181,10 +217,9 @@ const ReportGenerator = () => {
     // Generate inventory report data
     const inventoryData = products.map(product => ({
         ...product,
-    categoryName: product.category_id ? categoryMap[product.category_id] : 'Uncategorized',
-        status: product.quantity <= 0 ? 'Out of Stock' :
-            product.quantity <= product.reorder_level ? 'Low Stock' : 'In Stock',
-    value: Number(product.price) * product.quantity
+        categoryName: product.category_name || 'Uncategorized',
+        status: product.status || 'Unknown',
+        value: Number(product.sell_price || 0) * Number(product.quantity || 0)
     }));
 
     // Generate sales report data for chart
@@ -212,7 +247,7 @@ const ReportGenerator = () => {
     const handleExportPDF = () => {
         switch (reportType) {
             case 'inventory':
-                exportInventoryToPDF(products, categoryMap);
+                exportInventoryToPDF(inventoryData, categoryMap);
                 break;
             case 'sales':
         exportSalesToPDF(sales, {}, productMap);
@@ -232,15 +267,15 @@ const ReportGenerator = () => {
         switch (reportType) {
             case 'inventory':
                 data = inventoryData.map(item => ({
-          SKU: item.id,
+                    SKU: item.sku || '',
                     Name: item.name,
-                    Category: item.categoryName,
+                    Category: item.category_name || 'Uncategorized',
                     Quantity: item.quantity,
-          'Min Stock': item.reorder_level,
-          'Buy Price': Number(item.price).toFixed(2),
-          'Sell Price': Number(item.price).toFixed(2),
+                    'Min Stock': item.min_stock_level,
+                    'Buy Price': Number(item.buy_price || 0).toFixed(2),
+                    'Sell Price': Number(item.sell_price || 0).toFixed(2),
                     Status: item.status,
-          Value: (Number(item.price) * item.quantity).toFixed(2)
+                    Value: (Number(item.sell_price || 0) * Number(item.quantity || 0)).toFixed(2)
                 }));
                 filename = 'inventory_report';
                 break;
@@ -272,44 +307,25 @@ const ReportGenerator = () => {
     return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold">Reports</h2>
-        <div className="flex space-x-4">
-                                    <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
-                                        <PopoverTrigger asChild>
-              <Button variant="outline">
-                {format(dateRange.start, 'MMM d, yyyy')} - {format(dateRange.end, 'MMM d, yyyy')}
-                                            </Button>
-                                        </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="end">
-                                            <Calendar
-                                                mode="range"
-                                                selected={{
-                                                    from: dateRange.start,
-                                                    to: dateRange.end
-                                                }}
-                                                onSelect={(range) => {
-                                                    if (range?.from && range?.to) {
-                                                        setDateRange({
-                                                            start: startOfDay(range.from),
-                                                            end: endOfDay(range.to)
-                                                        });
-                  }
-                                                        setCalendarOpen(false);
-                                                }}
-                                                initialFocus
-                                            />
-                                        </PopoverContent>
-                                    </Popover>
-          <Button onClick={() => exportToCSV(reportType === 'inventory' ? inventoryReportData : 
-                                          reportType === 'sales' ? salesReportData : 
-                                          profitReportData, 
-                                          `${reportType}_report_${format(new Date(), 'yyyy-MM-dd')}`)}>
-            Export to CSV
-          </Button>
-                            </div>
-                        </div>
+        <div>
+          <h2 className="text-xl font-semibold text-gray-800">Generate Reports</h2>
+          <p className="text-gray-600">Select a report type and date range to generate your report.</p>
+        </div>
+        <div className="space-x-2">
+          <Button onClick={handleExportPDF}>Export PDF</Button>
+          <Button onClick={handleExportCSV}>Export CSV</Button>
+        </div>
+      </div>
 
-      <Tabs value={reportType} onValueChange={(value: 'inventory' | 'sales' | 'profit') => setReportType(value)}>
+      <Tabs 
+        value={reportType} 
+        onValueChange={value => {
+            if (value === 'inventory' || value === 'sales' || value === 'profit') {
+                setReportType(value);
+            }
+        }}
+        className="space-y-4"
+      >
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="inventory">Inventory Report</TabsTrigger>
           <TabsTrigger value="sales">Sales Report</TabsTrigger>
@@ -361,7 +377,7 @@ const ReportGenerator = () => {
               )}
             </CardContent>
           </Card>
-                    </TabsContent>
+        </TabsContent>
 
         <TabsContent value="sales">
           <Card>
