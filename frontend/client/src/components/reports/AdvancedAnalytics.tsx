@@ -447,13 +447,13 @@ const AdvancedAnalytics = () => {
         if (!stats || typeof stats !== 'object') {
             return {
                 totalRevenue: 0,
-                totalSales: 0,
+                totalSales: salesQuery.data?.summary?.total_sales || 0,
                 averageOrderValue: 0
             };
         }
 
-        const totalRevenue = Number(stats.totalRevenue || 0);
-        const totalSales = Number(stats.totalSales || 0);
+        const totalSales = salesQuery.data?.summary?.total_sales || 0;
+        const totalRevenue = salesQuery.data?.items?.reduce((sum, item) => sum + parseFloat(item.amount || '0'), 0) || 0;
         const averageOrderValue = totalSales > 0 ? totalRevenue / totalSales : 0;
 
         return {
@@ -461,15 +461,28 @@ const AdvancedAnalytics = () => {
             totalSales,
             averageOrderValue
         };
-    }, [stats]);
+    }, [stats, salesQuery.data]);
 
     // Calculate stock movement data with safety checks
     const stockMovementData = useMemo(() => {
         if (!Array.isArray(activities)) return [];
         
+        // Filter activities to only include stock-related ones within date range
+        const stockActivities = activities.filter(activity => {
+            if (!activity?.created_at) return false;
+            const activityDate = new Date(activity.created_at);
+            return (activityDate >= dateRange.start && 
+                    activityDate <= dateRange.end && 
+                    (activity.type === 'stock_added' || 
+                     activity.type === 'stock_removed' ||
+                     activity.type === 'sale_created' ||
+                     activity.type === 'purchase_created'));
+        });
+
+        // Create a map for each day in the range
         const movementMap = new Map<string, { additions: number, removals: number }>();
 
-        // Initialize with the date range
+        // Initialize with zeros for all dates in range
         const daysInRange = differenceInDays(dateRange.end, dateRange.start) + 1;
         for (let i = 0; i < daysInRange; i++) {
             const date = format(addDays(dateRange.start, i), 'yyyy-MM-dd');
@@ -477,28 +490,28 @@ const AdvancedAnalytics = () => {
         }
 
         // Process activities
-        activities.forEach(activity => {
-            if (!activity?.created_at) return;
-            
+        stockActivities.forEach(activity => {
             const activityDate = format(new Date(activity.created_at), 'yyyy-MM-dd');
             const current = movementMap.get(activityDate) || { additions: 0, removals: 0 };
+            const quantity = activity.quantity || 1;
 
-            if (activity.type === 'stock_added') {
+            if (activity.type === 'stock_added' || activity.type === 'purchase_created') {
                 movementMap.set(activityDate, {
                     ...current,
-                    additions: current.additions + (activity.quantity || 1)
+                    additions: current.additions + quantity
                 });
-            } else if (activity.type === 'stock_removed') {
+            } else if (activity.type === 'stock_removed' || activity.type === 'sale_created') {
                 movementMap.set(activityDate, {
                     ...current,
-                    removals: current.removals + (activity.quantity || 1)
+                    removals: current.removals + quantity
                 });
             }
         });
 
+        // Convert map to array and sort by date
         return Array.from(movementMap.entries())
             .map(([date, data]) => ({
-                date,
+                date: format(new Date(date), 'MMM dd'),
                 additions: data.additions,
                 removals: data.removals,
                 net: data.additions - data.removals
@@ -508,18 +521,29 @@ const AdvancedAnalytics = () => {
 
     // Calculate inventory status data
     const inventoryStatusData = useMemo(() => {
+        if (!Array.isArray(categories) || !Array.isArray(products)) return [];
+
         return categories.map(category => {
-            const categoryProducts = products.filter(p => p.category === category.id);
-            const totalQuantity = categoryProducts.reduce((sum, p) => sum + (p.quantity || 0), 0);
-            const lowStockCount = categoryProducts.filter(p => (p.quantity || 0) <= (p.min_stock_level || 0)).length;
+            const categoryProducts = products.filter(p => 
+                typeof p.category === 'number' && p.category === category.id
+            );
+
+            const totalQuantity = categoryProducts.reduce((sum, p) => sum + (Number(p.quantity) || 0), 0);
+            const lowStockCount = categoryProducts.filter(p => 
+                (Number(p.quantity) || 0) <= (Number(p.min_stock_level) || 0)
+            ).length;
+            const outOfStockCount = categoryProducts.filter(p => 
+                (Number(p.quantity) || 0) === 0
+            ).length;
 
             return {
                 category: category.name,
                 "Product Count": categoryProducts.length,
                 "Total Quantity": totalQuantity,
-                "Low Stock Items": lowStockCount
+                "Low Stock Items": lowStockCount,
+                "Out of Stock": outOfStockCount
             };
-        });
+        }).filter(data => data["Product Count"] > 0); // Only show categories with products
     }, [categories, products]);
 
     // Calculate year-over-year comparison data
@@ -697,7 +721,7 @@ const AdvancedAnalytics = () => {
                                 <CardTitle>Total Revenue</CardTitle>
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-bold">{formatCurrency(Number(stats?.totalRevenue || 0))}</div>
+                                <div className="text-2xl font-bold">{formatCurrency(metrics.totalRevenue)}</div>
                             </CardContent>
                         </Card>
                         <Card>
@@ -705,7 +729,7 @@ const AdvancedAnalytics = () => {
                                 <CardTitle>Total Sales</CardTitle>
                             </CardHeader>
                             <CardContent>
-                                <div className="text-2xl font-bold">{Number(stats?.totalSales || 0)}</div>
+                                <div className="text-2xl font-bold">{metrics.totalSales}</div>
                             </CardContent>
                         </Card>
                         <Card>
@@ -714,9 +738,7 @@ const AdvancedAnalytics = () => {
                             </CardHeader>
                             <CardContent>
                                 <div className="text-2xl font-bold">
-                                    {formatCurrency(Number(stats?.totalSales || 0) > 0 
-                                        ? Number(stats?.totalRevenue || 0) / Number(stats?.totalSales || 1) 
-                                        : 0)}
+                                    {formatCurrency(metrics.averageOrderValue)}
                                 </div>
                             </CardContent>
                         </Card>
@@ -924,12 +946,12 @@ const AdvancedAnalytics = () => {
                                                 <PolarGrid />
                                                 <PolarAngleAxis dataKey="category" />
                                                 <PolarRadiusAxis angle={30} domain={[0, 'auto']} />
-                                                <Radar name="Product Count" dataKey="Product Count" stroke="#8884d8"
-                                                      fill="#8884d8" fillOpacity={0.6} />
                                                 <Radar name="Total Quantity" dataKey="Total Quantity" stroke="#82ca9d"
                                                       fill="#82ca9d" fillOpacity={0.6} />
-                                                <Radar name="Low Stock Items" dataKey="Low Stock Items" stroke="#ff8042"
-                                                      fill="#ff8042" fillOpacity={0.6} />
+                                                <Radar name="Low Stock Items" dataKey="Low Stock Items" stroke="#f87171"
+                                                      fill="#f87171" fillOpacity={0.6} />
+                                                <Radar name="Out of Stock" dataKey="Out of Stock" stroke="#fbbf24"
+                                                      fill="#fbbf24" fillOpacity={0.6} />
                                                 <Legend />
                                                 <RechartsTooltip content={<CustomTooltip />} />
                                             </RadarChart>
