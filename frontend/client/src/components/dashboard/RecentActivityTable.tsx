@@ -70,19 +70,17 @@ const RecentActivityTable: React.FC<RecentActivityTableProps> = ({
   };
 
   const getActivityMessage = (activity: Activity) => {
-    if (activity.message) return activity.message;
-    
     switch (activity.type) {
       case 'product_added':
-        return `Added new product: ${activity.product?.name || 'Unknown product'}`;
+        return `Added new product: ${activity.description}`;
       case 'product_updated':
-        return `Updated product: ${activity.product?.name || 'Unknown product'}`;
+        return `Updated product: ${activity.description}`;
       case 'product_deleted':
-        return `Deleted product: ${activity.details?.product_name || 'Unknown product'}`;
+        return `Deleted product: ${activity.description}`;
       case 'sale_created':
-        return `New sale: ${activity.details?.amount || 0} KES`;
+        return `New sale: ${activity.description}`;
       case 'stock_updated':
-        return `Stock updated for: ${activity.product?.name || 'Unknown product'}`;
+        return `Stock updated: ${activity.description}`;
       default:
         return activity.description;
     }
@@ -108,23 +106,8 @@ const RecentActivityTable: React.FC<RecentActivityTableProps> = ({
           size="sm" 
           className="h-8 w-8 p-0"
           onClick={() => {
-            // If we have queryClient, use it for data refetching; otherwise fallback to page reload
             if (queryClient) {
-              // Invalidate all the relevant queries
               queryClient.invalidateQueries({ queryKey: ['/api/activities'] });
-              queryClient.invalidateQueries({ queryKey: ['/api/dashboard/stats'] });
-              queryClient.invalidateQueries({ queryKey: ['/api/dashboard/sales-chart'] });
-              queryClient.invalidateQueries({ queryKey: ['/api/dashboard/category-chart'] });
-              queryClient.invalidateQueries({ queryKey: ['/api/products'] });
-              queryClient.invalidateQueries({ queryKey: ['/api/products/low-stock'] });
-              
-              toast({
-                title: "Refreshing Activities",
-                description: "Updating the recent activity list...",
-              });
-            } else {
-              // Fallback to page reload
-              window.location.reload();
               toast({
                 title: "Refreshing Activities",
                 description: "Updating the recent activity list...",
@@ -140,7 +123,7 @@ const RecentActivityTable: React.FC<RecentActivityTableProps> = ({
           <TableHeader>
             <TableRow className="bg-gray-50">
               <TableHead>Event</TableHead>
-              <TableHead>Product</TableHead>
+              <TableHead>Description</TableHead>
               <TableHead>User</TableHead>
               <TableHead>Time</TableHead>
               <TableHead>Status</TableHead>
@@ -161,7 +144,7 @@ const RecentActivityTable: React.FC<RecentActivityTableProps> = ({
                   {activity.description}
                 </TableCell>
                 <TableCell className="text-sm text-gray-500">
-                  {activity.user.name}
+                  {activity.user_name}
                 </TableCell>
                 <TableCell className="text-sm text-gray-500">
                   {formatDistanceToNow(new Date(activity.created_at), { addSuffix: true })}
@@ -194,11 +177,7 @@ const RecentActivityTable: React.FC<RecentActivityTableProps> = ({
           variant="link" 
           className="text-sm text-blue-600 hover:text-blue-800 font-medium p-0"
           onClick={() => {
-            // For demo purposes, we'll show a more elegant modal or dropdown in the future
-            // For now, just scroll to top of current activities with animation
             window.scrollTo({ top: 0, behavior: 'smooth' });
-            
-            // Show a toast notification that's more professional for demos
             toast({
               title: "Viewing Recent Activities",
               description: "Displaying the most recent system activities.",

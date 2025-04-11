@@ -1,20 +1,11 @@
 export interface Activity {
     id: number;
     type: string;
+    description: string;
     created_at: string;
-    quantity?: number;
-    details?: {
-        quantity?: number;
-        old_quantity?: number;
-        new_quantity?: number;
-        items?: Array<{
-            quantity: number;
-            product_id: number;
-        }>;
-    };
-    product?: number;
-    user?: number;
-    description?: string;
+    status: string;
+    user_name: string;
+    activity_type: string;
 }
 
 export interface Product {
