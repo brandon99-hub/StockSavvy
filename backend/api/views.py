@@ -251,6 +251,29 @@ class CategoryViewSet(viewsets.ModelViewSet):
             )
         return super().create(request, *args, **kwargs)
 
+    def destroy(self, request, *args, **kwargs):
+        is_authenticated, user_id, is_admin = self.check_token_auth(request)
+        if not is_authenticated:
+            return Response(
+                {"detail": "Authentication required"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        if not is_admin:
+            return Response(
+                {"detail": "Permission denied"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+            
+        try:
+            instance = self.get_object()
+            self.perform_destroy(instance)
+            return Response({"message": "Category deleted successfully"}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response(
+                {"detail": f"Error deleting category: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all()
@@ -279,8 +302,9 @@ class ProductViewSet(viewsets.ModelViewSet):
                     is_staff, is_superuser, role = row
                     # Allow access if user is staff, superuser, admin, or manager
                     is_authorized = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager', 'staff'])
-                    return True, role, is_authorized
-        except (ValueError, IndexError, Exception):
+                    return True, user_id, is_authorized
+        except (IndexError, ValueError, Exception) as e:
+            print(f"Token validation error: {str(e)}")
             return False, None, False
 
         return False, None, False
@@ -354,7 +378,32 @@ class ProductViewSet(viewsets.ModelViewSet):
                 {"detail": "Permission denied"},
                 status=status.HTTP_403_FORBIDDEN
             )
-        return super().create(request, *args, **kwargs)
+        
+        try:
+            # Create the product
+            response = super().create(request, *args, **kwargs)
+            
+            if response.status_code == 201:  # If product was created successfully
+                # Get the created product data
+                product_data = response.data
+                
+                # Create activity log
+                Activity.objects.create(
+                    type='product_added',
+                    description=f'New product added: {product_data["name"]}',
+                    product_id=product_data['id'],
+                    user_id=user_id,
+                    created_at=timezone.now(),
+                    status='completed'
+                )
+            
+            return response
+            
+        except Exception as e:
+            return Response(
+                {"detail": f"Error creating product: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     def update(self, request, *args, **kwargs):
         is_authenticated, user_id, is_admin = self.check_token_auth(request)
@@ -362,7 +411,48 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
         if not is_admin:
             return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-        return super().update(request, *args, **kwargs)
+        
+        try:
+            # Get the product before update
+            instance = self.get_object()
+            old_quantity = instance.quantity
+            
+            # Update the product
+            response = super().update(request, *args, **kwargs)
+            
+            if response.status_code == 200:  # If product was updated successfully
+                # Get the updated product data
+                product_data = response.data
+                
+                # Create activity log for product update
+                Activity.objects.create(
+                    type='product_updated',
+                    description=f'Product updated: {product_data["name"]}',
+                    product_id=product_data['id'],
+                    user_id=user_id,
+                    created_at=timezone.now(),
+                    status='completed'
+                )
+                
+                # If quantity changed, create a stock update activity
+                new_quantity = product_data['quantity']
+                if new_quantity != old_quantity:
+                    Activity.objects.create(
+                        type='stock_updated',
+                        description=f'Stock updated for {product_data["name"]} from {old_quantity} to {new_quantity}',
+                        product_id=product_data['id'],
+                        user_id=user_id,
+                        created_at=timezone.now(),
+                        status='completed'
+                    )
+            
+            return response
+            
+        except Exception as e:
+            return Response(
+                {"detail": f"Error updating product: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     def destroy(self, request, *args, **kwargs):
         is_authenticated, user_id, is_admin = self.check_token_auth(request)
@@ -370,7 +460,32 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
         if not is_admin:
             return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-        return super().destroy(request, *args, **kwargs)
+        
+        try:
+            # Get the product before deletion
+            instance = self.get_object()
+            product_name = instance.name
+            
+            # Delete the product
+            response = super().destroy(request, *args, **kwargs)
+            
+            if response.status_code == 204:  # If product was deleted successfully
+                # Create activity log
+                Activity.objects.create(
+                    type='product_deleted',
+                    description=f'Product deleted: {product_name}',
+                    user_id=user_id,
+                    created_at=timezone.now(),
+                    status='completed'
+                )
+            
+            return response
+            
+        except Exception as e:
+            return Response(
+                {"detail": f"Error deleting product: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @action(detail=True, methods=['post'])
     def restock(self, request, pk=None):

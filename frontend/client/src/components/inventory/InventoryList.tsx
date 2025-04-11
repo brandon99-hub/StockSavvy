@@ -35,6 +35,16 @@ import {
   DialogTitle,
   DialogFooter
 } from '../ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
 import { Product, Category } from '../../types';
@@ -95,6 +105,7 @@ const InventoryList: React.FC<InventoryListProps> = ({
   const [page, setPage] = useState(1);
   const { user } = useAuth();
   const canEdit = user?.role === 'admin' || user?.role === 'manager';
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   
   const [sortField, setSortField] = useState<keyof Product>('name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
@@ -146,21 +157,37 @@ const InventoryList: React.FC<InventoryListProps> = ({
   const startIndex = (page - 1) * ITEMS_PER_PAGE;
   const paginatedProducts = filteredProducts.slice(startIndex, startIndex + ITEMS_PER_PAGE);
   
-  const handleDelete = async (productId: number) => {
+  const handleDelete = async (product: Product) => {
+    setProductToDelete(product);
+  };
+
+  const confirmDelete = async () => {
+    if (!productToDelete) return;
+    
     try {
-      const response = await apiRequest(`/api/products/${productId}/`, {
+      const response = await apiRequest(`/api/products/${productToDelete.id}/`, {
         method: 'DELETE',
       });
       
-      if (response.ok) {
+      if (response) {
         queryClient.invalidateQueries({ queryKey: ['products'] });
-        toast.success('Product deleted successfully');
+        queryClient.invalidateQueries({ queryKey: ['dashboard', 'activities'] });
+        toast({
+          title: 'Success',
+          description: 'Product deleted successfully',
+        });
       } else {
         throw new Error('Failed to delete product');
       }
     } catch (error) {
       console.error('Delete error:', error);
-      toast.error('Failed to delete product. Please try again.');
+      toast({
+        title: 'Error',
+        description: 'Failed to delete product. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setProductToDelete(null);
     }
   };
   
@@ -238,7 +265,7 @@ const InventoryList: React.FC<InventoryListProps> = ({
                 </TableCell>
               </TableRow>
             ) : (
-              filteredProducts.map((product) => {
+              paginatedProducts.map((product) => {
                 const stockStatus = getStockStatus(product.quantity, product.min_stock_level);
                 const category = categories.find(c => c.id === product.category_id);
                 
@@ -272,7 +299,7 @@ const InventoryList: React.FC<InventoryListProps> = ({
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => handleDelete(product.id)}
+                            onClick={() => handleDelete(product)}
                             className="text-red-600 hover:text-red-700"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -286,6 +313,28 @@ const InventoryList: React.FC<InventoryListProps> = ({
             )}
           </TableBody>
         </Table>
+        
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={!!productToDelete} onOpenChange={(open) => !open && setProductToDelete(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Product</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete the product "{productToDelete?.name}"? 
+                This action cannot be undone and will permanently remove the product from your inventory.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={confirmDelete}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </CardContent>
       <CardFooter className="p-4 border-t border-gray-200">
         <Pagination>

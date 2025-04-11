@@ -164,6 +164,7 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
             const finalAmount = calculateTotal();
             
             const saleData = {
+                sale_date: new Date().toISOString(),
                 total_amount: finalAmount.toFixed(2),
                 original_amount: subtotal.toFixed(2),
                 discount: discountAmount.toFixed(2),
@@ -172,11 +173,13 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                 payment_method: paymentMethod,
                 sale_items: selectedItems.map(item => ({
                     product_id: item.productId,
-                    quantity: item.quantity,
-                    unit_price: item.unitPrice.toFixed(2),
-                    total_price: (item.quantity * item.unitPrice).toFixed(2)
+                    quantity: parseInt(item.quantity.toString()),
+                    unit_price: parseFloat(item.unitPrice.toFixed(2)),
+                    total_price: parseFloat((item.quantity * item.unitPrice).toFixed(2))
                 }))
             };
+
+            console.log('Sending sale data:', saleData);
 
             const response = await apiRequest('/api/sales/', {
                 method: 'POST',
@@ -206,7 +209,8 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                 await Promise.all([
                     queryClient.invalidateQueries({ queryKey: ['/api/sales'] }),
                     queryClient.invalidateQueries({ queryKey: ['/api/products'] }),
-                    queryClient.invalidateQueries({ queryKey: ['/api/activities'] })
+                    queryClient.invalidateQueries({ queryKey: ['/api/activities'] }),
+                    queryClient.invalidateQueries({ queryKey: ['dashboard', 'activities'] })
                 ]);
 
                 setCustomerName('');
