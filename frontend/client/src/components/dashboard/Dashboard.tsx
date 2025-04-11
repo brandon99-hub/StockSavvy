@@ -52,7 +52,7 @@ const Dashboard = () => {
 
     // Dashboard stats query
     const {data: stats, isLoading: isStatsLoading} = useQuery<DashboardStats>({
-        queryKey: ["/api/dashboard/stats/"],
+        queryKey: ["dashboard", "stats"],
         queryFn: () => apiRequest('/api/dashboard/stats/'),
         refetchInterval: 60000,
     });
@@ -60,13 +60,13 @@ const Dashboard = () => {
     // Low stock products query
     const {data: lowStockData, isLoading: isLowStockLoading} =
         useQuery<LowStockResponse>({
-            queryKey: ["/api/products/low-stock/"],
+            queryKey: ["dashboard", "low-stock"],
             queryFn: () => apiRequest('/api/products/low-stock/')
         });
 
     // Sales chart data query
     const {data: salesData = [], isLoading: isSalesDataLoading} = useQuery<SalesChartData[]>({
-        queryKey: ["/api/dashboard/sales-chart/"],
+        queryKey: ["dashboard", "sales-chart"],
         queryFn: async () => {
             try {
                 const response = await apiRequest('/api/dashboard/sales-chart/');
@@ -87,12 +87,13 @@ const Dashboard = () => {
                 return [];
             }
         },
-        refetchInterval: 60000
+        refetchInterval: 60000,
+        staleTime: 55000 // Add staleTime to prevent unnecessary refetches
     });
 
     // Category chart data query
     const {data: categoryData = [], isLoading: isCategoryDataLoading} = useQuery<CategoryChartData[]>({
-        queryKey: ["/api/dashboard/category-chart/"],
+        queryKey: ["dashboard", "category-chart"],
         queryFn: async () => {
             try {
                 const response = await apiRequest('/api/dashboard/category-chart/');
@@ -118,12 +119,13 @@ const Dashboard = () => {
                 return [];
             }
         },
-        refetchInterval: 60000
+        refetchInterval: 60000,
+        staleTime: 55000 // Add staleTime to prevent unnecessary refetches
     });
 
     // Recent activities query
     const {data: activities = [], isLoading: isActivitiesLoading} = useQuery<Activity[]>({
-        queryKey: ["/api/activities/"],
+        queryKey: ["dashboard", "activities"],
         queryFn: async () => {
             try {
                 const response = await apiRequest('/api/activities/');
@@ -137,12 +139,14 @@ const Dashboard = () => {
                 return [];
             }
         },
-        refetchInterval: 30000
+        refetchInterval: 30000,
+        staleTime: 25000 // Add staleTime to prevent unnecessary refetches
     });
 
     const {data: categories = []} = useQuery<Category[]>({
-        queryKey: ['/api/categories/'],
-        queryFn: () => apiRequest('/api/categories/')
+        queryKey: ["dashboard", "categories"],
+        queryFn: () => apiRequest('/api/categories/'),
+        staleTime: 300000 // Categories don't change often, cache for 5 minutes
     });
 
     // Loading state
