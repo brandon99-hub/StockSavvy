@@ -12,6 +12,7 @@ export interface Product {
     id: number;
     name: string;
     sku: string;
+    description?: string;
     quantity: number;
     min_stock_level: number;
     category: number | { id: number; name: string };

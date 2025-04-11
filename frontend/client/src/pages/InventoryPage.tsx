@@ -1,98 +1,110 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Button } from '../components/ui/button';
+import InventoryList from '../components/inventory/InventoryList';
+import AddProductForm from '../components/inventory/AddProductForm';
+import RestockRulesManager from '../components/inventory/RestockRulesManager';
+import { Product, Category } from '../types';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { useAuth } from '../lib/auth';
 import { apiRequest } from '../lib/queryClient';
-import InventoryList from '../components/inventory/InventoryList';
-import { Product, Category } from '../types';
-import { Button, Container, Typography, Box, CircularProgress, Alert } from '@mui/material';
-import { useLocation } from 'wouter';
 
-const InventoryPage: React.FC = () => {
+const InventoryPage = () => {
+  const [activeTab, setActiveTab] = useState<string>('list');
+  const [editProduct, setEditProduct] = useState<Product | null>(null);
   const { user } = useAuth();
-  const [, navigate] = useLocation();
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  const canEdit = user?.role === 'admin' || user?.role === 'manager';
 
-  const { data: products, isLoading: isLoadingProducts, error: productsError } = useQuery<Product[]>({
-    queryKey: ['products'],
+  // Fetch products
+  const { data: products = [], isLoading: isProductsLoading } = useQuery<Product[]>({
+    queryKey: ['/api/products'],
     queryFn: () => apiRequest('/api/products/'),
-    enabled: !!user,
   });
 
-  const { data: categories, isLoading: isLoadingCategories, error: categoriesError } = useQuery<Category[]>({
-    queryKey: ['categories'],
+  // Fetch categories
+  const { data: categories = [], isLoading: isCategoriesLoading } = useQuery<Category[]>({
+    queryKey: ['/api/categories'],
     queryFn: () => apiRequest('/api/categories/'),
-    enabled: !!user,
+  });
+  
+  // Fetch low stock products
+  const { data: lowStockProducts = [], isLoading: isLowStockLoading } = useQuery<Product[]>({
+    queryKey: ['/api/products/low-stock'],
+    queryFn: () => apiRequest('/api/products/low-stock/'),
   });
 
-  const handleAddProduct = () => {
-    navigate('/inventory/add');
+  const isLoading = isProductsLoading || isCategoriesLoading || isLowStockLoading;
+
+  // Handle edit product
+  const handleEditProduct = (product: Product) => {
+    setEditProduct(product);
+    setActiveTab('add');
   };
 
-  const handleCategoryChange = (categoryId: string | null) => {
-    setSelectedCategory(categoryId);
+  // Handle cancel
+  const handleCancel = () => {
+    setEditProduct(null);
+    setActiveTab('list');
   };
-
-  const handleSearch = (query: string) => {
-    setSearchQuery(query);
-  };
-
-  const isLoading = isLoadingProducts || isLoadingCategories;
-
-  if (isLoading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
-        <CircularProgress />
-      </Box>
-    );
-  }
-
-  if (productsError || categoriesError) {
-    return (
-      <Container>
-        <Alert severity="error">
-          {productsError ? 'Error loading products' : 'Error loading categories'}
-        </Alert>
-      </Container>
-    );
-  }
-
-  if (!products || !categories) {
-    return (
-      <Container>
-        <Alert severity="warning">No data available</Alert>
-      </Container>
-    );
-  }
 
   return (
-    <Container>
-      <Box sx={{ my: 4 }}>
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
-          <Typography variant="h4" component="h1">
-            Inventory Management
-          </Typography>
-          {user?.role === 'admin' && (
-            <Button
-              variant="contained"
-              color="primary"
-              onClick={handleAddProduct}
-            >
-              Add Product
-            </Button>
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-semibold text-gray-800">Inventory Management</h1>
+        {canEdit && (
+          <Button onClick={() => {
+            setEditProduct(null);
+            setActiveTab('add');
+          }}>
+            <i className="fas fa-plus mr-2"></i> Add Product
+          </Button>
+        )}
+      </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="list">Product List</TabsTrigger>
+          {canEdit && (
+            <TabsTrigger value="add">{editProduct ? 'Edit Product' : 'Add Product'}</TabsTrigger>
           )}
-        </Box>
-        <InventoryList
-          products={products}
-          categories={categories}
-          selectedCategory={selectedCategory}
-          onCategoryChange={handleCategoryChange}
-          searchQuery={searchQuery}
-          onSearch={handleSearch}
-          isLoading={isLoading}
-        />
-      </Box>
-    </Container>
+          {canEdit && (
+            <TabsTrigger value="restock">Restock Rules</TabsTrigger>
+          )}
+        </TabsList>
+        <TabsContent value="list">
+          {isLoading ? (
+            <div className="text-center py-8">Loading inventory data...</div>
+          ) : (
+            <InventoryList 
+              products={products} 
+              categories={categories} 
+              onEdit={handleEditProduct} 
+            />
+          )}
+        </TabsContent>
+        {canEdit && (
+          <TabsContent value="add">
+            <AddProductForm 
+              categories={categories} 
+              editProduct={editProduct} 
+              onCancel={handleCancel} 
+            />
+          </TabsContent>
+        )}
+        {canEdit && (
+          <TabsContent value="restock">
+            {isLoading ? (
+              <div className="text-center py-8">Loading restock data...</div>
+            ) : (
+              <RestockRulesManager 
+                products={products} 
+                lowStockProducts={lowStockProducts} 
+              />
+            )}
+          </TabsContent>
+        )}
+      </Tabs>
+    </div>
   );
 };
 

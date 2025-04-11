@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -26,7 +26,7 @@ import { Textarea } from '../ui/textarea';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 
-// Define the product schema with validation
+// Extend the product schema with validation
 const productFormSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters"),
   sku: z.string().min(3, "SKU must be at least 3 characters"),
@@ -34,8 +34,14 @@ const productFormSchema = z.object({
   categoryId: z.number().nullable(),
   quantity: z.number().min(0, "Quantity must be 0 or greater"),
   minStockLevel: z.number().min(0, "Min stock level must be 0 or greater"),
-  buyPrice: z.number().min(0.01, "Buy price must be greater than 0"),
-  sellPrice: z.number().min(0.01, "Sell price must be greater than 0"),
+  buyPrice: z.preprocess(
+    (val) => (typeof val === 'string' ? parseFloat(val) : val as number),
+    z.number().min(0.01, "Buy price must be a number greater than 0")
+  ),
+  sellPrice: z.preprocess(
+    (val) => (typeof val === 'string' ? parseFloat(val) : val as number),
+    z.number().min(0.01, "Sell price must be a number greater than 0")
+  ),
 });
 
 type ProductFormValues = z.infer<typeof productFormSchema>;
@@ -43,27 +49,26 @@ type ProductFormValues = z.infer<typeof productFormSchema>;
 interface AddProductFormProps {
   categories: Category[];
   editProduct: Product | null;
-  onSuccess: () => void;
+  onCancel: () => void;
 }
 
-const AddProductForm = ({ categories, editProduct, onSuccess }: AddProductFormProps) => {
+const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormProps) => {
   const { toast } = useToast();
-  const [isLoading, setIsLoading] = useState(false);
   const queryClient = useQueryClient();
   const isEditing = !!editProduct;
   
-  // Initialize form with defaults or edit values
-  const form = useForm<ProductFormValues>({
+  // Initialize form with default values or edit values
+  const form = useForm({
     resolver: zodResolver(productFormSchema),
     defaultValues: {
       name: editProduct?.name || '',
       sku: editProduct?.sku || '',
       description: editProduct?.description || '',
-      categoryId: editProduct?.category?.id || null,
+      categoryId: editProduct?.categoryId || null,
       quantity: editProduct?.quantity || 0,
-      minStockLevel: editProduct?.min_stock_level || 10,
-      buyPrice: editProduct ? parseFloat(editProduct.buy_price) : 0.01,
-      sellPrice: editProduct ? parseFloat(editProduct.sell_price) : 0.01,
+      minStockLevel: editProduct?.minStockLevel || 10,
+      buyPrice: editProduct ? Number(editProduct.buyPrice) : 0.01,
+      sellPrice: editProduct ? Number(editProduct.sellPrice) : 0.01,
     },
   });
 
@@ -74,67 +79,79 @@ const AddProductForm = ({ categories, editProduct, onSuccess }: AddProductFormPr
         name: editProduct.name,
         sku: editProduct.sku,
         description: editProduct.description || '',
-        categoryId: editProduct.category?.id || null,
+        categoryId: editProduct.categoryId,
         quantity: editProduct.quantity,
-        minStockLevel: editProduct.min_stock_level,
-        buyPrice: parseFloat(editProduct.buy_price),
-        sellPrice: parseFloat(editProduct.sell_price),
+        minStockLevel: editProduct.minStockLevel,
+        buyPrice: parseFloat(String(editProduct.buyPrice)),
+        sellPrice: parseFloat(String(editProduct.sellPrice)),
+      });
+    } else {
+      form.reset({
+        name: '',
+        sku: '',
+        description: '',
+        categoryId: null,
+        quantity: 0,
+        minStockLevel: 10,
+        buyPrice: 0.01,
+        sellPrice: 0.01,
       });
     }
   }, [editProduct, form]);
 
-  // Submit handler
-  const onSubmit = async (data: ProductFormValues) => {
-    try {
-      setIsLoading(true);
-      
-      // Format the data for API
-      const productData = {
-        name: data.name,
-        sku: data.sku,
-        description: data.description,
-        category_id: data.categoryId,
-        quantity: data.quantity,
-        min_stock_level: data.minStockLevel,
-        buy_price: data.buyPrice.toFixed(2),
-        sell_price: data.sellPrice.toFixed(2),
+  // Create or update product mutation
+  const mutation = useMutation({
+    mutationFn: async (data: any) => {
+      const payload = {
+        ...data,
+        buyPrice: typeof data.buyPrice === 'number' ? data.buyPrice.toString() : data.buyPrice,
+        sellPrice: typeof data.sellPrice === 'number' ? data.sellPrice.toString() : data.sellPrice,
       };
-      
       if (isEditing && editProduct) {
-        await apiRequest(`/api/products/${editProduct.id}/`, {
-          method: "PATCH",
-          body: JSON.stringify(productData),
-        });
-        toast({
-          title: "Product updated",
-          description: "Product has been updated successfully",
-        });
+        return await apiRequest('PATCH', `/api/products/${editProduct.id}`, payload);
       } else {
-        await apiRequest("/api/products/", {
-          method: "POST",
-          body: JSON.stringify(productData),
-        });
-        toast({
-          title: "Product created",
-          description: "New product has been added successfully",
-        });
+        return await apiRequest('POST', '/api/products', payload);
       }
-      
-      // Invalidate queries to refresh data
+    },
+    onSuccess: () => {
+      // Invalidate and refetch product queries
       queryClient.invalidateQueries({ queryKey: ['/api/products'] });
       queryClient.invalidateQueries({ queryKey: ['/api/products/low-stock'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/dashboard/stats'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/dashboard/category-chart'] });
       
-      // Call success callback
-      onSuccess();
-    } catch (error) {
       toast({
-        title: "Error",
-        description: `Failed to ${isEditing ? 'update' : 'create'} product`,
-        variant: "destructive",
+        title: isEditing ? 'Product updated' : 'Product created',
+        description: isEditing ? 'Product has been updated successfully.' : 'New product has been added successfully.',
       });
-    } finally {
-      setIsLoading(false);
-    }
+      
+      // Reset form and close
+      form.reset();
+      onCancel();
+    },
+    onError: (error) => {
+      toast({
+        title: 'Error',
+        description: `Failed to ${isEditing ? 'update' : 'create'} product: ${error.message}`,
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Form submission handler
+  const onSubmit = (data: ProductFormValues) => {
+    // Ensure form data types are correct
+    const formData = {
+      ...data,
+      categoryId: data.categoryId === 0 ? null : data.categoryId,
+      quantity: Number(data.quantity),
+      minStockLevel: Number(data.minStockLevel),
+      buyPrice: Number(data.buyPrice), // Keep as number for Zod validation
+      sellPrice: Number(data.sellPrice) // Keep as number for Zod validation
+    };
+    
+    console.log('Submitting product data:', formData);
+    mutation.mutate(formData);
   };
 
   return (
@@ -144,7 +161,7 @@ const AddProductForm = ({ categories, editProduct, onSuccess }: AddProductFormPr
       </CardHeader>
       <CardContent>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <form onSubmit={form.handleSubmit(onSubmit as SubmitHandler<ProductFormValues>)} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FormField
                 control={form.control}
@@ -186,7 +203,6 @@ const AddProductForm = ({ categories, editProduct, onSuccess }: AddProductFormPr
                       placeholder="Product description" 
                       className="resize-none h-20" 
                       {...field} 
-                      value={field.value || ''}
                     />
                   </FormControl>
                   <FormMessage />
@@ -202,9 +218,13 @@ const AddProductForm = ({ categories, editProduct, onSuccess }: AddProductFormPr
                   <FormLabel>Category</FormLabel>
                   <Select
                     onValueChange={(value) => {
-                      field.onChange(value === '0' ? null : parseInt(value));
+                      if (value === '0') {
+                        field.onChange(null);
+                      } else {
+                        field.onChange(parseInt(value));
+                      }
                     }}
-                    value={field.value === null ? '0' : field.value?.toString()}
+                    value={field.value === null ? '0' : field.value?.toString() || '0'}
                   >
                     <FormControl>
                       <SelectTrigger>
@@ -213,7 +233,7 @@ const AddProductForm = ({ categories, editProduct, onSuccess }: AddProductFormPr
                     </FormControl>
                     <SelectContent>
                       <SelectItem value="0">Uncategorized</SelectItem>
-                      {categories && categories.map((category) => (
+                      {categories.map((category) => (
                         <SelectItem key={category.id} value={category.id.toString()}>
                           {category.name}
                         </SelectItem>
@@ -238,8 +258,10 @@ const AddProductForm = ({ categories, editProduct, onSuccess }: AddProductFormPr
                         min="0" 
                         step="1" 
                         {...field}
-                        onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
-                        value={field.value.toString()}
+                        onChange={(e) => {
+                          const value = e.target.value ? parseInt(e.target.value) : 0;
+                          field.onChange(value);
+                        }}
                       />
                     </FormControl>
                     <FormMessage />
@@ -259,8 +281,10 @@ const AddProductForm = ({ categories, editProduct, onSuccess }: AddProductFormPr
                         min="0" 
                         step="1" 
                         {...field}
-                        onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
-                        value={field.value.toString()}
+                        onChange={(e) => {
+                          const value = e.target.value ? parseInt(e.target.value) : 0;
+                          field.onChange(value);
+                        }}
                       />
                     </FormControl>
                     <FormMessage />
@@ -282,8 +306,11 @@ const AddProductForm = ({ categories, editProduct, onSuccess }: AddProductFormPr
                         min="0.01" 
                         step="0.01" 
                         {...field}
-                        onChange={(e) => field.onChange(parseFloat(e.target.value) || 0.01)}
-                        value={field.value.toString()}
+                        value={field.value as string | number}
+                        onChange={(e) => {
+                          const value = e.target.value ? parseFloat(e.target.value) : 0.01;
+                          field.onChange(value);
+                        }}
                       />
                     </FormControl>
                     <FormMessage />
@@ -303,8 +330,11 @@ const AddProductForm = ({ categories, editProduct, onSuccess }: AddProductFormPr
                         min="0.01" 
                         step="0.01" 
                         {...field}
-                        onChange={(e) => field.onChange(parseFloat(e.target.value) || 0.01)}
-                        value={field.value.toString()}
+                        value={field.value as string | number}
+                        onChange={(e) => {
+                          const value = e.target.value ? parseFloat(e.target.value) : 0.01;
+                          field.onChange(value);
+                        }}
                       />
                     </FormControl>
                     <FormMessage />
@@ -313,16 +343,12 @@ const AddProductForm = ({ categories, editProduct, onSuccess }: AddProductFormPr
               />
             </div>
             
-            <div className="flex justify-end space-x-4">
-              <Button 
-                type="button" 
-                variant="outline" 
-                onClick={onSuccess}
-              >
+            <div className="flex justify-end space-x-2 pt-4">
+              <Button type="button" variant="outline" onClick={onCancel}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={isLoading}>
-                {isLoading ? 'Saving...' : isEditing ? 'Update Product' : 'Add Product'}
+              <Button type="submit" disabled={mutation.isPending}>
+                {mutation.isPending ? 'Saving...' : isEditing ? 'Update Product' : 'Add Product'}
               </Button>
             </div>
           </form>

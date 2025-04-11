@@ -27,7 +27,8 @@ const LowStockTable = ({ products, onReorder, categories }: LowStockTableProps) 
   const [reorderingProduct, setReorderingProduct] = useState<number | null>(null);
 
   // Get category name helper
-  const getCategoryName = (categoryId: number) => {
+  const getCategoryName = (categoryId: number | undefined) => {
+    if (!categoryId) return "Uncategorized";
     return categories.find(c => c.id === categoryId)?.name || "Uncategorized";
   };
 
@@ -106,7 +107,7 @@ const LowStockTable = ({ products, onReorder, categories }: LowStockTableProps) 
                 </TableCell>
                 <TableCell className="text-right">
                   <Badge
-                    variant={product.quantity === 0 ? "destructive" : "warning"}
+                    variant={product.quantity === 0 ? "destructive" : "secondary"}
                     className="capitalize"
                   >
                     {product.quantity === 0 ? "Out of Stock" : "Low Stock"}
