@@ -69,6 +69,8 @@ interface InventoryListProps {
   onEdit: (product: Product) => void;
 }
 
+const ITEMS_PER_PAGE = 10;
+
 const InventoryList: React.FC<InventoryListProps> = ({
   products,
   categories,
@@ -82,31 +84,20 @@ const InventoryList: React.FC<InventoryListProps> = ({
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState<number | null>(null);
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const { user } = useAuth();
   const canEdit = user?.role === 'admin' || user?.role === 'manager';
-  
-  const itemsPerPage = 10;
   
   const [sortField, setSortField] = useState<keyof Product>('name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   
   if (isLoading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
-        <CircularProgress />
-      </Box>
-    );
-  }
-
-  if (!products || !categories) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
-        <Alert severity="warning">No data available</Alert>
-      </Box>
+      <Card>
+        <CardContent className="p-6">
+          <Skeleton className="h-8 w-1/3 mb-4" />
+          <Skeleton className="h-96" />
+        </CardContent>
+      </Card>
     );
   }
 
@@ -121,7 +112,7 @@ const InventoryList: React.FC<InventoryListProps> = ({
 
   const filteredProducts = products
     .filter(product => {
-      const matchesCategory = !selectedCategory || product.category_id === selectedCategory;
+      const matchesCategory = !selectedCategory || product.category_id?.toString() === selectedCategory;
       const matchesSearch = !searchQuery || (
         (product.name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
         (product.sku?.toLowerCase() || '').includes(searchQuery.toLowerCase())
@@ -142,14 +133,14 @@ const InventoryList: React.FC<InventoryListProps> = ({
     });
   
   // Paginate products
-  const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
-  const startIndex = (page - 1) * itemsPerPage;
-  const paginatedProducts = filteredProducts.slice(startIndex, startIndex + itemsPerPage);
+  const totalPages = Math.ceil(filteredProducts.length / ITEMS_PER_PAGE);
+  const startIndex = (page - 1) * ITEMS_PER_PAGE;
+  const paginatedProducts = filteredProducts.slice(startIndex, startIndex + ITEMS_PER_PAGE);
   
   // Delete product mutation
   const deleteMutation = useMutation({
     mutationFn: async (productId: number) => {
-      return await apiRequest('DELETE', `/api/products/${productId}`, {});
+      return await apiRequest('DELETE', `/api/products/${productId}`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/products'] });
@@ -161,9 +152,6 @@ const InventoryList: React.FC<InventoryListProps> = ({
         title: 'Product deleted',
         description: 'The product has been successfully deleted.',
       });
-      
-      setShowDeleteDialog(false);
-      setProductToDelete(null);
     },
     onError: (_error) => {
       toast({
@@ -174,135 +162,140 @@ const InventoryList: React.FC<InventoryListProps> = ({
     }
   });
   
-  const handleDelete = (product: Product) => {
-    setProductToDelete(product);
-    setShowDeleteDialog(true);
-  };
-  
-  const confirmDelete = () => {
-    if (productToDelete) {
-      deleteMutation.mutate(productToDelete.id);
-    }
-  };
-  
-  const getCategoryName = (category: Category | null | undefined) => {
-    return category?.name || 'Uncategorized';
+  const getCategoryName = (categoryId: number | undefined) => {
+    return categories.find(c => c.id === categoryId)?.name || 'Uncategorized';
   };
 
   return (
-    <>
-      <Card className="shadow-sm">
-        <CardHeader className="pb-2">
-          <div className="flex justify-between items-center flex-wrap gap-4">
-            <h2 className="text-xl font-semibold">Inventory Items</h2>
-            <div className="flex space-x-2">
-              <TextField
-                fullWidth
-                variant="outlined"
-                placeholder="Search products..."
-                value={searchQuery}
-                onChange={(e) => onSearch(e.target.value)}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon />
-                    </InputAdornment>
-                  ),
-                }}
-              />
-              <FormControl sx={{ minWidth: 200 }}>
-                <InputLabel>Category</InputLabel>
-                <Select
-                  value={selectedCategory || ''}
-                  onChange={(e) => onCategoryChange(e.target.value || null)}
-                  label="Category"
-                >
-                  <MenuItem value="">All Categories</MenuItem>
-                  {categories.map(category => (
-                    <MenuItem key={category.id} value={category.id}>
-                      {category.name}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <TableContainer>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell onClick={() => handleSort('name')} style={{ cursor: 'pointer' }}>
-                    Name {sortField === 'name' && (sortDirection === 'asc' ? '↑' : '↓')}
-                  </TableCell>
-                  <TableCell onClick={() => handleSort('sku')} style={{ cursor: 'pointer' }}>
-                    SKU {sortField === 'sku' && (sortDirection === 'asc' ? '↑' : '↓')}
-                  </TableCell>
-                  <TableCell onClick={() => handleSort('quantity')} style={{ cursor: 'pointer' }}>
-                    Quantity {sortField === 'quantity' && (sortDirection === 'asc' ? '↑' : '↓')}
-                  </TableCell>
-                  <TableCell onClick={() => handleSort('sell_price')} style={{ cursor: 'pointer' }}>
-                    Price {sortField === 'sell_price' && (sortDirection === 'asc' ? '↑' : '↓')}
-                  </TableCell>
-                  <TableCell>Category</TableCell>
-                </TableRow>
+    <Card>
+      <CardHeader className="border-b border-gray-200 px-6 py-4">
+        <h3 className="text-lg font-semibold text-gray-800">Inventory Items</h3>
+      </CardHeader>
+      <CardContent className="p-0">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-gray-50">
+              <TableHead 
+                className="cursor-pointer hover:bg-gray-100"
+                onClick={() => handleSort('name')}
+              >
+                Name {sortField === 'name' && (sortDirection === 'asc' ? '↑' : '↓')}
               </TableHead>
-              <TableBody>
-                {paginatedProducts.map((product) => (
-                  <TableRow key={product.id}>
-                    <TableCell>{product.name}</TableCell>
-                    <TableCell>{product.sku}</TableCell>
-                    <TableCell>{product.quantity}</TableCell>
-                    <TableCell>${product.sell_price.toFixed(2)}</TableCell>
-                    <TableCell>
-                      {categories.find(c => c.id === product.category_id)?.name || 'Uncategorized'}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </CardContent>
-        <CardFooter>
-          <Pagination>
-            <PaginationContent>
-              <PaginationItem>
-                <PaginationPrevious 
-                  onClick={() => setPage(Math.max(1, page - 1))}
-                  disabled={page === 1}
-                />
-              </PaginationItem>
-              <PaginationItem>
-                <PaginationNext
-                  onClick={() => setPage(Math.min(totalPages, page + 1))}
-                  disabled={page === totalPages}
-                />
-              </PaginationItem>
-            </PaginationContent>
-          </Pagination>
-        </CardFooter>
-      </Card>
-
-      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Confirm Deletion</DialogTitle>
-          </DialogHeader>
-          <p className="py-4">
-            Are you sure you want to delete <strong>{productToDelete?.name}</strong>? This action cannot be undone.
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={confirmDelete} disabled={deleteMutation.isPending}>
-              {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+              <TableHead 
+                className="cursor-pointer hover:bg-gray-100"
+                onClick={() => handleSort('sku')}
+              >
+                SKU {sortField === 'sku' && (sortDirection === 'asc' ? '↑' : '↓')}
+              </TableHead>
+              <TableHead 
+                className="cursor-pointer hover:bg-gray-100 text-right"
+                onClick={() => handleSort('quantity')}
+              >
+                Quantity {sortField === 'quantity' && (sortDirection === 'asc' ? '↑' : '↓')}
+              </TableHead>
+              <TableHead 
+                className="cursor-pointer hover:bg-gray-100 text-right"
+                onClick={() => handleSort('sell_price')}
+              >
+                Price {sortField === 'sell_price' && (sortDirection === 'asc' ? '↑' : '↓')}
+              </TableHead>
+              <TableHead>Category</TableHead>
+              <TableHead>Status</TableHead>
+              {canEdit && <TableHead className="text-right">Actions</TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {paginatedProducts.map((product) => (
+              <TableRow key={product.id} className="hover:bg-gray-50">
+                <TableCell className="font-medium">{product.name}</TableCell>
+                <TableCell className="text-gray-600">{product.sku}</TableCell>
+                <TableCell className="text-right">
+                  <div className="flex items-center justify-end gap-2">
+                    <span className="font-mono">{product.quantity}</span>
+                    {product.quantity <= (product.min_stock_level || 0) && (
+                      <Badge variant={product.quantity === 0 ? "destructive" : "secondary"} className="text-xs">
+                        {product.quantity === 0 ? "Out of Stock" : "Low Stock"}
+                      </Badge>
+                    )}
+                  </div>
+                </TableCell>
+                <TableCell className="text-right font-mono">
+                  ${product.sell_price?.toFixed(2)}
+                </TableCell>
+                <TableCell>
+                  <Badge variant="outline" className="text-xs">
+                    {getCategoryName(product.category_id)}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <Badge 
+                    variant={
+                      product.quantity === 0 ? "destructive" : 
+                      product.quantity <= (product.min_stock_level || 0) ? "secondary" : "default"
+                    }
+                    className="text-xs"
+                  >
+                    {product.quantity === 0 ? "Out of Stock" : 
+                     product.quantity <= (product.min_stock_level || 0) ? "Low Stock" : "In Stock"}
+                  </Badge>
+                </TableCell>
+                {canEdit && (
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onEdit(product)}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => deleteMutation.mutate(product.id)}
+                        disabled={deleteMutation.isPending}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </TableCell>
+                )}
+              </TableRow>
+            ))}
+            {paginatedProducts.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={canEdit ? 7 : 6} className="text-center text-gray-500 py-8">
+                  No products found
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </CardContent>
+      <CardFooter className="p-4 border-t border-gray-200">
+        <Pagination>
+          <PaginationContent>
+            <PaginationItem>
+              <PaginationPrevious 
+                onClick={() => setPage(Math.max(1, page - 1))}
+                isActive={page > 1}
+              />
+            </PaginationItem>
+            <PaginationItem>
+              <span className="text-sm text-gray-600">
+                Page {page} of {totalPages}
+              </span>
+            </PaginationItem>
+            <PaginationItem>
+              <PaginationNext
+                onClick={() => setPage(Math.min(totalPages, page + 1))}
+                isActive={page < totalPages}
+              />
+            </PaginationItem>
+          </PaginationContent>
+        </Pagination>
+      </CardFooter>
+    </Card>
   );
 };
 

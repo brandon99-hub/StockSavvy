@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useQuery, useQueryClient, QueryClient } from '@tanstack/react-query';
 import { Activity } from '../../types';
 import { apiRequest } from '../../lib/queryClient';
@@ -34,20 +34,22 @@ interface RecentActivityTableProps {
   queryClient: QueryClient;
 }
 
+const ITEMS_PER_PAGE = 6;
+
 const RecentActivityTable: React.FC<RecentActivityTableProps> = ({
   activities,
   queryClient,
 }) => {
+  const [currentPage, setCurrentPage] = useState(1);
   const { data: recentActivities, isLoading } = useQuery<Activity[]>({
     queryKey: ['/api/activities/'],
     queryFn: async () => {
       const data = await apiRequest('/api/activities/');
-      // Ensure activities are sorted by created_at in descending order
       return Array.isArray(data) ? data.sort((a, b) => 
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       ) : [];
     },
-    refetchInterval: 30000, // Refetch every 30 seconds
+    refetchInterval: 30000,
   });
 
   const { toast } = useToast();
@@ -84,6 +86,16 @@ const RecentActivityTable: React.FC<RecentActivityTableProps> = ({
       default:
         return activity.description;
     }
+  };
+
+  // Calculate pagination
+  const totalPages = Math.ceil((recentActivities?.length || 0) / ITEMS_PER_PAGE);
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
+  const paginatedActivities = recentActivities?.slice(startIndex, endIndex);
+
+  const handlePageChange = (newPage: number) => {
+    setCurrentPage(newPage);
   };
 
   if (isLoading) {
@@ -130,7 +142,7 @@ const RecentActivityTable: React.FC<RecentActivityTableProps> = ({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {recentActivities?.map((activity) => (
+            {paginatedActivities?.map((activity) => (
               <TableRow key={activity.id} className="hover:bg-gray-50">
                 <TableCell>
                   <div className="flex items-center">
@@ -162,7 +174,7 @@ const RecentActivityTable: React.FC<RecentActivityTableProps> = ({
                 </TableCell>
               </TableRow>
             ))}
-            {(!recentActivities || recentActivities.length === 0) && (
+            {(!paginatedActivities || paginatedActivities.length === 0) && (
               <TableRow>
                 <TableCell colSpan={5} className="text-center text-gray-500 py-8">
                   No recent activity
@@ -173,20 +185,27 @@ const RecentActivityTable: React.FC<RecentActivityTableProps> = ({
         </Table>
       </CardContent>
       <CardFooter className="p-4 border-t border-gray-200 flex justify-between items-center">
-        <Button 
-          variant="link" 
-          className="text-sm text-blue-600 hover:text-blue-800 font-medium p-0"
-          onClick={() => {
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-            toast({
-              title: "Viewing Recent Activities",
-              description: "Displaying the most recent system activities.",
-              variant: "default",
-            });
-          }}
-        >
-          View all activity
-        </Button>
+        <Pagination>
+          <PaginationContent>
+            <PaginationItem>
+              <PaginationPrevious
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={currentPage === 1}
+              />
+            </PaginationItem>
+            <PaginationItem>
+              <span className="text-sm text-gray-600">
+                Page {currentPage} of {totalPages}
+              </span>
+            </PaginationItem>
+            <PaginationItem>
+              <PaginationNext
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={currentPage === totalPages}
+              />
+            </PaginationItem>
+          </PaginationContent>
+        </Pagination>
       </CardFooter>
     </Card>
   );
