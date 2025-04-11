@@ -258,34 +258,90 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     def check_token_auth(self, request):
         auth_header = request.headers.get('Authorization')
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(' ')[1]
-            if token and token.startswith('token_'):
-                try:
-                    parts = token.split('_')
-                    if len(parts) >= 2:
-                        user_id = int(parts[1])
-                        # Get user from database to check admin status
-                        with connection.cursor() as cursor:
-                            cursor.execute(
-                                "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
-                                [user_id]
-                            )
-                            row = cursor.fetchone()
-                            if row:
-                                is_staff, is_superuser, role = row
-                                is_admin = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager'])
-                                return True, user_id, is_admin
-                except (IndexError, ValueError) as e:
-                    print(f"Token validation error: {str(e)}")
-                    pass
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return False, None, False
+
+        token = auth_header.split(' ')[1]
+        if not token.startswith('token_'):
+            return False, None, False
+
+        try:
+            parts = token.split('_')
+            user_id = int(parts[1])
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
+                    [user_id]
+                )
+                row = cursor.fetchone()
+                if row:
+                    is_staff, is_superuser, role = row
+                    # Allow access if user is staff, superuser, admin, or manager
+                    is_authorized = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager', 'staff'])
+                    return True, user_id, is_authorized
+        except (IndexError, ValueError, Exception) as e:
+            print(f"Token validation error: {str(e)}")
+            return False, None, False
+
         return False, None, False
 
-    def list(self, request, *args, **kwargs):
-        is_authenticated, _, _ = self.check_token_auth(request)
+    @action(detail=False, methods=['get'])
+    def low_stock(self, request):
+        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
         if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response(
+                {"detail": "Authentication required"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        if not is_authorized:
+            return Response(
+                {"detail": "Permission denied"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        try:
+            threshold = int(request.query_params.get('threshold', 10))
+            low_stock_products = self.queryset.filter(quantity__lte=threshold)
+            serializer = self.get_serializer(low_stock_products, many=True)
+            return Response(serializer.data)
+        except ValueError:
+            return Response(
+                {"detail": "Invalid threshold value"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            return Response(
+                {"detail": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def list(self, request, *args, **kwargs):
+        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
+        if not is_authenticated:
+            return Response(
+                {"detail": "Authentication required"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        if not is_authorized:
+            return Response(
+                {"detail": "Permission denied"},
+                status=status.HTTP_403_FORBIDDEN
+            )
         return super().list(request, *args, **kwargs)
+
+    def retrieve(self, request, *args, **kwargs):
+        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
+        if not is_authenticated:
+            return Response(
+                {"detail": "Authentication required"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        if not is_authorized:
+            return Response(
+                {"detail": "Permission denied"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().retrieve(request, *args, **kwargs)
 
     def create(self, request, *args, **kwargs):
         is_authenticated, user_id, is_admin = self.check_token_auth(request)
@@ -316,13 +372,6 @@ class ProductViewSet(viewsets.ModelViewSet):
         if not is_admin:
             return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
         return super().destroy(request, *args, **kwargs)
-
-    @action(detail=False, methods=['get'])
-    def low_stock(self, request):
-        is_authenticated, _, _ = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        return super().low_stock(request)
 
     @action(detail=True, methods=['post'])
     def restock(self, request, pk=None):
@@ -394,6 +443,9 @@ class SaleViewSet(viewsets.ModelViewSet):
                 {"detail": "Permission denied"},
                 status=status.HTTP_403_FORBIDDEN
             )
+        
+        # Add user_id to the request data
+        request.data['user_id'] = user_id
         return super().create(request, *args, **kwargs)
 
     def retrieve(self, request, *args, **kwargs):
@@ -412,7 +464,7 @@ class SaleViewSet(viewsets.ModelViewSet):
 
 
 class ActivityViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Activity.objects.all().order_by('-created_at')
+    queryset = Activity.objects.all()
     serializer_class = ActivitySerializer
     permission_classes = []
 
@@ -436,7 +488,9 @@ class ActivityViewSet(viewsets.ReadOnlyModelViewSet):
                 row = cursor.fetchone()
                 if row:
                     is_staff, is_superuser, role = row
-                    return True, user_id, is_staff or is_superuser or role in ['admin', 'manager']
+                    # Allow access if user is staff, superuser, admin, or manager
+                    is_authorized = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager', 'staff'])
+                    return True, user_id, is_authorized
         except (IndexError, ValueError, Exception) as e:
             print(f"Token validation error: {str(e)}")
             return False, None, False
@@ -444,18 +498,32 @@ class ActivityViewSet(viewsets.ReadOnlyModelViewSet):
         return False, None, False
 
     def list(self, request, *args, **kwargs):
-        is_authenticated, user_id, is_admin = self.check_token_auth(request)
+        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
         if not is_authenticated:
             return Response(
                 {"detail": "Authentication required"},
                 status=status.HTTP_401_UNAUTHORIZED
             )
-        if not is_admin:
+        if not is_authorized:
             return Response(
                 {"detail": "Permission denied"},
                 status=status.HTTP_403_FORBIDDEN
             )
         return super().list(request, *args, **kwargs)
+
+    def retrieve(self, request, *args, **kwargs):
+        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
+        if not is_authenticated:
+            return Response(
+                {"detail": "Authentication required"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        if not is_authorized:
+            return Response(
+                {"detail": "Permission denied"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().retrieve(request, *args, **kwargs)
 
 
 class SaleItemViewSet(viewsets.ModelViewSet):
