@@ -65,6 +65,7 @@ interface InventoryListProps {
   onCategoryChange: (categoryId: string | null) => void;
   searchQuery: string;
   onSearch: (query: string) => void;
+  isLoading?: boolean;
 }
 
 const InventoryList: React.FC<InventoryListProps> = ({
@@ -74,6 +75,7 @@ const InventoryList: React.FC<InventoryListProps> = ({
   onCategoryChange,
   searchQuery,
   onSearch,
+  isLoading = false,
 }) => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -90,6 +92,14 @@ const InventoryList: React.FC<InventoryListProps> = ({
   const [sortField, setSortField] = useState<keyof Product>('name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   
+  if (isLoading) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
+        <CircularProgress />
+      </Box>
+    );
+  }
+
   if (!products || !categories) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
@@ -169,16 +179,6 @@ const InventoryList: React.FC<InventoryListProps> = ({
     return category?.name || 'Uncategorized';
   };
 
-  if (isLoading) {
-    return (
-      <div className="space-y-4">
-        {[1, 2, 3, 4, 5].map((i) => (
-          <Skeleton key={i} className="h-20" />
-        ))}
-      </div>
-    );
-  }
-
   return (
     <>
       <Card className="shadow-sm">
@@ -219,7 +219,7 @@ const InventoryList: React.FC<InventoryListProps> = ({
           </div>
         </CardHeader>
         <CardContent>
-          <TableContainer component={Paper}>
+          <TableContainer>
             <Table>
               <TableHead>
                 <TableRow>
@@ -254,49 +254,19 @@ const InventoryList: React.FC<InventoryListProps> = ({
             </Table>
           </TableContainer>
         </CardContent>
-        <CardFooter className="flex items-center justify-between">
-          <div className="text-sm text-gray-500">
-            Showing {Math.min(filteredProducts.length, 1 + startIndex)}-{Math.min(filteredProducts.length, startIndex + itemsPerPage)} of {filteredProducts.length} items
-          </div>
+        <CardFooter>
           <Pagination>
             <PaginationContent>
               <PaginationItem>
                 <PaginationPrevious 
-                  onClick={() => setPage(p => Math.max(1, p - 1))}
-                  className={page <= 1 ? 'opacity-50 cursor-not-allowed' : ''}
+                  onClick={() => setPage(Math.max(1, page - 1))}
+                  disabled={page === 1}
                 />
               </PaginationItem>
-              {Array.from({ length: Math.min(totalPages, 3) }).map((_, index) => (
-                <PaginationItem key={index}>
-                  <Button 
-                    variant={page === index + 1 ? 'outline' : 'ghost'}
-                    size="icon"
-                    onClick={() => setPage(index + 1)}
-                  >
-                    {index + 1}
-                  </Button>
-                </PaginationItem>
-              ))}
-              {totalPages > 3 && (
-                <PaginationItem>
-                  <span className="px-2">...</span>
-                </PaginationItem>
-              )}
-              {totalPages > 3 && (
-                <PaginationItem>
-                  <Button 
-                    variant={page === totalPages ? 'outline' : 'ghost'}
-                    size="icon"
-                    onClick={() => setPage(totalPages)}
-                  >
-                    {totalPages}
-                  </Button>
-                </PaginationItem>
-              )}
               <PaginationItem>
-                <PaginationNext 
-                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                  className={page >= totalPages ? 'opacity-50 cursor-not-allowed' : ''}
+                <PaginationNext
+                  onClick={() => setPage(Math.min(totalPages, page + 1))}
+                  disabled={page === totalPages}
                 />
               </PaginationItem>
             </PaginationContent>

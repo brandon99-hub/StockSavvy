@@ -37,7 +37,9 @@ const InventoryPage: React.FC = () => {
     setSearchQuery(query);
   };
 
-  if (isLoadingProducts || isLoadingCategories) {
+  const isLoading = isLoadingProducts || isLoadingCategories;
+
+  if (isLoading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
         <CircularProgress />
@@ -87,6 +89,7 @@ const InventoryPage: React.FC = () => {
           onCategoryChange={handleCategoryChange}
           searchQuery={searchQuery}
           onSearch={handleSearch}
+          isLoading={isLoading}
         />
       </Box>
     </Container>
