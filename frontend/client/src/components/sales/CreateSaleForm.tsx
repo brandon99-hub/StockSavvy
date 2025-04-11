@@ -164,23 +164,26 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
             const finalAmount = calculateTotal();
             
             const saleData = {
-                total_amount: finalAmount.toString(),
-                original_amount: subtotal.toString(),
-                discount: discountAmount.toString(),
-                discount_percentage: discountPercent.toString(),
-                customer_name: customerName.trim(),
+                total_amount: finalAmount.toFixed(2),
+                original_amount: subtotal.toFixed(2),
+                discount: discountAmount.toFixed(2),
+                discount_percentage: discountPercent.toFixed(2),
+                customer_name: customerName.trim() || null,
                 payment_method: paymentMethod,
                 sale_items: selectedItems.map(item => ({
                     product_id: item.productId,
                     quantity: item.quantity,
-                    unit_price: item.unitPrice.toString(),
-                    total_price: (item.quantity * item.unitPrice).toString()
+                    unit_price: item.unitPrice.toFixed(2),
+                    total_price: (item.quantity * item.unitPrice).toFixed(2)
                 }))
             };
 
             const response = await apiRequest('/api/sales/', {
                 method: 'POST',
-                body: JSON.stringify(saleData)
+                body: JSON.stringify(saleData),
+                headers: {
+                    'Content-Type': 'application/json'
+                }
             });
             
             if (response) {
@@ -189,7 +192,6 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                     `${item.quantity}x ${item.productName}`
                 ).join(', ');
 
-                // Show success message immediately
                 toast({
                     title: '✅ Sale Created Successfully',
                     description: [
@@ -201,21 +203,18 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                     variant: 'default',
                 });
 
-                // Refresh queries
                 await Promise.all([
                     queryClient.invalidateQueries({ queryKey: ['/api/sales'] }),
                     queryClient.invalidateQueries({ queryKey: ['/api/products'] }),
                     queryClient.invalidateQueries({ queryKey: ['/api/activities'] })
                 ]);
 
-                // Reset form state
                 setCustomerName('');
                 setSelectedItems([]);
                 setDiscountAmount(0);
                 setDiscountPercent(0);
                 setPaymentMethod('CASH');
 
-                // Close the dialog last
                 onClose?.();
             }
         } catch (error: any) {

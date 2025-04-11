@@ -64,11 +64,11 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
       name: editProduct?.name || '',
       sku: editProduct?.sku || '',
       description: editProduct?.description || '',
-      categoryId: editProduct?.categoryId || null,
+      categoryId: editProduct?.category_id || null,
       quantity: editProduct?.quantity || 0,
-      minStockLevel: editProduct?.minStockLevel || 10,
-      buyPrice: editProduct ? Number(editProduct.buyPrice) : 0.01,
-      sellPrice: editProduct ? Number(editProduct.sellPrice) : 0.01,
+      minStockLevel: editProduct?.min_stock_level || 10,
+      buyPrice: editProduct ? Number(editProduct.buy_price) : 0.01,
+      sellPrice: editProduct ? Number(editProduct.sell_price) : 0.01,
     },
   });
 
@@ -79,11 +79,11 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
         name: editProduct.name,
         sku: editProduct.sku,
         description: editProduct.description || '',
-        categoryId: editProduct.categoryId,
+        categoryId: editProduct.category_id,
         quantity: editProduct.quantity,
-        minStockLevel: editProduct.minStockLevel,
-        buyPrice: parseFloat(String(editProduct.buyPrice)),
-        sellPrice: parseFloat(String(editProduct.sellPrice)),
+        minStockLevel: editProduct.min_stock_level,
+        buyPrice: parseFloat(String(editProduct.buy_price)),
+        sellPrice: parseFloat(String(editProduct.sell_price)),
       });
     } else {
       form.reset({
@@ -103,14 +103,31 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
   const mutation = useMutation({
     mutationFn: async (data: any) => {
       const payload = {
-        ...data,
-        buyPrice: typeof data.buyPrice === 'number' ? data.buyPrice.toString() : data.buyPrice,
-        sellPrice: typeof data.sellPrice === 'number' ? data.sellPrice.toString() : data.sellPrice,
+        name: data.name,
+        sku: data.sku,
+        description: data.description,
+        category_id: data.categoryId,
+        quantity: data.quantity,
+        min_stock_level: data.minStockLevel,
+        buy_price: typeof data.buyPrice === 'number' ? data.buyPrice.toString() : data.buyPrice,
+        sell_price: typeof data.sellPrice === 'number' ? data.sellPrice.toString() : data.sellPrice,
       };
       if (isEditing && editProduct) {
-        return await apiRequest('PATCH', `/api/products/${editProduct.id}`, payload);
+        return await apiRequest(`/api/products/${editProduct.id}/`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
       } else {
-        return await apiRequest('POST', '/api/products', payload);
+        return await apiRequest('/api/products/', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
       }
     },
     onSuccess: () => {
