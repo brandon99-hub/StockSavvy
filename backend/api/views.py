@@ -639,6 +639,14 @@ class SaleViewSet(viewsets.ModelViewSet):
         try:
             with connection.cursor() as cursor:
                 cursor.execute("""
+                    WITH sale_items_count AS (
+                        SELECT 
+                            sale_id,
+                            COUNT(*) as items_count,
+                            SUM(quantity) as total_quantity
+                        FROM sale_items
+                        GROUP BY sale_id
+                    )
                     SELECT 
                         s.id,
                         s.sale_date,
@@ -647,18 +655,11 @@ class SaleViewSet(viewsets.ModelViewSet):
                         s.discount,
                         s.discount_percentage,
                         u.username as sold_by,
-                        COUNT(si.id) as items_count
+                        COALESCE(sic.items_count, 0) as items_count,
+                        COALESCE(sic.total_quantity, 0) as total_quantity
                     FROM sales s
                     LEFT JOIN users u ON s.user_id = u.id
-                    LEFT JOIN sale_items si ON s.id = si.sale_id
-                    GROUP BY 
-                        s.id, 
-                        s.sale_date, 
-                        s.total_amount,
-                        s.original_amount,
-                        s.discount,
-                        s.discount_percentage,
-                        u.username
+                    LEFT JOIN sale_items_count sic ON s.id = sic.sale_id
                     ORDER BY s.sale_date DESC
                 """)
                 columns = [col[0] for col in cursor.description]
@@ -673,7 +674,9 @@ class SaleViewSet(viewsets.ModelViewSet):
                             sale[key] = str(sale[key])
                     # Set default username if none
                     if not sale['sold_by']:
-                        sale['sold_by'] = 'Unknown'
+                        sale['sold_by'] = 'System'
+                    # Format items display
+                    sale['items'] = f"{sale['total_quantity']} items" if sale['total_quantity'] else "0 items"
 
                 return Response(sales)
         except Exception as e:
@@ -707,13 +710,19 @@ class SaleViewSet(viewsets.ModelViewSet):
             
             # Start a transaction
             with transaction.atomic():
+                # Calculate amounts
+                original_amount = request.data.get('original_amount')
+                discount = request.data.get('discount', 0)
+                total_amount = float(original_amount) - float(discount)
+                discount_percentage = (float(discount) / float(original_amount) * 100) if float(original_amount) > 0 else 0
+                
                 # Create the sale
                 sale_data = {
                     'sale_date': request.data.get('sale_date', timezone.now()),
-                    'total_amount': request.data.get('total_amount'),
-                    'original_amount': request.data.get('original_amount'),
-                    'discount': request.data.get('discount', 0),
-                    'discount_percentage': request.data.get('discount_percentage', 0),
+                    'total_amount': str(total_amount),
+                    'original_amount': original_amount,
+                    'discount': str(discount),
+                    'discount_percentage': str(discount_percentage),
                     'user_id': user_id,
                     'created_at': timezone.now()
                 }
@@ -964,15 +973,10 @@ class SaleItemViewSet(viewsets.ModelViewSet):
                         si.total_price,
                         p.name as product_name,
                         p.sku as product_sku,
-                        c.name as category_name,
-                        s.created_at as sale_date,
-                        s.total_amount as sale_total,
-                        u.username as sold_by
+                        c.name as category_name
                     FROM sale_items si
                     JOIN products p ON si.product_id = p.id
                     LEFT JOIN categories c ON p.category_id = c.id
-                    JOIN sales s ON si.sale_id = s.id
-                    LEFT JOIN users u ON s.user_id = u.id
                 """
                 
                 if sale_id:
@@ -980,23 +984,18 @@ class SaleItemViewSet(viewsets.ModelViewSet):
                     cursor.execute(base_query + " WHERE si.sale_id = %s ORDER BY si.id", [sale_id])
                 else:
                     # Otherwise, get all sale items
-                    cursor.execute(base_query + " ORDER BY s.created_at DESC")
+                    cursor.execute(base_query + " ORDER BY si.id DESC")
                 
                 columns = [col[0] for col in cursor.description]
                 results = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
-                # Format decimal values and dates
+                # Format decimal values
                 for row in results:
-                    if 'sale_date' in row and row['sale_date']:
-                        row['sale_date'] = row['sale_date'].isoformat()
-                    for key in ['unit_price', 'total_price', 'sale_total']:
+                    for key in ['unit_price', 'total_price']:
                         if key in row and row[key] is not None:
                             row[key] = str(row[key])
-                    # Set default username if none
-                    if not row['sold_by']:
-                        row['sold_by'] = 'Unknown'
 
-                if not results:
+                if not results and sale_id:
                     return Response({
                         'items': [],
                         'summary': {
@@ -1007,7 +1006,7 @@ class SaleItemViewSet(viewsets.ModelViewSet):
 
                 # Calculate summary
                 total_items = len(results)
-                total_value = sum(float(row['total_price']) for row in results)
+                total_value = sum(float(row['total_price']) for row in results if row.get('total_price'))
 
                 return Response({
                     'items': results,
