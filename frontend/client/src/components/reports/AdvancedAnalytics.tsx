@@ -467,8 +467,12 @@ const AdvancedAnalytics = () => {
 
     // Calculate stock movement data with safety checks
     const stockMovementData = useMemo(() => {
-        if (!Array.isArray(activities)) return [];
+        if (!Array.isArray(activities) || !Array.isArray(products)) return [];
         
+        // Calculate initial stock levels (total of all products)
+        const initialStock = products.reduce((total, product) => total + (Number(product.quantity) || 0), 0);
+        let runningTotal = initialStock; // Start with current total stock
+
         // Filter activities to only include stock-related ones within date range
         const stockActivities = activities.filter(activity => {
             if (!activity?.created_at) return false;
@@ -491,16 +495,14 @@ const AdvancedAnalytics = () => {
             cumulativeNet: number 
         }>();
 
-        let runningTotal = 0; // Keep track of cumulative stock changes
-
-        // Initialize with zeros for all dates in range
+        // Initialize with zeros for all dates in range, but keep the running total
         const daysInRange = differenceInDays(dateRange.end, dateRange.start) + 1;
         for (let i = 0; i < daysInRange; i++) {
             const date = format(addDays(dateRange.start, i), 'yyyy-MM-dd');
             movementMap.set(date, { 
                 additions: 0, 
                 removals: 0, 
-                cumulativeNet: 0 
+                cumulativeNet: runningTotal // Use running total for each day's initial value
             });
         }
 
@@ -579,7 +581,7 @@ const AdvancedAnalytics = () => {
                 cumulativeNet: data.cumulativeNet
             }))
             .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    }, [activities, dateRange]);
+    }, [activities, dateRange, products]);
 
     // Update the Stock Movement chart JSX
     const renderStockMovementChart = () => (
