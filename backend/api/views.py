@@ -702,25 +702,25 @@ def check_token_auth(request):
     if not auth_header or not auth_header.startswith('Bearer '):
         return False, None, False
 
-    token = auth_header.split(' ')[1]
+        token = auth_header.split(' ')[1]
     if not token.startswith('token_'):
         return False, None, False
 
-    try:
-        parts = token.split('_')
-        user_id = int(parts[1])
-        with connection.cursor() as cursor:
-            cursor.execute(
+            try:
+                parts = token.split('_')
+                    user_id = int(parts[1])
+                    with connection.cursor() as cursor:
+                        cursor.execute(
                 "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
-                [user_id]
-            )
-            row = cursor.fetchone()
-            if row:
+                            [user_id]
+                        )
+                        row = cursor.fetchone()
+                        if row:
                 is_staff, is_superuser, role = row
                 is_admin = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager'])
                 return True, user_id, is_admin
-    except (IndexError, ValueError) as e:
-        print(f"Token validation error: {str(e)}")
+            except (IndexError, ValueError) as e:
+                print(f"Token validation error: {str(e)}")
         return False, None, False
 
     return False, None, False
@@ -732,7 +732,7 @@ def profit_report(request):
     auth_header = request.headers.get('Authorization')
     if not auth_header or not auth_header.startswith('Bearer '):
         return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-    
+
     token = auth_header.split(' ')[1]
     try:
         # Decode token and get user info
@@ -756,9 +756,9 @@ def profit_report(request):
             if not is_admin:
                 return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
 
-            # Get date range from query params
-            start_date = request.query_params.get('start')
-            end_date = request.query_params.get('end')
+        # Get date range from query params
+        start_date = request.query_params.get('start')
+        end_date = request.query_params.get('end')
             if not start_date or not end_date:
                 return Response({"detail": "Date range required"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1004,25 +1004,25 @@ class ReportViewSet(viewsets.ViewSet):
     def check_token_auth(self, request):
         auth_header = request.headers.get('Authorization')
         if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(' ')[1]
+        token = auth_header.split(' ')[1]
             if token and token.startswith('token_'):
-                try:
-                    parts = token.split('_')
+        try:
+            parts = token.split('_')
                     if len(parts) >= 2:
-                        user_id = int(parts[1])
-                        with connection.cursor() as cursor:
-                            cursor.execute(
-                                "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
-                                [user_id]
-                            )
-                            row = cursor.fetchone()
-                            if row:
-                                is_staff, is_superuser, role = row
+            user_id = int(parts[1])
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
+                    [user_id]
+                )
+                row = cursor.fetchone()
+                if row:
+                    is_staff, is_superuser, role = row
                                 is_admin = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager'])
                                 return True, user_id, is_admin
                 except (jwt.InvalidTokenError, IndexError, ValueError, Exception) as e:
-                    print(f"Token validation error: {str(e)}")
-                    return False, None, False
+            print(f"Token validation error: {str(e)}")
+            return False, None, False
         return False, None, False
 
     @action(detail=False, methods=['get'])
@@ -1036,77 +1036,77 @@ class ReportViewSet(viewsets.ViewSet):
         try:
             with connection.cursor() as cursor:
                 # Get summary statistics
-                cursor.execute("""
-                    SELECT 
-                        COUNT(*) as total_products,
-                        COUNT(CASE WHEN quantity <= min_stock_level AND quantity > 0 THEN 1 END) as low_stock_count,
-                        COUNT(CASE WHEN quantity = 0 THEN 1 END) as out_of_stock_count,
+                    cursor.execute("""
+                        SELECT 
+                            COUNT(*) as total_products,
+                            COUNT(CASE WHEN quantity <= min_stock_level AND quantity > 0 THEN 1 END) as low_stock_count,
+                            COUNT(CASE WHEN quantity = 0 THEN 1 END) as out_of_stock_count,
                         COALESCE(SUM(quantity * buy_price), 0) as total_value
-                    FROM products
-                """)
-                summary = dict(zip([col[0] for col in cursor.description], cursor.fetchone()))
+                        FROM products
+                    """)
+                    summary = dict(zip([col[0] for col in cursor.description], cursor.fetchone()))
 
-                # Get category breakdown
-                cursor.execute("""
-                    SELECT 
+                    # Get category breakdown
+                    cursor.execute("""
+                        SELECT 
                         c.name,
-                        COUNT(p.id) as product_count,
-                        COALESCE(SUM(p.quantity), 0) as total_quantity,
+                            COUNT(p.id) as product_count,
+                            COALESCE(SUM(p.quantity), 0) as total_quantity,
                         COALESCE(SUM(p.quantity * p.buy_price), 0) as value
-                    FROM categories c
-                    LEFT JOIN products p ON c.id = p.category_id
+                        FROM categories c
+                        LEFT JOIN products p ON c.id = p.category_id
                     GROUP BY c.id, c.name
                     ORDER BY value DESC
-                """)
-                categories = [dict(zip([col[0] for col in cursor.description], row))
-                            for row in cursor.fetchall()]
+                    """)
+                    categories = [dict(zip([col[0] for col in cursor.description], row))
+                                  for row in cursor.fetchall()]
 
-                # Get product details
-                cursor.execute("""
-                    SELECT 
-                        p.id,
-                        p.name,
-                        p.sku,
+                    # Get product details
+                    cursor.execute("""
+                        SELECT 
+                            p.id,
+                            p.name,
+                            p.sku,
                         p.quantity,
-                        p.min_stock_level,
-                        p.buy_price,
-                        p.sell_price,
+                            p.min_stock_level,
+                            p.buy_price,
+                            p.sell_price,
                         c.name as category_name,
-                        CASE 
-                            WHEN p.quantity = 0 THEN 'Out of Stock'
-                            WHEN p.quantity <= p.min_stock_level THEN 'Low Stock'
+                            CASE 
+                                WHEN p.quantity = 0 THEN 'Out of Stock'
+                                WHEN p.quantity <= p.min_stock_level THEN 'Low Stock'
                             ELSE 'In Stock'
-                        END as status
-                    FROM products p
-                    LEFT JOIN categories c ON p.category_id = c.id
-                    ORDER BY 
-                        CASE 
-                            WHEN p.quantity = 0 THEN 1
-                            WHEN p.quantity <= p.min_stock_level THEN 2
-                            ELSE 3
-                        END,
-                        p.name
-                """)
-                products = [dict(zip([col[0] for col in cursor.description], row))
-                          for row in cursor.fetchall()]
+                            END as status
+                        FROM products p
+                        LEFT JOIN categories c ON p.category_id = c.id
+                        ORDER BY 
+                            CASE 
+                                WHEN p.quantity = 0 THEN 1
+                                WHEN p.quantity <= p.min_stock_level THEN 2
+                                ELSE 3
+                            END,
+                            p.name
+                    """)
+                    products = [dict(zip([col[0] for col in cursor.description], row))
+                                for row in cursor.fetchall()]
 
-                # Format decimal values
+                    # Format decimal values
                 for row in products:
                     if 'buy_price' in row and row['buy_price'] is not None:
                         row['buy_price'] = str(row['buy_price'])
                     if 'sell_price' in row and row['sell_price'] is not None:
                         row['sell_price'] = str(row['sell_price'])
 
-                return Response({
-                    'summary': {
-                        'totalProducts': summary['total_products'],
-                        'lowStock': summary['low_stock_count'],
-                        'outOfStock': summary['out_of_stock_count'],
-                        'totalValue': str(summary['total_value'])
-                    },
-                    'categories': categories,
-                    'products': products
-                })
+                    return Response({
+                        'summary': {
+                            'totalProducts': summary['total_products'],
+                            'lowStock': summary['low_stock_count'],
+                            'outOfStock': summary['out_of_stock_count'],
+                            'totalValue': str(summary['total_value'])
+                        },
+                        'categories': categories,
+                        'products': products
+                    })
 
         except Exception as e:
             print(f"Error generating inventory report: {str(e)}")
@@ -1203,7 +1203,7 @@ class ReportViewSet(viewsets.ViewSet):
                     FROM monthly_data
                     ORDER BY month DESC
                 """, [start_date, end_date])
-                
+
                 columns = [col[0] for col in cursor.description]
                 monthly_data = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
@@ -1248,48 +1248,48 @@ class ReportViewSet(viewsets.ViewSet):
 
         try:
             with connection.cursor() as cursor:
-                # Get current month stats with proper revenue calculation
+                # Get current month stats
                 cursor.execute("""
-                    WITH monthly_stats AS (
-                        SELECT 
-                            COALESCE(SUM(s.total_amount), 0) as total_revenue,
-                            COUNT(DISTINCT s.id) as order_count,
-                            CASE 
-                                WHEN COUNT(DISTINCT s.id) > 0 
-                                THEN COALESCE(SUM(s.total_amount), 0) / COUNT(DISTINCT s.id)
-                                ELSE 0 
-                            END as avg_order_value
-                        FROM sales s
-                        WHERE s.created_at >= DATE_TRUNC('month', CURRENT_DATE)
-                    ),
-                    product_stats AS (
-                        SELECT 
-                            COUNT(*) as total_products,
-                            COUNT(CASE WHEN quantity <= min_stock_level THEN 1 END) as low_stock_products
-                        FROM products
-                    )
                     SELECT 
-                        ms.total_revenue,
-                        ms.order_count,
-                        ms.avg_order_value,
-                        ps.total_products,
-                        ps.low_stock_products
-                    FROM monthly_stats ms
-                    CROSS JOIN product_stats ps
+                        COALESCE((SELECT COUNT(*) FROM products), 0) as total_products,
+                        COALESCE((SELECT COUNT(*) FROM products WHERE quantity <= min_stock_level), 0) as low_stock_products,
+                        COALESCE((SELECT SUM(total_amount) FROM sales WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)), 0) as total_sales,
+                        COALESCE((SELECT COUNT(*) FROM sales WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)), 0) as total_orders
                 """)
-                
-                result = cursor.fetchone()
-                if result:
-                    total_revenue, order_count, avg_order_value, total_products, low_stock_products = result
-                    
-                    return Response({
-                        'totalRevenue': str(total_revenue),
-                        'totalOrders': order_count,
-                        'averageOrderValue': str(avg_order_value),
-                        'totalProducts': total_products,
-                        'lowStockCount': low_stock_products
-                    })
+                current_stats = cursor.fetchone()
 
+                # Get last month stats for comparison
+                cursor.execute("""
+                    SELECT 
+                        COALESCE((SELECT COUNT(*) FROM products WHERE created_at < DATE_TRUNC('month', CURRENT_DATE)), 0) as last_month_products,
+                        COALESCE((SELECT COUNT(*) FROM products WHERE quantity <= min_stock_level AND created_at < DATE_TRUNC('month', CURRENT_DATE)), 0) as last_month_low_stock,
+                        COALESCE((SELECT SUM(total_amount) FROM sales WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') AND created_at < DATE_TRUNC('month', CURRENT_DATE)), 0) as last_month_sales,
+                        COALESCE((SELECT COUNT(*) FROM sales WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') AND created_at < DATE_TRUNC('month', CURRENT_DATE)), 0) as last_month_orders
+                """)
+                last_month_stats = cursor.fetchone()
+
+                if current_stats and last_month_stats:
+                    total_products, low_stock_products, total_sales, total_orders = current_stats
+                    last_month_products, last_month_low_stock, last_month_sales, last_month_orders = last_month_stats
+
+                    # Calculate percentage changes
+                    products_change = ((total_products - last_month_products) / last_month_products * 100) if last_month_products > 0 else 0
+                    low_stock_change = ((low_stock_products - last_month_low_stock) / last_month_low_stock * 100) if last_month_low_stock > 0 else 0
+                    sales_change = ((total_sales - last_month_sales) / last_month_sales * 100) if last_month_sales > 0 else 0
+                    orders_change = ((total_orders - last_month_orders) / last_month_orders * 100) if last_month_orders > 0 else 0
+
+                    return Response({
+                        'totalProducts': total_products,
+                        'lowStockCount': low_stock_products,
+                        'totalSales': float(total_sales),
+                        'pendingOrders': total_orders,
+                        'compareLastMonth': {
+                            'products': round(products_change, 1),
+                            'lowStock': round(low_stock_change, 1),
+                            'sales': round(sales_change, 1),
+                            'orders': round(orders_change, 1)
+                        }
+                    })
         except Exception as e:
             print(f"Error in stats: {str(e)}")
             return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1348,57 +1348,4 @@ class ReportViewSet(viewsets.ViewSet):
                 return Response(results)
         except Exception as e:
             print(f"Error in category_chart: {str(e)}")
-            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    @action(detail=False, methods=['get'])
-    def stock_movement(self, request):
-        is_authenticated, _, is_admin = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin:
-            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-
-        try:
-            with connection.cursor() as cursor:
-                cursor.execute("""
-                    WITH RECURSIVE dates AS (
-                        SELECT DATE_TRUNC('day', NOW() - INTERVAL '30 days')::date AS date
-                        UNION ALL
-                        SELECT (date + INTERVAL '1 day')::date
-                        FROM dates
-                        WHERE date < CURRENT_DATE
-                    ),
-                    stock_changes AS (
-                        SELECT 
-                            DATE_TRUNC('day', a.created_at)::date as date,
-                            SUM(CASE 
-                                WHEN a.type = 'restock' THEN 1
-                                WHEN a.type = 'sale' THEN -1
-                                ELSE 0
-                            END) as movement
-                        FROM activities a
-                        WHERE a.type IN ('restock', 'sale')
-                        AND a.created_at >= NOW() - INTERVAL '30 days'
-                        GROUP BY DATE_TRUNC('day', a.created_at)::date
-                    )
-                    SELECT 
-                        d.date,
-                        COALESCE(sc.movement, 0) as movement
-                    FROM dates d
-                    LEFT JOIN stock_changes sc ON d.date = sc.date
-                    ORDER BY d.date ASC
-                """)
-                
-                results = [
-                    {
-                        'date': row[0].isoformat(),
-                        'movement': row[1]
-                    }
-                    for row in cursor.fetchall()
-                ]
-
-                return Response(results)
-
-        except Exception as e:
-            print(f"Error in stock_movement: {str(e)}")
             return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

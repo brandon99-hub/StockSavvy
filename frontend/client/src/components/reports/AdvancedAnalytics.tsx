@@ -129,6 +129,7 @@ interface ApiSaleItem {
 interface ApiSale {
     id: number;
     created_at: string;
+    date?: string;
     amount: number;
     items: ApiSaleItem[];
 }
@@ -349,11 +350,37 @@ const AdvancedAnalytics = () => {
 
     // Transform data for analytics with safety checks
     const salesData = useMemo(() => {
-        if (!salesQuery.data?.items) return [];
-        return salesQuery.data.items.map(item => ({
-            date: format(new Date(item.created_at), 'yyyy-MM-dd'),
-            amount: item.amount
-        }));
+        if (!salesQuery.data?.items) {
+            console.log('No sales data available');
+            return [];
+        }
+        
+        // Log the raw data structure for debugging
+        console.log('Raw sales data structure:', {
+            totalItems: salesQuery.data.items.length,
+            firstItem: salesQuery.data.items[0],
+            dataKeys: Object.keys(salesQuery.data.items[0] || {})
+        });
+        
+        return salesQuery.data.items.map(item => {
+            // Ensure we have a valid date string
+            const dateStr = item.created_at || item.date || new Date().toISOString();
+            const formattedDate = format(new Date(dateStr), 'yyyy-MM-dd');
+            const amount = Number(item.amount || 0);
+            
+            // Log individual item transformation
+            console.log('Processing sale item:', {
+                originalDate: dateStr,
+                formattedDate,
+                amount,
+                rawAmount: item.amount
+            });
+            
+            return {
+                date: formattedDate,
+                amount
+            };
+        });
     }, [salesQuery.data]);
 
     const categoryData = useMemo(() => {
@@ -368,18 +395,38 @@ const AdvancedAnalytics = () => {
 
     // Create profit data with safety checks
     const profitData = useMemo(() => {
-        if (!salesQuery.data?.items) return [];
+        if (!salesQuery.data?.items) {
+            console.log('No sales data available for profit calculation');
+            return [];
+        }
+        
+        // Log the raw data structure for debugging
+        console.log('Raw sales data for profit calculation:', {
+            totalItems: salesQuery.data.items.length,
+            sampleItem: salesQuery.data.items[0]
+        });
         
         // Group sales by date and calculate totals
         const dailyTotals = new Map();
         
         salesQuery.data.items.forEach(sale => {
-            const date = format(new Date(sale.created_at), 'yyyy-MM-dd');
+            // Ensure we have a valid date string
+            const dateStr = sale.created_at || sale.date || new Date().toISOString();
+            const date = format(new Date(dateStr), 'yyyy-MM-dd');
             const existing = dailyTotals.get(date) || { revenue: 0, cost: 0, profit: 0 };
             
-            const revenue = sale.amount;
+            const revenue = Number(sale.amount || 0);
             const cost = revenue * 0.7; // Assuming 30% profit margin
             const profit = revenue - cost;
+            
+            // Log individual sale processing
+            console.log('Processing sale for profit:', {
+                date,
+                revenue,
+                cost,
+                profit,
+                rawAmount: sale.amount
+            });
             
             dailyTotals.set(date, {
                 revenue: existing.revenue + revenue,
@@ -388,7 +435,7 @@ const AdvancedAnalytics = () => {
             });
         });
         
-        return Array.from(dailyTotals.entries())
+        const result = Array.from(dailyTotals.entries())
             .map(([date, data]) => ({
                 date,
                 revenue: data.revenue,
@@ -396,6 +443,18 @@ const AdvancedAnalytics = () => {
                 profit: data.profit
             }))
             .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+            
+        // Log the final profit data
+        console.log('Processed profit data:', {
+            totalDays: result.length,
+            sampleDay: result[0],
+            dateRange: result.length > 0 ? {
+                start: result[0].date,
+                end: result[result.length - 1].date
+            } : null
+        });
+        
+        return result;
     }, [salesQuery.data]);
 
     // Calculate metrics with safety checks
@@ -520,45 +579,69 @@ const AdvancedAnalytics = () => {
 
         return Array.from(movementMap.entries())
             .map(([date, data]) => ({
-                date,
-                additions: data.additions,
-                removals: data.removals,
-                net: data.additions - data.removals
+            date,
+            additions: data.additions,
+            removals: data.removals,
+            net: data.additions - data.removals
             }))
             .sort((a, b) => a.date.localeCompare(b.date));
     }, [filteredActivities, dateRange]);
 
     // Calculate top products with safety checks
     const topProducts = useMemo(() => {
-        if (!salesQuery.data?.items) return [];
+        if (!salesQuery.data?.items) {
+            console.log('No sales data available for top products calculation');
+            return [];
+        }
+        
+        // Log the raw data structure for debugging
+        console.log('Raw sales data for top products:', {
+            totalItems: salesQuery.data.items.length,
+            sampleItem: salesQuery.data.items[0]
+        });
         
         const productSales = new Map();
         
         salesQuery.data.items.forEach(sale => {
-            if (!Array.isArray(sale.items)) return;
+            if (!Array.isArray(sale.items)) {
+                console.log('Invalid sale items structure:', sale);
+                return;
+            }
             
             sale.items.forEach(item => {
                 const existing = productSales.get(item.product) || {
-                    name: item.product_name,
+                    name: item.product_name || 'Unknown Product',
                     sales: 0,
                     revenue: 0,
                     profit: 0
                 };
                 
-                const itemRevenue = item.quantity * item.unit_price;
+                const quantity = Number(item.quantity || 0);
+                const unitPrice = Number(item.unit_price || 0);
+                const itemRevenue = quantity * unitPrice;
                 const itemCost = itemRevenue * 0.7; // Assuming 30% profit margin
                 const itemProfit = itemRevenue - itemCost;
                 
+                // Log individual product processing
+                console.log('Processing product sale:', {
+                    productId: item.product,
+                    productName: item.product_name,
+                    quantity,
+                    unitPrice,
+                    revenue: itemRevenue,
+                    profit: itemProfit
+                });
+                
                 productSales.set(item.product, {
-                    name: item.product_name,
-                    sales: existing.sales + item.quantity,
+                    name: item.product_name || 'Unknown Product',
+                    sales: existing.sales + quantity,
                     revenue: existing.revenue + itemRevenue,
                     profit: existing.profit + itemProfit
                 });
             });
         });
         
-        return Array.from(productSales.entries())
+        const result = Array.from(productSales.entries())
             .map(([id, data]) => ({
                 id,
                 name: data.name,
@@ -568,6 +651,16 @@ const AdvancedAnalytics = () => {
             }))
             .sort((a, b) => b.profit - a.profit)
             .slice(0, 10);
+            
+        // Log the final top products data
+        console.log('Processed top products data:', {
+            totalProducts: result.length,
+            topProduct: result[0],
+            totalRevenue: result.reduce((sum, p) => sum + p.revenue, 0),
+            totalProfit: result.reduce((sum, p) => sum + p.profit, 0)
+        });
+        
+        return result;
     }, [salesQuery.data]);
 
     return (

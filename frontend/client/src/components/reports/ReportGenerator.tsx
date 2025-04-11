@@ -2,32 +2,32 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardFooter
+    Card,
+    CardContent,
+    CardHeader,
+    CardTitle,
+    CardFooter
 } from '../ui/card';
 import { Button } from '../ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Separator } from '../ui/separator';
 import { Calendar } from '../ui/calendar';
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
 } from '../ui/popover';
 import {
-  BarChart,
-  Bar,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer
+    BarChart,
+    Bar,
+    LineChart,
+    Line,
+    XAxis,
+    YAxis,
+    CartesianGrid,
+    Tooltip,
+    Legend,
+    ResponsiveContainer
 } from 'recharts';
 import { exportInventoryToPDF, exportSalesToPDF, exportProfitToPDF, exportToCSV } from '../../lib/exportUtils';
 import { apiRequest } from '../../lib/queryClient';
@@ -72,14 +72,14 @@ interface ProfitData {
 }
 
 const ReportGenerator = () => {
-  const [reportType, setReportType] = useState<'inventory' | 'sales' | 'profit'>('inventory');
-  const [dateRange, setDateRange] = useState({
-    start: startOfDay(subDays(new Date(), 30)),
-    end: endOfDay(new Date())
-  });
-  const [calendarOpen, setCalendarOpen] = useState(false);
+    const [reportType, setReportType] = useState<'inventory' | 'sales' | 'profit'>('inventory');
+    const [dateRange, setDateRange] = useState({
+        start: startOfDay(subDays(new Date(), 30)),
+        end: endOfDay(new Date())
+    });
+    const [calendarOpen, setCalendarOpen] = useState(false);
 
-  // Fetch data based on report type
+    // Fetch data based on report type
   const { data: stats = {}, isLoading: isStatsLoading } = useQuery({
     queryKey: ['/api/dashboard/stats/'],
     queryFn: () => apiRequest('/api/dashboard/stats/')
@@ -166,148 +166,148 @@ const ReportGenerator = () => {
     return `KSh ${value.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
-  // Transform categories array to an object for easier lookup
-  const categoryMap = categories.reduce((acc, category) => {
-    acc[category.id] = category.name;
-    return acc;
-  }, {} as Record<number, string>);
+    // Transform categories array to an object for easier lookup
+    const categoryMap = categories.reduce((acc, category) => {
+        acc[category.id] = category.name;
+        return acc;
+    }, {} as Record<number, string>);
 
-  // Transform products array to an object for easier lookup
-  const productMap = products.reduce((acc, product) => {
-    acc[product.id] = product;
-    return acc;
-  }, {} as Record<number, Product>);
+    // Transform products array to an object for easier lookup
+    const productMap = products.reduce((acc, product) => {
+        acc[product.id] = product;
+        return acc;
+    }, {} as Record<number, Product>);
 
-  // Generate inventory report data
-  const inventoryData = products.map(product => ({
-    ...product,
+    // Generate inventory report data
+    const inventoryData = products.map(product => ({
+        ...product,
     categoryName: product.category_id ? categoryMap[product.category_id] : 'Uncategorized',
-    status: product.quantity <= 0 ? 'Out of Stock' :
+        status: product.quantity <= 0 ? 'Out of Stock' :
             product.quantity <= product.reorder_level ? 'Low Stock' : 'In Stock',
     value: Number(product.price) * product.quantity
-  }));
+    }));
 
-  // Generate sales report data for chart
-  const filteredSales = sales.filter(sale => {
+    // Generate sales report data for chart
+    const filteredSales = sales.filter(sale => {
     const saleDate = new Date(sale.date);
-    return saleDate >= dateRange.start && saleDate <= dateRange.end;
-  });
+        return saleDate >= dateRange.start && saleDate <= dateRange.end;
+    });
 
-  // Group sales by date for chart
-  const salesByDate = filteredSales.reduce((acc, sale) => {
+    // Group sales by date for chart
+    const salesByDate = filteredSales.reduce((acc, sale) => {
     const dateStr = format(new Date(sale.date), 'yyyy-MM-dd');
-    if (!acc[dateStr]) {
+        if (!acc[dateStr]) {
       acc[dateStr] = { date: dateStr, revenue: 0, transactions: 0 };
-    }
+        }
     acc[dateStr].revenue += Number(sale.total_amount);
-    acc[dateStr].transactions += 1;
-    return acc;
-  }, {} as Record<string, { date: string, revenue: number, transactions: number }>);
+        acc[dateStr].transactions += 1;
+        return acc;
+    }, {} as Record<string, { date: string, revenue: number, transactions: number }>);
 
   const salesChartDataForChart = Object.values(salesByDate).sort((a, b) =>
-    new Date(a.date).getTime() - new Date(b.date).getTime()
-  );
+        new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
 
-  // Handle export to PDF
-  const handleExportPDF = () => {
-    switch (reportType) {
-      case 'inventory':
-        exportInventoryToPDF(products, categoryMap);
-        break;
-      case 'sales':
+    // Handle export to PDF
+    const handleExportPDF = () => {
+        switch (reportType) {
+            case 'inventory':
+                exportInventoryToPDF(products, categoryMap);
+                break;
+            case 'sales':
         exportSalesToPDF(sales, {}, productMap);
-        break;
-      case 'profit':
+                break;
+            case 'profit':
         // Use category chart data for profit report
         exportProfitToPDF(profitReportData, dateRange);
-        break;
-    }
-  };
+                break;
+        }
+    };
 
-  // Handle export to CSV
-  const handleExportCSV = () => {
-    let data: any[] = [];
-    let filename = '';
+    // Handle export to CSV
+    const handleExportCSV = () => {
+        let data: any[] = [];
+        let filename = '';
 
-    switch (reportType) {
-      case 'inventory':
-        data = inventoryData.map(item => ({
+        switch (reportType) {
+            case 'inventory':
+                data = inventoryData.map(item => ({
           SKU: item.id,
-          Name: item.name,
-          Category: item.categoryName,
-          Quantity: item.quantity,
+                    Name: item.name,
+                    Category: item.categoryName,
+                    Quantity: item.quantity,
           'Min Stock': item.reorder_level,
           'Buy Price': Number(item.price).toFixed(2),
           'Sell Price': Number(item.price).toFixed(2),
-          Status: item.status,
+                    Status: item.status,
           Value: (Number(item.price) * item.quantity).toFixed(2)
-        }));
-        filename = 'inventory_report';
-        break;
-      case 'sales':
-        data = filteredSales.map(sale => {
+                }));
+                filename = 'inventory_report';
+                break;
+            case 'sales':
+                data = filteredSales.map(sale => {
           const saleDate = new Date(sale.date);
-          return {
-            'Sale ID': sale.id,
-            Date: format(saleDate, 'yyyy-MM-dd HH:mm:ss'),
+                    return {
+                        'Sale ID': sale.id,
+                        Date: format(saleDate, 'yyyy-MM-dd HH:mm:ss'),
             'Total Amount': Number(sale.total_amount).toFixed(2),
             'Items Sold': sale.items?.length || 0,
             'User ID': sale.id
-          };
-        });
-        filename = 'sales_report';
-        break;
-      case 'profit':
+                    };
+                });
+                filename = 'sales_report';
+                break;
+            case 'profit':
         data = profitReportData.map(item => ({
           Category: item.category,
           'Percentage': item.percentage.toFixed(2) + '%'
-        }));
-        filename = 'profit_report';
-        break;
-    }
+                }));
+                filename = 'profit_report';
+                break;
+        }
 
-    exportToCSV(data, filename);
-  };
+        exportToCSV(data, filename);
+    };
 
-  return (
+    return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">Reports</h2>
         <div className="flex space-x-4">
-          <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
-            <PopoverTrigger asChild>
+                                    <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+                                        <PopoverTrigger asChild>
               <Button variant="outline">
                 {format(dateRange.start, 'MMM d, yyyy')} - {format(dateRange.end, 'MMM d, yyyy')}
-              </Button>
-            </PopoverTrigger>
+                                            </Button>
+                                        </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="end">
-              <Calendar
-                mode="range"
-                selected={{
-                  from: dateRange.start,
-                  to: dateRange.end
-                }}
-                onSelect={(range) => {
-                  if (range?.from && range?.to) {
-                    setDateRange({
-                      start: startOfDay(range.from),
-                      end: endOfDay(range.to)
-                    });
+                                            <Calendar
+                                                mode="range"
+                                                selected={{
+                                                    from: dateRange.start,
+                                                    to: dateRange.end
+                                                }}
+                                                onSelect={(range) => {
+                                                    if (range?.from && range?.to) {
+                                                        setDateRange({
+                                                            start: startOfDay(range.from),
+                                                            end: endOfDay(range.to)
+                                                        });
                   }
-                  setCalendarOpen(false);
-                }}
-                initialFocus
-              />
-            </PopoverContent>
-          </Popover>
+                                                        setCalendarOpen(false);
+                                                }}
+                                                initialFocus
+                                            />
+                                        </PopoverContent>
+                                    </Popover>
           <Button onClick={() => exportToCSV(reportType === 'inventory' ? inventoryReportData : 
                                           reportType === 'sales' ? salesReportData : 
                                           profitReportData, 
                                           `${reportType}_report_${format(new Date(), 'yyyy-MM-dd')}`)}>
             Export to CSV
           </Button>
-        </div>
-      </div>
+                            </div>
+                        </div>
 
       <Tabs value={reportType} onValueChange={(value: 'inventory' | 'sales' | 'profit') => setReportType(value)}>
         <TabsList className="grid w-full grid-cols-3">
@@ -357,11 +357,11 @@ const ReportGenerator = () => {
                       ))}
                     </tbody>
                   </table>
-                </div>
+                        </div>
               )}
             </CardContent>
           </Card>
-        </TabsContent>
+                    </TabsContent>
 
         <TabsContent value="sales">
           <Card>
@@ -372,7 +372,7 @@ const ReportGenerator = () => {
               {isLoading ? (
                 <div className="flex justify-center items-center h-64">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-                </div>
+                                </div>
               ) : (
                 <div className="space-y-8">
                   <div className="h-[400px]">
@@ -384,9 +384,9 @@ const ReportGenerator = () => {
                         <Tooltip formatter={(value) => formatCurrency(Number(value))} />
                         <Legend />
                         <Line type="monotone" dataKey="amount" name="Sales Amount" stroke="#8884d8" />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
+                                </LineChart>
+                            </ResponsiveContainer>
+                        </div>
                   <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
@@ -406,8 +406,8 @@ const ReportGenerator = () => {
                         ))}
                       </tbody>
                     </table>
-                  </div>
-                </div>
+                                </div>
+                            </div>
               )}
             </CardContent>
           </Card>
@@ -422,7 +422,7 @@ const ReportGenerator = () => {
               {isLoading ? (
                 <div className="flex justify-center items-center h-64">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-                </div>
+                        </div>
               ) : (
                 <div className="space-y-8">
                   <div className="h-[400px]">
@@ -434,9 +434,9 @@ const ReportGenerator = () => {
                         <Tooltip formatter={(value) => formatCurrency(Number(value))} />
                         <Legend />
                         <Bar dataKey="revenue" name="Revenue" fill="#8884d8" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
                   <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
@@ -460,11 +460,11 @@ const ReportGenerator = () => {
                 </div>
               )}
             </CardContent>
-          </Card>
+        </Card>
         </TabsContent>
       </Tabs>
     </div>
-  );
+    );
 };
 
 export default ReportGenerator;

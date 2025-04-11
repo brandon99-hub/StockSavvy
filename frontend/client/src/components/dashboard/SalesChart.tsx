@@ -44,8 +44,8 @@ const SalesChart: React.FC<SalesChartProps> = ({ data = [], view }) => {
     };
 
     const chartData = getFilteredData();
-
-    return (
+  
+  return (
         <div style={{ width: '100%', height: 300 }}>
             <ResponsiveContainer>
                 <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
@@ -70,8 +70,8 @@ const SalesChart: React.FC<SalesChartProps> = ({ data = [], view }) => {
                     />
                 </LineChart>
             </ResponsiveContainer>
-        </div>
-    );
+    </div>
+  );
 };
 
 export default SalesChart;
