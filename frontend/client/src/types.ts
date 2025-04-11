@@ -45,4 +45,21 @@ export interface Sale {
         quantity: number;
         unit_price: number;
     }[];
+}
+
+export interface SaleItem {
+    id: number;
+    sale: number;
+    product: number;
+    quantity: number;
+    unit_price: number;
+    total_price: number;
+}
+
+export interface User {
+    id: number;
+    username: string;
+    name: string;
+    role: string;
+    created_at: string;
 } 

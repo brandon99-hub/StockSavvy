@@ -12,7 +12,7 @@ import { apiRequest } from '../lib/queryClient';
 const SalesPage = () => {
   const [activeTab, setActiveTab] = useState<string>('list');
   const { user } = useAuth();
-  const canCreateSale = user?.role === 'admin' || user?.role === 'manager';
+  const canCreateSale = user?.role === 'admin' || user?.role === 'manager' || user?.role === 'staff';
 
   // Fetch sales
   const { data: sales = [], isLoading: isSalesLoading } = useQuery<Sale[]>({

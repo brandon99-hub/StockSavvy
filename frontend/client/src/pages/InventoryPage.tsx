@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useAuth } from '../contexts/AuthContext';
-import { fetchProducts, fetchCategories } from '../services/api';
+import { useAuth } from '../lib/auth';
+import { apiRequest } from '../lib/queryClient';
 import InventoryList from '../components/inventory/InventoryList';
-import { Product } from '../types';
+import { Product, Category } from '../types';
 import { Button, Container, Typography, Box, CircularProgress, Alert } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 
@@ -15,13 +15,13 @@ const InventoryPage: React.FC = () => {
 
   const { data: products, isLoading: isLoadingProducts, error: productsError } = useQuery<Product[]>({
     queryKey: ['products'],
-    queryFn: fetchProducts,
+    queryFn: () => apiRequest('/api/products/'),
     enabled: !!user,
   });
 
-  const { data: categories, isLoading: isLoadingCategories, error: categoriesError } = useQuery({
+  const { data: categories, isLoading: isLoadingCategories, error: categoriesError } = useQuery<Category[]>({
     queryKey: ['categories'],
-    queryFn: fetchCategories,
+    queryFn: () => apiRequest('/api/categories/'),
     enabled: !!user,
   });
 
