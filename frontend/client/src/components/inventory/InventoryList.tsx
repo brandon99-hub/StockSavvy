@@ -146,30 +146,23 @@ const InventoryList: React.FC<InventoryListProps> = ({
   const startIndex = (page - 1) * ITEMS_PER_PAGE;
   const paginatedProducts = filteredProducts.slice(startIndex, startIndex + ITEMS_PER_PAGE);
   
-  // Delete product mutation
-  const deleteMutation = useMutation({
-    mutationFn: async (productId: number) => {
-      return await apiRequest('DELETE', `/api/products/${productId}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/products'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/products/low-stock'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/dashboard/stats'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/dashboard/category-chart'] });
+  const handleDelete = async (productId: number) => {
+    try {
+      const response = await apiRequest(`/api/products/${productId}/`, {
+        method: 'DELETE',
+      });
       
-      toast({
-        title: 'Product deleted',
-        description: 'The product has been successfully deleted.',
-      });
-    },
-    onError: (_error) => {
-      toast({
-        title: 'Error',
-        description: 'Failed to delete the product. Please try again.',
-        variant: 'destructive',
-      });
+      if (response.ok) {
+        queryClient.invalidateQueries({ queryKey: ['products'] });
+        toast.success('Product deleted successfully');
+      } else {
+        throw new Error('Failed to delete product');
+      }
+    } catch (error) {
+      console.error('Delete error:', error);
+      toast.error('Failed to delete product. Please try again.');
     }
-  });
+  };
   
   const getCategoryName = (categoryId: number | undefined) => {
     return categories.find(c => c.id === categoryId)?.name || 'Uncategorized';
@@ -226,70 +219,61 @@ const InventoryList: React.FC<InventoryListProps> = ({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {paginatedProducts.map((product) => {
-              const stockStatus = getStockStatus(product.quantity, product.min_stock_level);
-              const category = categories.find(c => c.id === product.category_id);
-              
-              return (
-                <TableRow key={product.id} className="hover:bg-gray-50">
-                  <TableCell className="font-medium">{product.name}</TableCell>
-                  <TableCell className="text-gray-600">{product.sku}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className="text-xs">
-                      {category?.name || 'Uncategorized'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <span className="font-mono">{product.quantity}</span>
-                      {product.quantity <= (product.min_stock_level || 0) && (
-                        <Badge variant={product.quantity === 0 ? "destructive" : "secondary"} className="text-xs">
-                          {product.quantity === 0 ? "Out of Stock" : "Low Stock"}
-                        </Badge>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right font-mono">
-                    ${product.sell_price?.toFixed(2)}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      {getStockIcon(product.quantity, product.min_stock_level)}
-                      <Badge className={stockStatus.color}>
-                        {stockStatus.status}
-                      </Badge>
-                    </div>
-                  </TableCell>
-                  {canEdit && (
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => onEdit(product)}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => deleteMutation.mutate(product.id)}
-                          disabled={deleteMutation.isPending}
-                        >
-                          Delete
-                        </Button>
-                      </div>
-                    </TableCell>
-                  )}
-                </TableRow>
-              );
-            })}
-            {paginatedProducts.length === 0 && (
+            {isLoading ? (
               <TableRow>
-                <TableCell colSpan={canEdit ? 7 : 6} className="text-center text-gray-500 py-8">
+                <TableCell colSpan={7} className="text-center py-4">
+                  Loading...
+                </TableCell>
+              </TableRow>
+            ) : filteredProducts.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center py-4">
                   No products found
                 </TableCell>
               </TableRow>
+            ) : (
+              filteredProducts.map((product) => {
+                const stockStatus = getStockStatus(product.quantity, product.min_stock_level);
+                const category = categories.find(c => c.id === product.category_id);
+                
+                return (
+                  <TableRow key={product.id} className="hover:bg-gray-50">
+                    <TableCell className="font-medium">{product.name}</TableCell>
+                    <TableCell>{product.sku}</TableCell>
+                    <TableCell>{category?.name || 'Uncategorized'}</TableCell>
+                    <TableCell>{product.quantity}</TableCell>
+                    <TableCell>KSH {product.sell_price.toFixed(2)}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        {getStockIcon(product.quantity, product.min_stock_level)}
+                        <Badge className={stockStatus.color}>
+                          {stockStatus.status}
+                        </Badge>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => onEdit(product)}
+                          className="text-blue-600 hover:text-blue-700"
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDelete(product.id)}
+                          className="text-red-600 hover:text-red-700"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })
             )}
           </TableBody>
         </Table>
