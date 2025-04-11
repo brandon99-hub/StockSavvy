@@ -41,14 +41,17 @@ import { Product, Category } from '../../types';
 import { useToast } from '../../hooks/use-toast';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '../../lib/queryClient';
+import { useAuth } from '../../lib/auth';
+import { Skeleton } from '../ui/skeleton';
 
 interface InventoryListProps {
   products: Product[];
   categories: Category[];
-  onEdit: (product: Product) => void;
+  onEdit?: (product: Product) => void;
+  isLoading?: boolean;
 }
 
-const InventoryList = ({ products, categories, onEdit }: InventoryListProps) => {
+const InventoryList = ({ products, categories, onEdit, isLoading }: InventoryListProps) => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
@@ -56,7 +59,8 @@ const InventoryList = ({ products, categories, onEdit }: InventoryListProps) => 
   const [categoryFilter, setCategoryFilter] = useState<number | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const { user } = useAuth();
+  const canEdit = user?.role === 'admin' || user?.role === 'manager';
   
   const itemsPerPage = 10;
   
@@ -79,7 +83,6 @@ const InventoryList = ({ products, categories, onEdit }: InventoryListProps) => 
   // Delete product mutation
   const handleDelete = async (product: Product) => {
     try {
-      setIsLoading(true);
       await apiRequest(`/products/${product.id}/`, { method: "DELETE" });
       
       // Invalidate queries
@@ -101,8 +104,6 @@ const InventoryList = ({ products, categories, onEdit }: InventoryListProps) => 
         description: 'Failed to delete product',
         variant: 'destructive',
       });
-    } finally {
-      setIsLoading(false);
     }
   };
   
@@ -115,7 +116,17 @@ const InventoryList = ({ products, categories, onEdit }: InventoryListProps) => 
   const getCategoryName = (category: Category | null | undefined) => {
     return category?.name || 'Uncategorized';
   };
-  
+
+  if (isLoading) {
+    return (
+      <div className="space-y-4">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <Skeleton key={i} className="h-20" />
+        ))}
+      </div>
+    );
+  }
+
   return (
     <>
       <Card className="shadow-sm">
@@ -191,9 +202,16 @@ const InventoryList = ({ products, categories, onEdit }: InventoryListProps) => 
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => onEdit(product)}>
-                        <i className="fas fa-edit text-blue-500"></i>
-                      </Button>
+                      {canEdit && onEdit && (
+                        <Button variant="ghost" size="sm" onClick={() => onEdit(product)}>
+                          <i className="fas fa-edit text-blue-500"></i>
+                        </Button>
+                      )}
+                      {product.quantity <= product.min_stock_level && (
+                        <Button variant="ghost" size="sm" onClick={() => onEdit(product)}>
+                          <i className="fas fa-restock text-amber-500"></i>
+                        </Button>
+                      )}
                       <Button variant="ghost" size="sm" onClick={() => handleDelete(product)}>
                         <i className="fas fa-trash text-red-500"></i>
                       </Button>
@@ -274,9 +292,8 @@ const InventoryList = ({ products, categories, onEdit }: InventoryListProps) => 
             <Button 
               variant="destructive" 
               onClick={confirmDelete}
-              disabled={isLoading}
             >
-              {isLoading ? "Deleting..." : "Delete"}
+              Delete
             </Button>
           </DialogFooter>
         </DialogContent>

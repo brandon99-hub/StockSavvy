@@ -15,6 +15,8 @@ const Sidebar = ({isMobile, setMobileOpen}: { isMobile?: boolean; setMobileOpen?
         }
     };
 
+    const isAdmin = user?.role === 'admin' || user?.role === 'manager';
+
     return (
         <div className="bg-gray-800 text-white w-full h-full flex flex-col">
             {/* Logo */}
@@ -32,9 +34,9 @@ const Sidebar = ({isMobile, setMobileOpen}: { isMobile?: boolean; setMobileOpen?
             <div className="p-4 border-b border-gray-700">
                 <div className="flex items-center space-x-3">
                     <div className="w-10 h-10 rounded-full bg-gray-600 flex items-center justify-center">
-            <span className="text-sm font-medium">
-              {user?.name ? user.name.split(' ').map(n => n[0]).join('').toUpperCase() : 'U'}
-            </span>
+                        <span className="text-sm font-medium">
+                            {user?.name ? user.name.split(' ').map(n => n[0]).join('').toUpperCase() : 'U'}
+                        </span>
                     </div>
                     <div>
                         <p className="text-sm font-medium">{user?.name || 'User'}</p>
@@ -44,13 +46,13 @@ const Sidebar = ({isMobile, setMobileOpen}: { isMobile?: boolean; setMobileOpen?
             </div>
 
             {/* Nav Links */}
-            <nav className="p-2 flex-1 overflow-y-auto">
-                <ul>
+            <nav className="flex-1 overflow-y-auto">
+                <ul className="space-y-2 p-4">
                     <li>
                         <Link
-                            href="/"
+                            href="/dashboard"
                             onClick={closeMobileMenu}
-                            className={`flex items-center p-3 text-gray-300 hover:bg-gray-700 rounded-lg ${isActive("/")}`}
+                            className={`flex items-center p-3 text-gray-300 hover:bg-gray-700 rounded-lg ${isActive("/dashboard")}`}
                         >
                             <i className="fas fa-tachometer-alt w-6"></i>
                             <span>Dashboard</span>
@@ -62,7 +64,7 @@ const Sidebar = ({isMobile, setMobileOpen}: { isMobile?: boolean; setMobileOpen?
                             onClick={closeMobileMenu}
                             className={`flex items-center p-3 text-gray-300 hover:bg-gray-700 rounded-lg ${isActive("/inventory")}`}
                         >
-                            <i className="fas fa-box w-6"></i>
+                            <i className="fas fa-boxes w-6"></i>
                             <span>Inventory</span>
                         </Link>
                     </li>
@@ -86,41 +88,39 @@ const Sidebar = ({isMobile, setMobileOpen}: { isMobile?: boolean; setMobileOpen?
                             <span>Reports</span>
                         </Link>
                     </li>
-                    {(user?.role === 'admin' || user?.role === 'manager') && (
-                        <li>
-                            <Link
-                                href="/analytics"
-                                onClick={closeMobileMenu}
-                                className={`flex items-center p-3 text-gray-300 hover:bg-gray-700 rounded-lg ${isActive("/analytics")}`}
-                            >
-                                <i className="fas fa-chart-line w-6"></i>
-                                <span>Advanced Analytics</span>
-                            </Link>
-                        </li>
-                    )}
-                    {user?.role === 'admin' && (
-                        <li>
-                            <Link
-                                href="/users"
-                                onClick={closeMobileMenu}
-                                className={`flex items-center p-3 text-gray-300 hover:bg-gray-700 rounded-lg ${isActive("/users")}`}
-                            >
-                                <i className="fas fa-users w-6"></i>
-                                <span>Users</span>
-                            </Link>
-                        </li>
-                    )}
-                    {user?.role === 'admin' && (
-                        <li>
-                            <Link
-                                href="/manage-categories"
-                                onClick={closeMobileMenu}
-                                className={`flex items-center p-3 text-gray-300 hover:bg-gray-700 rounded-lg ${isActive("/manage-categories")}`}
-                            >
-                                <i className="fas fa-tags w-6"></i>
-                                <span>Manage Categories</span>
-                            </Link>
-                        </li>
+                    {isAdmin && (
+                        <>
+                            <li>
+                                <Link
+                                    href="/analytics"
+                                    onClick={closeMobileMenu}
+                                    className={`flex items-center p-3 text-gray-300 hover:bg-gray-700 rounded-lg ${isActive("/analytics")}`}
+                                >
+                                    <i className="fas fa-chart-line w-6"></i>
+                                    <span>Advanced Analytics</span>
+                                </Link>
+                            </li>
+                            <li>
+                                <Link
+                                    href="/users"
+                                    onClick={closeMobileMenu}
+                                    className={`flex items-center p-3 text-gray-300 hover:bg-gray-700 rounded-lg ${isActive("/users")}`}
+                                >
+                                    <i className="fas fa-users w-6"></i>
+                                    <span>Users</span>
+                                </Link>
+                            </li>
+                            <li>
+                                <Link
+                                    href="/manage-categories"
+                                    onClick={closeMobileMenu}
+                                    className={`flex items-center p-3 text-gray-300 hover:bg-gray-700 rounded-lg ${isActive("/manage-categories")}`}
+                                >
+                                    <i className="fas fa-tags w-6"></i>
+                                    <span>Manage Categories</span>
+                                </Link>
+                            </li>
+                        </>
                     )}
                 </ul>
             </nav>

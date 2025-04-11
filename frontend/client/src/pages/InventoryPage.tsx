@@ -49,8 +49,11 @@ const InventoryPage = () => {
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-semibold text-gray-800">Inventory Management</h1>
         {canEdit && (
-          <Button onClick={() => setActiveTab('add')}>
-            <i className="fas fa-plus mr-2"></i> Add Product
+          <Button
+            onClick={() => setActiveTab('add')}
+            className="bg-blue-500 hover:bg-blue-600 text-white"
+          >
+            Add Product
           </Button>
         )}
       </div>
@@ -59,37 +62,35 @@ const InventoryPage = () => {
         <TabsList>
           <TabsTrigger value="list">Products</TabsTrigger>
           {canEdit && (
-            <TabsTrigger value="add">{editProduct ? 'Edit Product' : 'Add Product'}</TabsTrigger>
+            <>
+              <TabsTrigger value="add">Add/Edit Product</TabsTrigger>
+              <TabsTrigger value="restock">Restock Rules</TabsTrigger>
+            </>
           )}
-          <TabsTrigger value="rules">Restock Rules</TabsTrigger>
         </TabsList>
+
         <TabsContent value="list">
-          {isLoading ? (
-            <div className="text-center py-8">Loading inventory data...</div>
-          ) : (
-            <InventoryList 
-              products={products} 
-              categories={categories}
-              onEdit={handleEditProduct}
-            />
-          )}
-        </TabsContent>
-        {canEdit && (
-          <TabsContent value="add">
-            <AddProductForm 
-              categories={categories} 
-              editProduct={editProduct}
-              onSuccess={handleCancel}
-            />
-          </TabsContent>
-        )}
-        <TabsContent value="rules">
-          <RestockRulesManager 
+          <InventoryList
             products={products}
-            lowStockProducts={lowStockProducts}
-            onSuccess={() => {}}
+            onEdit={canEdit ? handleEditProduct : undefined}
+            isLoading={isLoading}
           />
         </TabsContent>
+
+        {canEdit && (
+          <>
+            <TabsContent value="add">
+              <AddProductForm
+                categories={categories}
+                editProduct={editProduct}
+                onCancel={handleCancel}
+              />
+            </TabsContent>
+            <TabsContent value="restock">
+              <RestockRulesManager />
+            </TabsContent>
+          </>
+        )}
       </Tabs>
     </div>
   );

@@ -268,13 +268,14 @@ class ProductViewSet(viewsets.ModelViewSet):
                         # Get user from database to check admin status
                         with connection.cursor() as cursor:
                             cursor.execute(
-                                "SELECT is_staff, is_superuser FROM users WHERE id = %s",
+                                "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
                                 [user_id]
                             )
                             row = cursor.fetchone()
                             if row:
-                                is_staff, is_superuser = row
-                                return True, user_id, is_staff or is_superuser
+                                is_staff, is_superuser, role = row
+                                is_admin = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager'])
+                                return True, user_id, is_admin
                 except (IndexError, ValueError) as e:
                     print(f"Token validation error: {str(e)}")
                     pass
@@ -301,7 +302,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         return super().create(request, *args, **kwargs)
 
     def update(self, request, *args, **kwargs):
-        is_authenticated, is_admin = self.check_token_auth(request)
+        is_authenticated, user_id, is_admin = self.check_token_auth(request)
         if not is_authenticated:
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
         if not is_admin:
@@ -309,7 +310,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         return super().update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
-        is_authenticated, is_admin = self.check_token_auth(request)
+        is_authenticated, user_id, is_admin = self.check_token_auth(request)
         if not is_authenticated:
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
         if not is_admin:
@@ -321,94 +322,16 @@ class ProductViewSet(viewsets.ModelViewSet):
         is_authenticated, _, _ = self.check_token_auth(request)
         if not is_authenticated:
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-
-        try:
-            with connection.cursor() as cursor:
-                cursor.execute("""
-                    SELECT 
-                        p.id,
-                        p.name,
-                        p.sku,
-                        p.quantity,
-                        p.min_stock_level,
-                        p.sell_price,
-                        c.name as category_name,
-                        COALESCE(SUM(si.quantity), 0) as total_sold,
-                        p.quantity <= p.min_stock_level as is_low_stock,
-                        p.quantity = 0 as is_out_of_stock,
-                        CASE 
-                            WHEN p.quantity = 0 THEN 'Out of Stock'
-                            WHEN p.quantity <= p.min_stock_level THEN 'Low Stock'
-                            ELSE 'Normal'
-                        END as stock_status,
-                        CASE
-                            WHEN p.quantity = 0 THEN 'critical'
-                            WHEN p.quantity <= p.min_stock_level THEN 'warning'
-                            ELSE 'normal'
-                        END as status_level
-                    FROM products p
-                    LEFT JOIN categories c ON p.category_id = c.id
-                    LEFT JOIN sale_items si ON p.id = si.product_id
-                    WHERE p.quantity <= p.min_stock_level
-                    GROUP BY 
-                        p.id, p.name, p.sku, p.quantity, p.min_stock_level,
-                        p.sell_price, c.name
-                    ORDER BY 
-                        p.quantity = 0 DESC,
-                        p.quantity ASC,
-                        p.name ASC
-                """)
-                columns = [col[0] for col in cursor.description]
-                results = [dict(zip(columns, row)) for row in cursor.fetchall()]
-
-                # Format decimal values
-                for row in results:
-                    if 'sell_price' in row and row['sell_price'] is not None:
-                        row['sell_price'] = str(row['sell_price'])
-
-                return Response({
-                    'items': results,
-                    'summary': {
-                        'total': len(results),
-                        'outOfStock': sum(1 for item in results if item['is_out_of_stock']),
-                        'lowStock': sum(1 for item in results if item['is_low_stock'] and not item['is_out_of_stock'])
-                    }
-                })
-        except Exception as e:
-            print(f"Error in low_stock: {str(e)}")
-            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return super().low_stock(request)
 
     @action(detail=True, methods=['post'])
     def restock(self, request, pk=None):
-        is_authenticated, is_admin = self.check_token_auth(request)
+        is_authenticated, user_id, is_admin = self.check_token_auth(request)
         if not is_authenticated:
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
         if not is_admin:
             return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-
-        product = self.get_object()
-        quantity = request.data.get('quantity', 0)
-
-        if quantity <= 0:
-            return Response(
-                {'message': 'Quantity must be greater than 0'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        product.stock_quantity += quantity
-        product.save()
-
-        # Create activity log
-        try:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "INSERT INTO activities (type, description, user_id, created_at, status) VALUES (%s, %s, %s, NOW(), %s)",
-                    ['restock', f'Restocked {quantity} units of {product.name}', request.user.id, 'success']
-                )
-        except Exception as e:
-            print(f"Could not create activity: {str(e)}")
-
-        return Response(ProductSerializer(product).data)
+        return super().restock(request, pk)
 
 
 class SaleViewSet(viewsets.ModelViewSet):
@@ -436,7 +359,9 @@ class SaleViewSet(viewsets.ModelViewSet):
                 row = cursor.fetchone()
                 if row:
                     is_staff, is_superuser, role = row
-                    return True, user_id, is_staff or is_superuser or role in ['admin', 'manager']
+                    # Allow access if user is staff, superuser, admin, or manager
+                    is_authorized = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager', 'staff'])
+                    return True, user_id, is_authorized
         except (IndexError, ValueError, Exception) as e:
             print(f"Token validation error: {str(e)}")
             return False, None, False
@@ -444,13 +369,13 @@ class SaleViewSet(viewsets.ModelViewSet):
         return False, None, False
 
     def list(self, request, *args, **kwargs):
-        is_authenticated, user_id, is_admin = self.check_token_auth(request)
+        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
         if not is_authenticated:
             return Response(
                 {"detail": "Authentication required"},
                 status=status.HTTP_401_UNAUTHORIZED
             )
-        if not is_admin:
+        if not is_authorized:
             return Response(
                 {"detail": "Permission denied"},
                 status=status.HTTP_403_FORBIDDEN
@@ -458,97 +383,32 @@ class SaleViewSet(viewsets.ModelViewSet):
         return super().list(request, *args, **kwargs)
 
     def create(self, request, *args, **kwargs):
-        is_authenticated, user_id, _ = self.check_token_auth(request)
+        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
         if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-
-        data = request.data
-        now = timezone.now()
-
-        try:
-            # Get username from token
-            token = request.headers.get('Authorization').split(' ')[1]
-            username = token.split('_')[2]  # token format is token_userid_username
-
-            # Get the user instance by username
-            user = User.objects.get_by_natural_key(username)
-
-            # Create the sale
-            sale = Sale.objects.create(
-                user_id=user.id,
-                sale_date=now,
-                created_at=now,
-                total_amount=float(data.get('totalAmount', 0)),
-                discount=float(data.get('discount', 0)),
-                discount_percentage=float(data.get('discountPercentage', 0)),
-                original_amount=float(data.get('originalAmount', 0))
+            return Response(
+                {"detail": "Authentication required"},
+                status=status.HTTP_401_UNAUTHORIZED
             )
-
-            # Create sale items and track total items
-            items_data = data.get('items', [])
-            total_items = 0
-
-            for item_data in items_data:
-                product = Product.objects.get(id=item_data.get('id'))
-                quantity = int(item_data['quantity'])
-                unit_price = float(item_data.get('unitPrice', 0))
-                total_price = float(item_data.get('totalPrice', quantity * unit_price))
-
-                total_items += quantity
-
-                # Create sale item
-                SaleItem.objects.create(
-                    sale=sale,
-                    product=product,
-                    quantity=quantity,
-                    unit_price=unit_price,
-                    total_price=total_price
-                )
-
-                # Update product quantity and get new quantity
-                new_quantity = product.quantity - quantity
-                product.quantity = new_quantity
-                product.updated_at = now
-                product.save()
-
-                # Log activity for each item
-                Activity.objects.create(
-                    type='sale',
-                    description=f'Sold {quantity} {product.name}(s)',
-                    product=product,
-                    user=user,
-                    created_at=now,
-                    status='success'
-                )
-
-                # Check if product is low on stock after sale
-                if new_quantity <= product.min_stock_level:
-                    Activity.objects.create(
-                        type='low_stock',
-                        description=f'Low stock alert: {product.name} ({new_quantity} remaining)',
-                        product=product,
-                        user=user,
-                        created_at=now,
-                        status='warning'
-                    )
-
-            # Create a summary activity
-            Activity.objects.create(
-                type='sale',
-                description=f'Created sale #{sale.id} with {total_items} items for KSh {sale.total_amount}',
-                user=user,
-                created_at=now,
-                status='success'
+        if not is_authorized:
+            return Response(
+                {"detail": "Permission denied"},
+                status=status.HTTP_403_FORBIDDEN
             )
+        return super().create(request, *args, **kwargs)
 
-            return Response(SaleSerializer(sale).data)
-
-        except User.DoesNotExist:
-            return Response({"detail": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-        except Product.DoesNotExist:
-            return Response({"detail": "Product not found"}, status=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
-            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    def retrieve(self, request, *args, **kwargs):
+        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
+        if not is_authenticated:
+            return Response(
+                {"detail": "Authentication required"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        if not is_authorized:
+            return Response(
+                {"detail": "Permission denied"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().retrieve(request, *args, **kwargs)
 
 
 class ActivityViewSet(viewsets.ReadOnlyModelViewSet):
@@ -911,7 +771,9 @@ class AnalyticsViewSet(viewsets.ViewSet):
                             row = cursor.fetchone()
                             if row:
                                 is_staff, is_superuser, role = row
-                                return True, user_id, is_staff or is_superuser or role in ['admin', 'manager']
+                                # Allow access if user is staff, superuser, admin, or manager
+                                is_authorized = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager', 'staff'])
+                                return True, user_id, is_authorized
                 except (IndexError, ValueError) as e:
                     print(f"Token validation error: {str(e)}")
                     pass
@@ -1019,12 +881,13 @@ class ReportViewSet(viewsets.ViewSet):
                             row = cursor.fetchone()
                             if row:
                                 is_staff, is_superuser, role = row
-                                is_admin = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager'])
-                                return True, user_id, is_admin
+                                # Allow access if user is staff, superuser, admin, or manager
+                                is_authorized = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager', 'staff'])
+                                return True, user_id, is_authorized
                 except (jwt.InvalidTokenError, IndexError, ValueError, Exception) as e:
                     print(f"Token validation error: {str(e)}")
                     return False, None, False
-            return False, None, False
+        return False, None, False
 
     @action(detail=False, methods=['get'])
     def inventory(self, request):
