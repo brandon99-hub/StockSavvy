@@ -156,7 +156,8 @@ class UserViewSet(viewsets.ModelViewSet):
                 Activity.objects.create(
                     user=user,
                     type='login',
-                    description=f'User {username} logged in'
+                    description=f'User {username} logged in',
+                    created_at=timezone.now()
                 )
 
                 return Response(user_data)
