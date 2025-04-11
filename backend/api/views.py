@@ -541,7 +541,39 @@ class ActivityViewSet(viewsets.ReadOnlyModelViewSet):
                 {"detail": "Permission denied"},
                 status=status.HTTP_403_FORBIDDEN
             )
-        return super().list(request, *args, **kwargs)
+        
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    SELECT 
+                        a.id,
+                        a.type,
+                        a.description,
+                        a.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Nairobi' as created_at,
+                        a.status,
+                        u.username as user_name,
+                        CASE 
+                            WHEN a.type = 'sale' THEN 'sale'
+                            WHEN a.type = 'restock' THEN 'restock'
+                            WHEN a.type = 'low_stock' THEN 'warning'
+                            ELSE 'info'
+                        END as activity_type
+                    FROM activities a
+                    LEFT JOIN users u ON a.user_id = u.id
+                    ORDER BY a.created_at DESC
+                    LIMIT 50
+                """)
+                activities = [
+                    {
+                        **dict(zip([col[0] for col in cursor.description], row)),
+                        'created_at': row[3].isoformat() if row[3] else None
+                    }
+                    for row in cursor.fetchall()
+                ]
+                return Response(activities)
+        except Exception as e:
+            print(f"Error in ActivityViewSet list: {str(e)}")
+            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def retrieve(self, request, *args, **kwargs):
         is_authenticated, user_id, is_authorized = self.check_token_auth(request)
@@ -905,16 +937,52 @@ class AnalyticsViewSet(viewsets.ViewSet):
                 """)
                 sales_data = dict(zip([col[0] for col in cursor.description], cursor.fetchone()))
 
-                # Product analytics
+                # Product analytics with proper low stock calculation
                 cursor.execute("""
                     SELECT 
                         COUNT(*) as total_products,
-                        COUNT(CASE WHEN quantity <= min_stock_level THEN 1 END) as low_stock_count,
+                        COUNT(CASE WHEN quantity <= min_stock_level AND quantity > 0 THEN 1 END) as low_stock_count,
                         COUNT(CASE WHEN quantity = 0 THEN 1 END) as out_of_stock_count,
                         COALESCE(SUM(quantity * sell_price), 0) as inventory_value
                     FROM products
                 """)
                 product_data = dict(zip([col[0] for col in cursor.description], cursor.fetchone()))
+
+                # Get low stock items with proper ordering
+                cursor.execute("""
+                    SELECT 
+                        p.id,
+                        p.name,
+                        p.sku,
+                        p.quantity,
+                        p.min_stock_level,
+                        p.sell_price,
+                        c.name as category_name,
+                        CASE 
+                            WHEN p.quantity = 0 THEN 'Out of Stock'
+                            WHEN p.quantity <= p.min_stock_level THEN 'Low Stock'
+                            ELSE 'In Stock'
+                        END as status
+                    FROM products p
+                    LEFT JOIN categories c ON p.category_id = c.id
+                    WHERE p.quantity <= p.min_stock_level
+                    ORDER BY 
+                        CASE 
+                            WHEN p.quantity = 0 THEN 1
+                            WHEN p.quantity <= p.min_stock_level THEN 2
+                            ELSE 3
+                        END,
+                        p.quantity ASC,
+                        p.name ASC
+                    LIMIT 10
+                """)
+                low_stock_items = [
+                    {
+                        **dict(zip([col[0] for col in cursor.description], row)),
+                        'sell_price': str(row[5]) if row[5] is not None else '0.00'
+                    }
+                    for row in cursor.fetchall()
+                ]
 
                 # Recent activities with proper timezone handling and formatting
                 cursor.execute("""
@@ -958,6 +1026,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
                         'outOfStock': product_data['out_of_stock_count'],
                         'value': str(product_data['inventory_value'])
                     },
+                    'lowStockItems': low_stock_items,
                     'recentActivities': activities
                 })
         except Exception as e:

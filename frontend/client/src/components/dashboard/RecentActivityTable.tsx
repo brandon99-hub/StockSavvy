@@ -40,7 +40,13 @@ const RecentActivityTable: React.FC<RecentActivityTableProps> = ({
 }) => {
   const { data: recentActivities, isLoading } = useQuery<Activity[]>({
     queryKey: ['/api/activities/'],
-    queryFn: () => apiRequest('/api/activities/'),
+    queryFn: async () => {
+      const data = await apiRequest('/api/activities/');
+      // Ensure activities are sorted by created_at in descending order
+      return Array.isArray(data) ? data.sort((a, b) => 
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      ) : [];
+    },
     refetchInterval: 30000, // Refetch every 30 seconds
   });
 
