@@ -262,27 +262,25 @@ class ProductViewSet(viewsets.ModelViewSet):
         if not auth_header or not auth_header.startswith('Bearer '):
             return False, None, False
 
-            token = auth_header.split(' ')[1]
+        token = auth_header.split(' ')[1]
         if not token.startswith('token_'):
             return False, None, False
 
-                try:
-                    parts = token.split('_')
-                        user_id = int(parts[1])
-                        with connection.cursor() as cursor:
-                            cursor.execute(
+        try:
+            parts = token.split('_')
+            user_id = int(parts[1])
+            with connection.cursor() as cursor:
+                cursor.execute(
                     "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
-                                [user_id]
-                            )
-                            row = cursor.fetchone()
-                            if row:
+                    [user_id]
+                )
+                row = cursor.fetchone()
+                if row:
                     is_staff, is_superuser, role = row
                     # Allow access if user is staff, superuser, admin, or manager
-                    is_authorized = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager', 'staff'])
-                    return True, user_id, is_authorized
-        except (IndexError, ValueError, Exception) as e:
-                    print(f"Token validation error: {str(e)}")
-        return False, None, False
+                    return True, role, is_staff or is_superuser or role in ['admin', 'manager']
+        except (ValueError, IndexError, Exception):
+            return False, None, False
 
         return False, None, False
 
