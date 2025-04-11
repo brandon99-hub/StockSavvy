@@ -20,50 +20,32 @@ const handleUnauthorized = () => {
 
 // API request function
 export const apiRequest = async (url: string, options: RequestInit = {}) => {
+  const baseURL = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
   const token = localStorage.getItem('token');
   
-  if (!token) {
-    handleUnauthorized();
-    throw new Error('No authentication token found');
-  }
-
   const headers = {
     'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`,
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     ...options.headers,
   };
 
   try {
-    const response = await fetch(`${API_BASE_URL}${url}`, {
+    const response = await fetch(`${baseURL}${url}`, {
       ...options,
       headers,
     });
 
-    if (response.status === 401) {
-      handleUnauthorized();
-      throw new Error('Unauthorized');
-    }
-
     if (!response.ok) {
+      if (response.status === 401) {
+        // Clear stored data on authentication error
+        localStorage.removeItem('user');
+        localStorage.removeItem('token');
+      }
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    const contentType = response.headers.get('content-type');
-    if (contentType && contentType.includes('application/json')) {
-      const data = await response.json();
-      // Ensure we're returning an array if the response is expected to be an array
-      if (Array.isArray(data)) {
-        return data;
-      }
-      // If it's an object with a 'results' property (common in Django REST Framework)
-      if (data && typeof data === 'object' && 'results' in data) {
-        return data.results;
-      }
-      return data;
-    } else {
-      const text = await response.text();
-      return text;
-    }
+    const data = await response.json();
+    return data;
   } catch (error) {
     console.error('API request failed:', error);
     throw error;

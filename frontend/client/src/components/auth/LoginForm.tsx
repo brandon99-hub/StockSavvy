@@ -131,7 +131,7 @@ const LoginForm = () => {
         
         <div className="mt-4 text-center text-sm text-gray-500">
           <p>Default admin credentials:</p>
-          <p>Username: admin / Password: admin123</p>
+          <p>Username: admin / Password: temporary_password_123</p>
         </div>
       </CardContent>
     </Card>

@@ -118,11 +118,23 @@ class UserViewSet(viewsets.ModelViewSet):
             username = request.data.get('username')
             password = request.data.get('password')
 
+            print(f"Login attempt for username: {username}")  # Debug log
+
+            if not username or not password:
+                return Response(
+                    {'message': 'Username and password are required'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
             # Use Django's authenticate
             user = authenticate(request, username=username, password=password)
+            print(f"Authentication result: {'Success' if user else 'Failed'}")  # Debug log
 
-            if user is not None:
+            if user is not None and user.is_active:
                 # Generate token and return user data
+                token = f"token_{user.id}_{user.username}"
+                
+                # Create user data response
                 user_data = {
                     'id': user.id,
                     'username': user.username,
@@ -131,18 +143,32 @@ class UserViewSet(viewsets.ModelViewSet):
                     'is_staff': user.is_staff,
                     'is_superuser': user.is_superuser,
                     'name': user.name,
-                    'token': f"token_{user.id}_{user.username}"
+                    'token': token
                 }
-                # Log activity (your existing code)
+
+                # Store the token in the session
+                request.session['auth_token'] = token
+                
+                # Log successful login
+                print(f"Login successful for user: {username}")
+                
+                # Create activity log
+                Activity.objects.create(
+                    user=user,
+                    action_type='login',
+                    description=f'User {username} logged in'
+                )
+
                 return Response(user_data)
             else:
+                print(f"Login failed for user: {username}")  # Debug log
                 return Response(
                     {'message': 'Invalid credentials'},
                     status=status.HTTP_401_UNAUTHORIZED
                 )
 
         except Exception as e:
-            print(f"Login error: {str(e)}")
+            print(f"Login error for {username}: {str(e)}")  # Debug log
             return Response(
                 {'message': 'Login error', 'detail': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR

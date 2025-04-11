@@ -40,10 +40,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (credentials: { username: string; password: string }) => {
     try {
+      console.log('Attempting login with credentials:', credentials.username);
+      
       const response = await apiRequest('/api/users/login/', {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify(credentials),
+        credentials: 'include', // This is important for cookies
       });
+
+      if (!response || typeof response !== 'object') {
+        console.error('Invalid response format:', response);
+        throw new Error('Invalid response from server');
+      }
 
       // Extract token and user data
       const { token, ...userData } = response;
@@ -54,22 +65,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error('Invalid token format received from server');
       }
       
-      // Store user data and token separately
+      // Store user data and token
       setUser(userData);
       localStorage.setItem('user', JSON.stringify(userData));
       localStorage.setItem('token', token);
       
+      console.log('Login successful');
       return userData;
     } catch (error) {
       console.error('Login error:', error);
+      // Clear any stale data
+      setUser(null);
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
       throw error;
     }
   };
 
   const logout = () => {
-    setUser(null);
-    localStorage.removeItem('user');
-    localStorage.removeItem('token');
+    try {
+      // Clear user data and token
+      setUser(null);
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
+      
+      // Call the logout endpoint
+      apiRequest('/api/users/logout/', {
+        method: 'POST',
+        credentials: 'include',
+      }).catch(console.error); // Don't wait for the response
+      
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
   };
 
   return (
