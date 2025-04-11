@@ -205,13 +205,26 @@ const AdvancedAnalytics = () => {
     const salesQuery = useQuery<ApiResponse>({
         queryKey: ['/api/dashboard/sales-chart/'],
         queryFn: async () => {
-            const response = await apiRequest('/api/dashboard/sales-chart/');
-            if (!response?.items || !Array.isArray(response.items)) {
-                console.error('Invalid sales data format:', response);
+            try {
+                const response = await apiRequest('/api/dashboard/sales-chart/');
+                // The API returns { items: [], summary: {} }
+                const salesArray = response?.items || [];
+                
+                if (!Array.isArray(salesArray)) {
+                    console.error('Sales data structure:', response);
+                    return { items: [], summary: { total_sales: 0, total_items: 0 } };
+                }
+                
+                return {
+                    items: salesArray,
+                    summary: response?.summary || { total_sales: 0, total_items: 0 }
+                };
+            } catch (error) {
+                console.error('Error fetching sales data:', error);
                 return { items: [], summary: { total_sales: 0, total_items: 0 } };
             }
-            return response;
-        }
+        },
+        refetchInterval: 60000 // Refresh every minute
     });
 
     const { data: categoryChartData = [], isLoading: isCategoryDataLoading } = useQuery({
@@ -349,22 +362,29 @@ const AdvancedAnalytics = () => {
     };
 
     // Transform data for analytics with safety checks
-    const salesData = useMemo(() => {
-        if (!salesQuery.data?.items) {
-            console.log('No sales data available');
-            return [] as SalesChartData[];
+    const salesData = useMemo((): SalesChartData[] => {
+        try {
+            if (!salesQuery.data?.items) {
+                return [];
+            }
+            
+            const salesArray = salesQuery.data.items;
+            if (!Array.isArray(salesArray)) {
+                console.error('Sales data structure:', salesQuery.data);
+                return [];
+            }
+            
+            const transformedData = salesArray.map(item => {
+                const date = format(new Date(item.date || item.created_at), 'yyyy-MM-dd');
+                const amount = parseFloat(String(item.amount || '0'));
+                return { date, amount } as SalesChartData;
+            });
+            
+            return transformedData.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        } catch (error) {
+            console.error('Error transforming sales data:', error);
+            return [];
         }
-        
-        const salesArray = salesQuery.data.items;
-        if (!Array.isArray(salesArray)) {
-            console.error('Sales data structure:', salesQuery.data);
-            return [] as SalesChartData[];
-        }
-        
-        return salesArray.map(item => ({
-            date: format(new Date(item.date || item.created_at), 'yyyy-MM-dd'),
-            amount: parseFloat(String(item.amount || '0'))
-        })).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()) as SalesChartData[];
     }, [salesQuery.data]);
 
     const categoryData = useMemo(() => {
