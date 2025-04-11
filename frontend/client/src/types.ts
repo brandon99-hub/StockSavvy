@@ -3,6 +3,11 @@ export interface Activity {
     type: string;
     created_at: string;
     quantity?: number;
+    details?: {
+        quantity?: number;
+        old_quantity?: number;
+        new_quantity?: number;
+    };
     product?: number;
     user?: number;
     description?: string;
@@ -12,10 +17,13 @@ export interface Product {
     id: number;
     name: string;
     sku: string;
-    category?: number;
     quantity: number;
     min_stock_level: number;
+    category: number | { id: number; name: string };
+    category_id?: number;
+    buy_price: number;
     sell_price: number;
+    status: string;
 }
 
 export interface Category {

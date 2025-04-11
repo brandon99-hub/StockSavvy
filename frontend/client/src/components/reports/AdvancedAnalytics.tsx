@@ -444,24 +444,26 @@ const AdvancedAnalytics = () => {
 
     // Calculate metrics with safety checks
     const metrics = useMemo(() => {
-        if (!stats || typeof stats !== 'object') {
+        if (!salesQuery.data?.items || !Array.isArray(salesQuery.data.items)) {
             return {
                 totalRevenue: 0,
-                totalSales: salesQuery.data?.summary?.total_sales || 0,
+                totalSales: 0,
                 averageOrderValue: 0
             };
         }
 
-        const totalSales = salesQuery.data?.summary?.total_sales || 0;
-        const totalRevenue = salesQuery.data?.items?.reduce((sum, item) => sum + parseFloat(item.amount || '0'), 0) || 0;
-        const averageOrderValue = totalSales > 0 ? totalRevenue / totalSales : 0;
+        const totalRevenue = salesQuery.data.items.reduce((sum, item) => 
+            sum + parseFloat(item.amount || '0'), 0);
+        
+        const totalTransactions = salesQuery.data.items.reduce((sum, item) => 
+            sum + (item.transaction_count || 0), 0);
 
         return {
             totalRevenue,
-            totalSales,
-            averageOrderValue
+            totalSales: totalTransactions,
+            averageOrderValue: totalTransactions > 0 ? totalRevenue / totalTransactions : 0
         };
-    }, [stats, salesQuery.data]);
+    }, [salesQuery.data]);
 
     // Calculate stock movement data with safety checks
     const stockMovementData = useMemo(() => {
@@ -471,12 +473,15 @@ const AdvancedAnalytics = () => {
         const stockActivities = activities.filter(activity => {
             if (!activity?.created_at) return false;
             const activityDate = new Date(activity.created_at);
+            // Include all relevant stock-affecting activities
             return (activityDate >= dateRange.start && 
                     activityDate <= dateRange.end && 
                     (activity.type === 'stock_added' || 
                      activity.type === 'stock_removed' ||
+                     activity.type === 'product_added' ||
                      activity.type === 'sale_created' ||
-                     activity.type === 'purchase_created'));
+                     activity.type === 'purchase_created' ||
+                     activity.type === 'stock_updated'));
         });
 
         // Create a map for each day in the range
@@ -493,18 +498,41 @@ const AdvancedAnalytics = () => {
         stockActivities.forEach(activity => {
             const activityDate = format(new Date(activity.created_at), 'yyyy-MM-dd');
             const current = movementMap.get(activityDate) || { additions: 0, removals: 0 };
-            const quantity = activity.quantity || 1;
+            const quantity = Number(activity.quantity) || Number(activity.details?.quantity) || 1;
 
-            if (activity.type === 'stock_added' || activity.type === 'purchase_created') {
-                movementMap.set(activityDate, {
-                    ...current,
-                    additions: current.additions + quantity
-                });
-            } else if (activity.type === 'stock_removed' || activity.type === 'sale_created') {
-                movementMap.set(activityDate, {
-                    ...current,
-                    removals: current.removals + quantity
-                });
+            switch (activity.type) {
+                case 'stock_added':
+                case 'purchase_created':
+                case 'product_added':
+                    movementMap.set(activityDate, {
+                        ...current,
+                        additions: current.additions + quantity
+                    });
+                    break;
+                case 'stock_removed':
+                case 'sale_created':
+                    movementMap.set(activityDate, {
+                        ...current,
+                        removals: current.removals + quantity
+                    });
+                    break;
+                case 'stock_updated':
+                    // Handle stock updates by comparing old and new quantities
+                    const oldQty = Number(activity.details?.old_quantity) || 0;
+                    const newQty = Number(activity.details?.new_quantity) || 0;
+                    const diff = newQty - oldQty;
+                    if (diff > 0) {
+                        movementMap.set(activityDate, {
+                            ...current,
+                            additions: current.additions + Math.abs(diff)
+                        });
+                    } else if (diff < 0) {
+                        movementMap.set(activityDate, {
+                            ...current,
+                            removals: current.removals + Math.abs(diff)
+                        });
+                    }
+                    break;
             }
         });
 
@@ -524,13 +552,22 @@ const AdvancedAnalytics = () => {
         if (!Array.isArray(categories) || !Array.isArray(products)) return [];
 
         return categories.map(category => {
-            const categoryProducts = products.filter(p => 
-                typeof p.category === 'number' && p.category === category.id
-            );
+            // Handle both number and object category references
+            const categoryProducts = products.filter(p => {
+                if (typeof p.category === 'number') {
+                    return p.category === category.id;
+                } else if (typeof p.category === 'object' && p.category !== null) {
+                    return p.category.id === category.id;
+                } else if (typeof p.category_id === 'number') {
+                    return p.category_id === category.id;
+                }
+                return false;
+            });
 
             const totalQuantity = categoryProducts.reduce((sum, p) => sum + (Number(p.quantity) || 0), 0);
             const lowStockCount = categoryProducts.filter(p => 
-                (Number(p.quantity) || 0) <= (Number(p.min_stock_level) || 0)
+                (Number(p.quantity) || 0) <= (Number(p.min_stock_level) || 0) && 
+                (Number(p.quantity) || 0) > 0
             ).length;
             const outOfStockCount = categoryProducts.filter(p => 
                 (Number(p.quantity) || 0) === 0
