@@ -210,9 +210,15 @@ const InventoryList: React.FC<InventoryListProps> = ({
               </TableHead>
               <TableHead 
                 className="cursor-pointer hover:bg-gray-100 text-right"
+                onClick={() => handleSort('buy_price')}
+              >
+                Buy Price {sortField === 'buy_price' && (sortDirection === 'asc' ? '↑' : '↓')}
+              </TableHead>
+              <TableHead 
+                className="cursor-pointer hover:bg-gray-100 text-right"
                 onClick={() => handleSort('sell_price')}
               >
-                Price {sortField === 'sell_price' && (sortDirection === 'asc' ? '↑' : '↓')}
+                Sell Price {sortField === 'sell_price' && (sortDirection === 'asc' ? '↑' : '↓')}
               </TableHead>
               <TableHead>Status</TableHead>
               {canEdit && <TableHead className="text-right">Actions</TableHead>}
@@ -221,13 +227,13 @@ const InventoryList: React.FC<InventoryListProps> = ({
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-4">
+                <TableCell colSpan={8} className="text-center py-4">
                   Loading...
                 </TableCell>
               </TableRow>
             ) : filteredProducts.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-4">
+                <TableCell colSpan={8} className="text-center py-4">
                   No products found
                 </TableCell>
               </TableRow>
@@ -241,8 +247,9 @@ const InventoryList: React.FC<InventoryListProps> = ({
                     <TableCell className="font-medium">{product.name}</TableCell>
                     <TableCell>{product.sku}</TableCell>
                     <TableCell>{category?.name || 'Uncategorized'}</TableCell>
-                    <TableCell>{product.quantity}</TableCell>
-                    <TableCell>KSH {product.sell_price.toFixed(2)}</TableCell>
+                    <TableCell className="text-right">{product.quantity}</TableCell>
+                    <TableCell className="text-right">KSH {product.buy_price.toFixed(2)}</TableCell>
+                    <TableCell className="text-right">KSH {product.sell_price.toFixed(2)}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
                         {getStockIcon(product.quantity, product.min_stock_level)}
@@ -251,26 +258,28 @@ const InventoryList: React.FC<InventoryListProps> = ({
                         </Badge>
                       </div>
                     </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => onEdit(product)}
-                          className="text-blue-600 hover:text-blue-700"
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleDelete(product.id)}
-                          className="text-red-600 hover:text-red-700"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
+                    {canEdit && (
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => onEdit(product)}
+                            className="text-blue-600 hover:text-blue-700"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDelete(product.id)}
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    )}
                   </TableRow>
                 );
               })

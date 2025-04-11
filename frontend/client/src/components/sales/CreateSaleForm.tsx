@@ -164,17 +164,17 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
             const finalAmount = calculateTotal();
             
             const saleData = {
-                totalAmount: finalAmount.toString(),
-                originalAmount: subtotal.toString(),
+                total_amount: finalAmount.toString(),
+                original_amount: subtotal.toString(),
                 discount: discountAmount.toString(),
-                discountPercentage: discountPercent.toString(),
-                customerName: customerName.trim(),
-                paymentMethod: paymentMethod,
-                items: selectedItems.map(item => ({
-                    id: item.productId,
+                discount_percentage: discountPercent.toString(),
+                customer_name: customerName.trim(),
+                payment_method: paymentMethod,
+                sale_items: selectedItems.map(item => ({
+                    product_id: item.productId,
                     quantity: item.quantity,
-                    unitPrice: item.unitPrice.toString(),
-                    totalPrice: (item.quantity * item.unitPrice).toString()
+                    unit_price: item.unitPrice.toString(),
+                    total_price: (item.quantity * item.unitPrice).toString()
                 }))
             };
 
