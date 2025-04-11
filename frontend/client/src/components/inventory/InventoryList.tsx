@@ -43,15 +43,38 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '../../lib/queryClient';
 import { useAuth } from '../../lib/auth';
 import { Skeleton } from '../ui/skeleton';
+import {
+  TableContainer,
+  TextField,
+  InputAdornment,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Box,
+  Typography,
+  CircularProgress,
+  Alert,
+} from '@mui/material';
+import { Search as SearchIcon } from '@mui/icons-material';
 
 interface InventoryListProps {
   products: Product[];
   categories: Category[];
-  onEdit?: (product: Product) => void;
-  isLoading?: boolean;
+  selectedCategory: string | null;
+  onCategoryChange: (categoryId: string | null) => void;
+  searchQuery: string;
+  onSearch: (query: string) => void;
 }
 
-const InventoryList = ({ products, categories, onEdit, isLoading }: InventoryListProps) => {
+const InventoryList: React.FC<InventoryListProps> = ({
+  products,
+  categories,
+  selectedCategory,
+  onCategoryChange,
+  searchQuery,
+  onSearch,
+}) => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
@@ -64,16 +87,45 @@ const InventoryList = ({ products, categories, onEdit, isLoading }: InventoryLis
   
   const itemsPerPage = 10;
   
-  // Filter products
-  const filteredProducts = products.filter(product => {
-    const matchesSearch = searchTerm === '' || 
-      product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.sku.toLowerCase().includes(searchTerm.toLowerCase());
-      
-    const matchesCategory = categoryFilter === null || product.category?.id === categoryFilter;
-    
-    return matchesSearch && matchesCategory;
-  });
+  const [sortField, setSortField] = useState<keyof Product>('name');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  
+  if (!products || !categories) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
+        <Alert severity="warning">No data available</Alert>
+      </Box>
+    );
+  }
+
+  const handleSort = (field: keyof Product) => {
+    if (field === sortField) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  const filteredProducts = products
+    .filter(product => {
+      const matchesCategory = !selectedCategory || product.category_id === selectedCategory;
+      const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          product.sku.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesCategory && matchesSearch;
+    })
+    .sort((a, b) => {
+      const aValue = a[sortField];
+      const bValue = b[sortField];
+      if (typeof aValue === 'string' && typeof bValue === 'string') {
+        return sortDirection === 'asc' 
+          ? aValue.localeCompare(bValue)
+          : bValue.localeCompare(aValue);
+      }
+      return sortDirection === 'asc' 
+        ? (aValue as number) - (bValue as number)
+        : (bValue as number) - (aValue as number);
+    });
   
   // Paginate products
   const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
@@ -134,100 +186,73 @@ const InventoryList = ({ products, categories, onEdit, isLoading }: InventoryLis
           <div className="flex justify-between items-center flex-wrap gap-4">
             <h2 className="text-xl font-semibold">Inventory Items</h2>
             <div className="flex space-x-2">
-              <Input
+              <TextField
+                fullWidth
+                variant="outlined"
                 placeholder="Search products..."
-                value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setPage(1); // Reset to first page when searching
+                value={searchQuery}
+                onChange={(e) => onSearch(e.target.value)}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon />
+                    </InputAdornment>
+                  ),
                 }}
-                className="w-full max-w-xs"
               />
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline">
-                    {categoryFilter !== null 
-                      ? `Category: ${getCategoryName(categories.find(c => c.id === categoryFilter))}` 
-                      : 'All Categories'}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                  <DropdownMenuItem onClick={() => setCategoryFilter(null)}>
-                    All Categories
-                  </DropdownMenuItem>
+              <FormControl sx={{ minWidth: 200 }}>
+                <InputLabel>Category</InputLabel>
+                <Select
+                  value={selectedCategory || ''}
+                  onChange={(e) => onCategoryChange(e.target.value || null)}
+                  label="Category"
+                >
+                  <MenuItem value="">All Categories</MenuItem>
                   {categories.map(category => (
-                    <DropdownMenuItem 
-                      key={category.id} 
-                      onClick={() => setCategoryFilter(category.id)}
-                    >
+                    <MenuItem key={category.id} value={category.id}>
                       {category.name}
-                    </DropdownMenuItem>
+                    </MenuItem>
                   ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                </Select>
+              </FormControl>
             </div>
           </div>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Product</TableHead>
-                <TableHead>SKU</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Quantity</TableHead>
-                <TableHead>Buy Price</TableHead>
-                <TableHead>Sell Price</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {paginatedProducts.map(product => (
-                <TableRow key={product.id}>
-                  <TableCell className="font-medium">{product.name}</TableCell>
-                  <TableCell>{product.sku}</TableCell>
-                  <TableCell>{getCategoryName(product.category)}</TableCell>
-                  <TableCell>{product.quantity}</TableCell>
-                  <TableCell>KSh {product.buy_price}</TableCell>
-                  <TableCell>KSh {product.sell_price}</TableCell>
-                  <TableCell>
-                    {product.quantity <= 0 ? (
-                      <Badge variant="destructive">Out of Stock</Badge>
-                    ) : product.quantity <= product.min_stock_level ? (
-                      <Badge variant="outline" className="bg-amber-100 text-amber-800">Low Stock</Badge>
-                    ) : (
-                      <Badge variant="outline" className="bg-green-100 text-green-800">In Stock</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      {canEdit && onEdit && (
-                        <Button variant="ghost" size="sm" onClick={() => onEdit(product)}>
-                          <i className="fas fa-edit text-blue-500"></i>
-                        </Button>
-                      )}
-                      {product.quantity <= product.min_stock_level && (
-                        <Button variant="ghost" size="sm" onClick={() => onEdit(product)}>
-                          <i className="fas fa-restock text-amber-500"></i>
-                        </Button>
-                      )}
-                      <Button variant="ghost" size="sm" onClick={() => handleDelete(product)}>
-                        <i className="fas fa-trash text-red-500"></i>
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {paginatedProducts.length === 0 && (
+          <TableContainer component={Paper}>
+            <Table>
+              <TableHead>
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center py-8 text-gray-500">
-                    No products found. Try a different search or add a new product.
+                  <TableCell onClick={() => handleSort('name')} style={{ cursor: 'pointer' }}>
+                    Name {sortField === 'name' && (sortDirection === 'asc' ? '↑' : '↓')}
                   </TableCell>
+                  <TableCell onClick={() => handleSort('sku')} style={{ cursor: 'pointer' }}>
+                    SKU {sortField === 'sku' && (sortDirection === 'asc' ? '↑' : '↓')}
+                  </TableCell>
+                  <TableCell onClick={() => handleSort('quantity')} style={{ cursor: 'pointer' }}>
+                    Quantity {sortField === 'quantity' && (sortDirection === 'asc' ? '↑' : '↓')}
+                  </TableCell>
+                  <TableCell onClick={() => handleSort('sell_price')} style={{ cursor: 'pointer' }}>
+                    Price {sortField === 'sell_price' && (sortDirection === 'asc' ? '↑' : '↓')}
+                  </TableCell>
+                  <TableCell>Category</TableCell>
                 </TableRow>
-              )}
-            </TableBody>
-          </Table>
+              </TableHead>
+              <TableBody>
+                {paginatedProducts.map((product) => (
+                  <TableRow key={product.id}>
+                    <TableCell>{product.name}</TableCell>
+                    <TableCell>{product.sku}</TableCell>
+                    <TableCell>{product.quantity}</TableCell>
+                    <TableCell>${product.sell_price.toFixed(2)}</TableCell>
+                    <TableCell>
+                      {categories.find(c => c.id === product.category_id)?.name || 'Uncategorized'}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
         </CardContent>
         <CardFooter className="flex items-center justify-between">
           <div className="text-sm text-gray-500">

@@ -1,98 +1,95 @@
-// @ts-ignore
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Button } from '../components/ui/button';
+import { useAuth } from '../contexts/AuthContext';
+import { fetchProducts, fetchCategories } from '../services/api';
 import InventoryList from '../components/inventory/InventoryList';
-import AddProductForm from '../components/inventory/AddProductForm';
-import RestockRulesManager from '../components/inventory/RestockRulesManager';
-import { Product, Category } from '../types';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { useAuth } from '../lib/auth';
+import { Product } from '../types';
+import { Button, Container, Typography, Box, CircularProgress, Alert } from '@mui/material';
+import { useNavigate } from 'react-router-dom';
 
-const InventoryPage = () => {
-  const [activeTab, setActiveTab] = useState<string>('list');
-  const [editProduct, setEditProduct] = useState<Product | null>(null);
+const InventoryPage: React.FC = () => {
   const { user } = useAuth();
-  const canEdit = user?.role === 'admin' || user?.role === 'manager';
+  const navigate = useNavigate();
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
-  // Fetch products
-  const { data: products = [], isLoading: isProductsLoading } = useQuery<Product[]>({
-    queryKey: ['/api/products/'],
+  const { data: products, isLoading: isLoadingProducts, error: productsError } = useQuery<Product[]>({
+    queryKey: ['products'],
+    queryFn: fetchProducts,
+    enabled: !!user,
   });
 
-  // Fetch categories
-  const { data: categories = [], isLoading: isCategoriesLoading } = useQuery<Category[]>({
-    queryKey: ['/api/categories/'],
-  });
-  
-  // Fetch low stock products
-  const { data: lowStockProducts = [], isLoading: isLowStockLoading } = useQuery<Product[]>({
-    queryKey: ['products/low-stock/'],
+  const { data: categories, isLoading: isLoadingCategories, error: categoriesError } = useQuery({
+    queryKey: ['categories'],
+    queryFn: fetchCategories,
+    enabled: !!user,
   });
 
-  const isLoading = isProductsLoading || isCategoriesLoading || isLowStockLoading;
-
-  // Handle edit product
-  const handleEditProduct = (product: Product) => {
-    setEditProduct(product);
-    setActiveTab('add');
+  const handleAddProduct = () => {
+    navigate('/inventory/add');
   };
 
-  // Handle cancel
-  const handleCancel = () => {
-    setEditProduct(null);
-    setActiveTab('list');
+  const handleCategoryChange = (categoryId: string | null) => {
+    setSelectedCategory(categoryId);
   };
+
+  const handleSearch = (query: string) => {
+    setSearchQuery(query);
+  };
+
+  if (isLoadingProducts || isLoadingCategories) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (productsError || categoriesError) {
+    return (
+      <Container>
+        <Alert severity="error">
+          {productsError ? 'Error loading products' : 'Error loading categories'}
+        </Alert>
+      </Container>
+    );
+  }
+
+  if (!products || !categories) {
+    return (
+      <Container>
+        <Alert severity="warning">No data available</Alert>
+      </Container>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-semibold text-gray-800">Inventory Management</h1>
-        {canEdit && (
-          <Button
-            onClick={() => setActiveTab('add')}
-            className="bg-blue-500 hover:bg-blue-600 text-white"
-          >
-            Add Product
-          </Button>
-        )}
-      </div>
-
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
-          <TabsTrigger value="list">Products</TabsTrigger>
-          {canEdit && (
-            <>
-              <TabsTrigger value="add">Add/Edit Product</TabsTrigger>
-              <TabsTrigger value="restock">Restock Rules</TabsTrigger>
-            </>
+    <Container>
+      <Box sx={{ my: 4 }}>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
+          <Typography variant="h4" component="h1">
+            Inventory Management
+          </Typography>
+          {user?.role === 'admin' && (
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={handleAddProduct}
+            >
+              Add Product
+            </Button>
           )}
-        </TabsList>
-
-        <TabsContent value="list">
-          <InventoryList
-            products={products}
-            onEdit={canEdit ? handleEditProduct : undefined}
-            isLoading={isLoading}
-          />
-        </TabsContent>
-
-        {canEdit && (
-          <>
-            <TabsContent value="add">
-              <AddProductForm
-                categories={categories}
-                editProduct={editProduct}
-                onCancel={handleCancel}
-              />
-            </TabsContent>
-            <TabsContent value="restock">
-              <RestockRulesManager />
-            </TabsContent>
-          </>
-        )}
-      </Tabs>
-    </div>
+        </Box>
+        <InventoryList
+          products={products}
+          categories={categories}
+          selectedCategory={selectedCategory}
+          onCategoryChange={handleCategoryChange}
+          searchQuery={searchQuery}
+          onSearch={handleSearch}
+        />
+      </Box>
+    </Container>
   );
 };
 

@@ -446,6 +446,38 @@ class SaleViewSet(viewsets.ModelViewSet):
         
         # Add user_id to the request data
         request.data['user_id'] = user_id
+        
+        # Validate sale items
+        sale_items = request.data.get('sale_items', [])
+        if not sale_items:
+            return Response(
+                {"detail": "Sale items are required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check product quantities
+        for item in sale_items:
+            product_id = item.get('product_id')
+            quantity = item.get('quantity')
+            if not product_id or not quantity:
+                return Response(
+                    {"detail": "Product ID and quantity are required for each item"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            try:
+                product = Product.objects.get(id=product_id)
+                if product.quantity < quantity:
+                    return Response(
+                        {"detail": f"Insufficient quantity for product {product.name}"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            except Product.DoesNotExist:
+                return Response(
+                    {"detail": f"Product with ID {product_id} not found"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        
         return super().create(request, *args, **kwargs)
 
     def retrieve(self, request, *args, **kwargs):
