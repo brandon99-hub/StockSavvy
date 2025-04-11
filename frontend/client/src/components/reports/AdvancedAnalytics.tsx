@@ -118,6 +118,29 @@ interface DashboardStats {
     averageOrderValue: number;
 }
 
+// API Response Types
+interface ApiSaleItem {
+    product: number;
+    product_name: string;
+    quantity: number;
+    unit_price: number;
+}
+
+interface ApiSale {
+    id: number;
+    created_at: string;
+    amount: number;
+    items: ApiSaleItem[];
+}
+
+interface ApiResponse {
+    items: ApiSale[];
+    summary: {
+        total_sales: number;
+        total_items: number;
+    };
+}
+
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658', '#8dd1e1'];
 
 // Time period options for the dashboard
@@ -178,9 +201,16 @@ const AdvancedAnalytics = () => {
         queryFn: () => apiRequest('/api/dashboard/stats/')
     });
 
-    const { data: salesChartData = [], isLoading: isSalesDataLoading } = useQuery({
+    const salesQuery = useQuery<ApiResponse>({
         queryKey: ['/api/dashboard/sales-chart/'],
-        queryFn: () => apiRequest('/api/dashboard/sales-chart/')
+        queryFn: async () => {
+            const response = await apiRequest('/api/dashboard/sales-chart/');
+            if (!response?.items || !Array.isArray(response.items)) {
+                console.error('Invalid sales data format:', response);
+                return { items: [], summary: { total_sales: 0, total_items: 0 } };
+            }
+            return response;
+        }
     });
 
     const { data: categoryChartData = [], isLoading: isCategoryDataLoading } = useQuery({
@@ -219,7 +249,7 @@ const AdvancedAnalytics = () => {
         isSalesLoading ||
         isActivitiesLoading ||
         isStatsLoading ||
-        isSalesDataLoading ||
+        salesQuery.isLoading ||
         isCategoryDataLoading ||
         isLowStockLoading;
 
@@ -319,13 +349,12 @@ const AdvancedAnalytics = () => {
 
     // Transform data for analytics with safety checks
     const salesData = useMemo(() => {
-        if (!salesChartData || !Array.isArray(salesChartData)) return [];
-        return salesChartData.map(item => ({
-            date: format(new Date(item.date || new Date()), 'yyyy-MM-dd'),
-            amount: Number(item.amount || 0),
-            count: Number(item.count || 0)
+        if (!salesQuery.data?.items) return [];
+        return salesQuery.data.items.map(item => ({
+            date: format(new Date(item.created_at), 'yyyy-MM-dd'),
+            amount: item.amount
         }));
-    }, [salesChartData]);
+    }, [salesQuery.data]);
 
     const categoryData = useMemo(() => {
         if (!categoryChartData || !Array.isArray(categoryChartData)) return [];
@@ -339,18 +368,35 @@ const AdvancedAnalytics = () => {
 
     // Create profit data with safety checks
     const profitData = useMemo(() => {
-        if (!stats || typeof stats !== 'object') return [];
+        if (!salesQuery.data?.items) return [];
         
-        const today = new Date();
-        const data = {
-            date: format(today, 'yyyy-MM-dd'),
-            revenue: Number(stats.totalRevenue || 0),
-            cost: Number(stats.totalCost || 0),
-            profit: Number(stats.profit || 0)
-        };
+        // Group sales by date and calculate totals
+        const dailyTotals = new Map();
         
-        return [data];
-    }, [stats]);
+        salesQuery.data.items.forEach(sale => {
+            const date = format(new Date(sale.created_at), 'yyyy-MM-dd');
+            const existing = dailyTotals.get(date) || { revenue: 0, cost: 0, profit: 0 };
+            
+            const revenue = sale.amount;
+            const cost = revenue * 0.7; // Assuming 30% profit margin
+            const profit = revenue - cost;
+            
+            dailyTotals.set(date, {
+                revenue: existing.revenue + revenue,
+                cost: existing.cost + cost,
+                profit: existing.profit + profit
+            });
+        });
+        
+        return Array.from(dailyTotals.entries())
+            .map(([date, data]) => ({
+                date,
+                revenue: data.revenue,
+                cost: data.cost,
+                profit: data.profit
+            }))
+            .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    }, [salesQuery.data]);
 
     // Calculate metrics with safety checks
     const metrics = useMemo(() => {
@@ -375,10 +421,10 @@ const AdvancedAnalytics = () => {
 
     // Calculate year-over-year comparison data
     const yearOverYearData = useMemo((): ComparisonData[] => {
-        if (!Array.isArray(sales)) return [];
+        if (!salesQuery.data?.items) return [];
         
         // Get current period data
-        const currentPeriodSales = sales.filter(sale => {
+        const currentPeriodSales = salesQuery.data.items.filter(sale => {
             const saleDate = new Date(sale.created_at);
             return saleDate >= dateRange.start && saleDate <= dateRange.end;
         });
@@ -388,14 +434,14 @@ const AdvancedAnalytics = () => {
         const previousEnd = subYears(dateRange.end, 1);
 
         // Filter sales for previous period
-        const previousPeriodSales = sales.filter(sale => {
+        const previousPeriodSales = salesQuery.data.items.filter(sale => {
             const saleDate = new Date(sale.created_at);
             return saleDate >= previousStart && saleDate <= previousEnd;
         });
 
         // Calculate metrics for comparison
-        const calculateMetrics = (salesData: Sale[]) => {
-            const totalRevenue = salesData.reduce((sum, sale) => sum + Number(sale.total_amount || '0'), 0);
+        const calculateMetrics = (salesData: SalesChartData[]) => {
+            const totalRevenue = salesData.reduce((sum, sale) => sum + Number(sale.amount || 0), 0);
             const totalItems = salesData.length;
             const avgOrderValue = totalItems > 0 ? totalRevenue / totalItems : 0;
 
@@ -436,7 +482,7 @@ const AdvancedAnalytics = () => {
                     : 0
             }
         ];
-    }, [sales, dateRange]);
+    }, [salesQuery.data, dateRange]);
 
     // Calculate stock movement data with safety checks
     const stockMovementData = useMemo(() => {
@@ -484,61 +530,45 @@ const AdvancedAnalytics = () => {
 
     // Calculate top products with safety checks
     const topProducts = useMemo(() => {
-        if (!Array.isArray(products) || !Array.isArray(sales)) return [];
+        if (!salesQuery.data?.items) return [];
         
-        const productSalesMap = new Map<number, {
-            sales: number,
-            revenue: number,
-            profit: number
-        }>();
-
-        // Process sales data
-        sales.forEach(sale => {
-            if (!sale || !Array.isArray(sale.items)) return;
+        const productSales = new Map();
+        
+        salesQuery.data.items.forEach(sale => {
+            if (!Array.isArray(sale.items)) return;
             
             sale.items.forEach(item => {
-                if (!item || !item.product_id) return;
-                
-                const product = productsById.get(item.product_id);
-                if (!product) return;
-
-                const quantity = Number(item.quantity || 0);
-                const itemPrice = Number(item.unit_price || product.sell_price || 0);
-                const revenue = itemPrice * quantity;
-                const cost = Number(product.buy_price || 0) * quantity;
-                const profit = revenue - cost;
-
-                const existing = productSalesMap.get(item.product_id) || {
+                const existing = productSales.get(item.product) || {
+                    name: item.product_name,
                     sales: 0,
                     revenue: 0,
                     profit: 0
                 };
-
-                productSalesMap.set(item.product_id, {
-                    sales: existing.sales + quantity,
-                    revenue: existing.revenue + revenue,
-                    profit: existing.profit + profit
+                
+                const itemRevenue = item.quantity * item.unit_price;
+                const itemCost = itemRevenue * 0.7; // Assuming 30% profit margin
+                const itemProfit = itemRevenue - itemCost;
+                
+                productSales.set(item.product, {
+                    name: item.product_name,
+                    sales: existing.sales + item.quantity,
+                    revenue: existing.revenue + itemRevenue,
+                    profit: existing.profit + itemProfit
                 });
             });
         });
-
-        return Array.from(productSalesMap.entries())
-            .map(([productId, data]) => {
-                const product = productsById.get(productId);
-                if (!product) return null;
-                
-                return {
-                    id: productId,
-                    name: product.name || 'Unknown Product',
-                    sales: data.sales,
-                    revenue: data.revenue,
-                    profit: data.profit
-                };
-            })
-            .filter((item): item is NonNullable<typeof item> => item !== null)
-            .sort((a, b) => b.sales - a.sales)
-            .slice(0, 5);
-    }, [sales, productsById, products]);
+        
+        return Array.from(productSales.entries())
+            .map(([id, data]) => ({
+                id,
+                name: data.name,
+                sales: data.sales,
+                revenue: data.revenue,
+                profit: data.profit
+            }))
+            .sort((a, b) => b.profit - a.profit)
+            .slice(0, 10);
+    }, [salesQuery.data]);
 
     return (
         <div className="space-y-6">
