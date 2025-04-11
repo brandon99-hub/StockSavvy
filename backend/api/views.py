@@ -666,8 +666,6 @@ class SaleViewSet(viewsets.ModelViewSet):
                     'original_amount': request.data.get('original_amount'),
                     'discount': request.data.get('discount', 0),
                     'discount_percentage': request.data.get('discount_percentage', 0),
-                    'customer_name': request.data.get('customer_name'),
-                    'payment_method': request.data.get('payment_method'),
                     'user_id': user_id
                 }
                 
@@ -676,16 +674,14 @@ class SaleViewSet(viewsets.ModelViewSet):
                     cursor.execute("""
                         INSERT INTO sales (
                             sale_date, total_amount, original_amount, discount,
-                            discount_percentage, customer_name, payment_method, user_id
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+                            discount_percentage, user_id
+                        ) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
                     """, [
                         sale_data['sale_date'],
                         sale_data['total_amount'],
                         sale_data['original_amount'],
                         sale_data['discount'],
                         sale_data['discount_percentage'],
-                        sale_data['customer_name'],
-                        sale_data['payment_method'],
                         sale_data['user_id']
                     ])
                     sale_id = cursor.fetchone()[0]

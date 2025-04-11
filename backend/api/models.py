@@ -128,8 +128,6 @@ class Sale(models.Model):
     discount = models.DecimalField(max_digits=10, decimal_places=2)
     discount_percentage = models.DecimalField(max_digits=10, decimal_places=2)
     original_amount = models.DecimalField(max_digits=10, decimal_places=2)
-    customer_name = models.TextField(blank=True, null=True)
-    payment_method = models.TextField(blank=True, null=True)
 
     class Meta:
         managed = False
@@ -138,8 +136,8 @@ class Sale(models.Model):
 class Activity(models.Model):
     type = models.TextField()
     description = models.TextField()
-    product = models.ForeignKey(Product, models.DO_NOTHING, blank=True, null=True)
-    user = models.ForeignKey(User, models.DO_NOTHING)
+    product = models.ForeignKey(Product, models.DO_NOTHING, blank=True, null=True, db_constraint=False)
+    user = models.ForeignKey(User, models.DO_NOTHING, db_constraint=False)
     created_at = models.DateTimeField()
     status = models.TextField()
 
