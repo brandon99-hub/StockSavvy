@@ -129,8 +129,8 @@ interface ApiSaleItem {
 interface ApiSale {
     id: number;
     created_at: string;
-    date?: string;
-    amount: number;
+    date: string;
+    amount: string | number;
     items: ApiSaleItem[];
 }
 
@@ -352,35 +352,19 @@ const AdvancedAnalytics = () => {
     const salesData = useMemo(() => {
         if (!salesQuery.data?.items) {
             console.log('No sales data available');
-            return [];
+            return [] as SalesChartData[];
         }
         
-        // Log the raw data structure for debugging
-        console.log('Raw sales data structure:', {
-            totalItems: salesQuery.data.items.length,
-            firstItem: salesQuery.data.items[0],
-            dataKeys: Object.keys(salesQuery.data.items[0] || {})
-        });
+        const salesArray = salesQuery.data.items;
+        if (!Array.isArray(salesArray)) {
+            console.error('Sales data structure:', salesQuery.data);
+            return [] as SalesChartData[];
+        }
         
-        return salesQuery.data.items.map(item => {
-            // Ensure we have a valid date string
-            const dateStr = item.created_at || item.date || new Date().toISOString();
-            const formattedDate = format(new Date(dateStr), 'yyyy-MM-dd');
-            const amount = Number(item.amount || 0);
-            
-            // Log individual item transformation
-            console.log('Processing sale item:', {
-                originalDate: dateStr,
-                formattedDate,
-                amount,
-                rawAmount: item.amount
-            });
-            
-            return {
-                date: formattedDate,
-                amount
-            };
-        });
+        return salesArray.map(item => ({
+            date: format(new Date(item.date || item.created_at), 'yyyy-MM-dd'),
+            amount: parseFloat(String(item.amount || '0'))
+        })).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()) as SalesChartData[];
     }, [salesQuery.data]);
 
     const categoryData = useMemo(() => {
@@ -400,61 +384,24 @@ const AdvancedAnalytics = () => {
             return [];
         }
         
-        // Log the raw data structure for debugging
-        console.log('Raw sales data for profit calculation:', {
-            totalItems: salesQuery.data.items.length,
-            sampleItem: salesQuery.data.items[0]
-        });
+        const salesArray = salesQuery.data.items;
+        if (!Array.isArray(salesArray)) {
+            console.error('Sales data structure:', salesQuery.data);
+            return [];
+        }
         
-        // Group sales by date and calculate totals
-        const dailyTotals = new Map();
-        
-        salesQuery.data.items.forEach(sale => {
-            // Ensure we have a valid date string
-            const dateStr = sale.created_at || sale.date || new Date().toISOString();
-            const date = format(new Date(dateStr), 'yyyy-MM-dd');
-            const existing = dailyTotals.get(date) || { revenue: 0, cost: 0, profit: 0 };
-            
-            const revenue = Number(sale.amount || 0);
+        return salesArray.map(item => {
+            const revenue = parseFloat(String(item.amount || '0'));
             const cost = revenue * 0.7; // Assuming 30% profit margin
             const profit = revenue - cost;
             
-            // Log individual sale processing
-            console.log('Processing sale for profit:', {
-                date,
+            return {
+                date: format(new Date(item.date || item.created_at), 'yyyy-MM-dd'),
                 revenue,
                 cost,
-                profit,
-                rawAmount: sale.amount
-            });
-            
-            dailyTotals.set(date, {
-                revenue: existing.revenue + revenue,
-                cost: existing.cost + cost,
-                profit: existing.profit + profit
-            });
-        });
-        
-        const result = Array.from(dailyTotals.entries())
-            .map(([date, data]) => ({
-                date,
-                revenue: data.revenue,
-                cost: data.cost,
-                profit: data.profit
-            }))
-            .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-            
-        // Log the final profit data
-        console.log('Processed profit data:', {
-            totalDays: result.length,
-            sampleDay: result[0],
-            dateRange: result.length > 0 ? {
-                start: result[0].date,
-                end: result[result.length - 1].date
-            } : null
-        });
-        
-        return result;
+                profit
+            };
+        }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     }, [salesQuery.data]);
 
     // Calculate metrics with safety checks
