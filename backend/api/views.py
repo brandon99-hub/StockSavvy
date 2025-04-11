@@ -1248,48 +1248,48 @@ class ReportViewSet(viewsets.ViewSet):
 
         try:
             with connection.cursor() as cursor:
-                # Get current month stats
+                # Get current month stats with proper revenue calculation
                 cursor.execute("""
+                    WITH monthly_stats AS (
+                        SELECT 
+                            COALESCE(SUM(s.total_amount), 0) as total_revenue,
+                            COUNT(DISTINCT s.id) as order_count,
+                            CASE 
+                                WHEN COUNT(DISTINCT s.id) > 0 
+                                THEN COALESCE(SUM(s.total_amount), 0) / COUNT(DISTINCT s.id)
+                                ELSE 0 
+                            END as avg_order_value
+                        FROM sales s
+                        WHERE s.created_at >= DATE_TRUNC('month', CURRENT_DATE)
+                    ),
+                    product_stats AS (
+                        SELECT 
+                            COUNT(*) as total_products,
+                            COUNT(CASE WHEN quantity <= min_stock_level THEN 1 END) as low_stock_products
+                        FROM products
+                    )
                     SELECT 
-                        COALESCE((SELECT COUNT(*) FROM products), 0) as total_products,
-                        COALESCE((SELECT COUNT(*) FROM products WHERE quantity <= min_stock_level), 0) as low_stock_products,
-                        COALESCE((SELECT SUM(total_amount) FROM sales WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)), 0) as total_sales,
-                        COALESCE((SELECT COUNT(*) FROM sales WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)), 0) as total_orders
+                        ms.total_revenue,
+                        ms.order_count,
+                        ms.avg_order_value,
+                        ps.total_products,
+                        ps.low_stock_products
+                    FROM monthly_stats ms
+                    CROSS JOIN product_stats ps
                 """)
-                current_stats = cursor.fetchone()
-
-                # Get last month stats for comparison
-                cursor.execute("""
-                    SELECT 
-                        COALESCE((SELECT COUNT(*) FROM products WHERE created_at < DATE_TRUNC('month', CURRENT_DATE)), 0) as last_month_products,
-                        COALESCE((SELECT COUNT(*) FROM products WHERE quantity <= min_stock_level AND created_at < DATE_TRUNC('month', CURRENT_DATE)), 0) as last_month_low_stock,
-                        COALESCE((SELECT SUM(total_amount) FROM sales WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') AND created_at < DATE_TRUNC('month', CURRENT_DATE)), 0) as last_month_sales,
-                        COALESCE((SELECT COUNT(*) FROM sales WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') AND created_at < DATE_TRUNC('month', CURRENT_DATE)), 0) as last_month_orders
-                """)
-                last_month_stats = cursor.fetchone()
-
-                if current_stats and last_month_stats:
-                    total_products, low_stock_products, total_sales, total_orders = current_stats
-                    last_month_products, last_month_low_stock, last_month_sales, last_month_orders = last_month_stats
-
-                    # Calculate percentage changes
-                    products_change = ((total_products - last_month_products) / last_month_products * 100) if last_month_products > 0 else 0
-                    low_stock_change = ((low_stock_products - last_month_low_stock) / last_month_low_stock * 100) if last_month_low_stock > 0 else 0
-                    sales_change = ((total_sales - last_month_sales) / last_month_sales * 100) if last_month_sales > 0 else 0
-                    orders_change = ((total_orders - last_month_orders) / last_month_orders * 100) if last_month_orders > 0 else 0
-
+                
+                result = cursor.fetchone()
+                if result:
+                    total_revenue, order_count, avg_order_value, total_products, low_stock_products = result
+                    
                     return Response({
+                        'totalRevenue': str(total_revenue),
+                        'totalOrders': order_count,
+                        'averageOrderValue': str(avg_order_value),
                         'totalProducts': total_products,
-                        'lowStockCount': low_stock_products,
-                        'totalSales': float(total_sales),
-                        'pendingOrders': total_orders,
-                        'compareLastMonth': {
-                            'products': round(products_change, 1),
-                            'lowStock': round(low_stock_change, 1),
-                            'sales': round(sales_change, 1),
-                            'orders': round(orders_change, 1)
-                        }
+                        'lowStockCount': low_stock_products
                     })
+
         except Exception as e:
             print(f"Error in stats: {str(e)}")
             return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1348,4 +1348,57 @@ class ReportViewSet(viewsets.ViewSet):
                 return Response(results)
         except Exception as e:
             print(f"Error in category_chart: {str(e)}")
+            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'])
+    def stock_movement(self, request):
+        is_authenticated, _, is_admin = self.check_token_auth(request)
+        if not is_authenticated:
+            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+        if not is_admin:
+            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    WITH RECURSIVE dates AS (
+                        SELECT DATE_TRUNC('day', NOW() - INTERVAL '30 days')::date AS date
+                        UNION ALL
+                        SELECT (date + INTERVAL '1 day')::date
+                        FROM dates
+                        WHERE date < CURRENT_DATE
+                    ),
+                    stock_changes AS (
+                        SELECT 
+                            DATE_TRUNC('day', a.created_at)::date as date,
+                            SUM(CASE 
+                                WHEN a.type = 'restock' THEN 1
+                                WHEN a.type = 'sale' THEN -1
+                                ELSE 0
+                            END) as movement
+                        FROM activities a
+                        WHERE a.type IN ('restock', 'sale')
+                        AND a.created_at >= NOW() - INTERVAL '30 days'
+                        GROUP BY DATE_TRUNC('day', a.created_at)::date
+                    )
+                    SELECT 
+                        d.date,
+                        COALESCE(sc.movement, 0) as movement
+                    FROM dates d
+                    LEFT JOIN stock_changes sc ON d.date = sc.date
+                    ORDER BY d.date ASC
+                """)
+                
+                results = [
+                    {
+                        'date': row[0].isoformat(),
+                        'movement': row[1]
+                    }
+                    for row in cursor.fetchall()
+                ]
+
+                return Response(results)
+
+        except Exception as e:
+            print(f"Error in stock_movement: {str(e)}")
             return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
