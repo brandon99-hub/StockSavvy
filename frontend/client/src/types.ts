@@ -7,6 +7,10 @@ export interface Activity {
         quantity?: number;
         old_quantity?: number;
         new_quantity?: number;
+        items?: Array<{
+            quantity: number;
+            product_id: number;
+        }>;
     };
     product?: number;
     user?: number;

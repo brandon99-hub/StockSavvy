@@ -473,7 +473,6 @@ const AdvancedAnalytics = () => {
         const stockActivities = activities.filter(activity => {
             if (!activity?.created_at) return false;
             const activityDate = new Date(activity.created_at);
-            // Include all relevant stock-affecting activities
             return (activityDate >= dateRange.start && 
                     activityDate <= dateRange.end && 
                     (activity.type === 'stock_added' || 
@@ -481,59 +480,93 @@ const AdvancedAnalytics = () => {
                      activity.type === 'product_added' ||
                      activity.type === 'sale_created' ||
                      activity.type === 'purchase_created' ||
-                     activity.type === 'stock_updated'));
+                     activity.type === 'stock_updated' ||
+                     activity.type === 'inventory_adjustment'));
         });
 
         // Create a map for each day in the range
-        const movementMap = new Map<string, { additions: number, removals: number }>();
+        const movementMap = new Map<string, { 
+            additions: number, 
+            removals: number, 
+            cumulativeNet: number 
+        }>();
+
+        let runningTotal = 0; // Keep track of cumulative stock changes
 
         // Initialize with zeros for all dates in range
         const daysInRange = differenceInDays(dateRange.end, dateRange.start) + 1;
         for (let i = 0; i < daysInRange; i++) {
             const date = format(addDays(dateRange.start, i), 'yyyy-MM-dd');
-            movementMap.set(date, { additions: 0, removals: 0 });
+            movementMap.set(date, { 
+                additions: 0, 
+                removals: 0, 
+                cumulativeNet: 0 
+            });
         }
 
+        // Sort activities by date
+        const sortedActivities = [...stockActivities].sort((a, b) => 
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        );
+
         // Process activities
-        stockActivities.forEach(activity => {
+        sortedActivities.forEach(activity => {
             const activityDate = format(new Date(activity.created_at), 'yyyy-MM-dd');
-            const current = movementMap.get(activityDate) || { additions: 0, removals: 0 };
-            const quantity = Number(activity.quantity) || Number(activity.details?.quantity) || 1;
+            const current = movementMap.get(activityDate) || { 
+                additions: 0, 
+                removals: 0, 
+                cumulativeNet: runningTotal 
+            };
+
+            let quantity = 0;
+            
+            // Get quantity from various possible sources
+            if (activity.quantity) {
+                quantity = Number(activity.quantity);
+            } else if (activity.details?.quantity) {
+                quantity = Number(activity.details.quantity);
+            } else if (activity.type === 'sale_created' && activity.details?.items) {
+                quantity = activity.details.items.reduce((sum: number, item: any) => 
+                    sum + (Number(item.quantity) || 0), 0);
+            } else {
+                quantity = 1; // Default quantity
+            }
+
+            let additions = current.additions;
+            let removals = current.removals;
 
             switch (activity.type) {
                 case 'stock_added':
                 case 'purchase_created':
                 case 'product_added':
-                    movementMap.set(activityDate, {
-                        ...current,
-                        additions: current.additions + quantity
-                    });
+                    additions += quantity;
+                    runningTotal += quantity;
                     break;
                 case 'stock_removed':
                 case 'sale_created':
-                    movementMap.set(activityDate, {
-                        ...current,
-                        removals: current.removals + quantity
-                    });
+                    removals += quantity;
+                    runningTotal -= quantity;
                     break;
                 case 'stock_updated':
-                    // Handle stock updates by comparing old and new quantities
+                case 'inventory_adjustment':
                     const oldQty = Number(activity.details?.old_quantity) || 0;
                     const newQty = Number(activity.details?.new_quantity) || 0;
                     const diff = newQty - oldQty;
                     if (diff > 0) {
-                        movementMap.set(activityDate, {
-                            ...current,
-                            additions: current.additions + Math.abs(diff)
-                        });
+                        additions += Math.abs(diff);
+                        runningTotal += Math.abs(diff);
                     } else if (diff < 0) {
-                        movementMap.set(activityDate, {
-                            ...current,
-                            removals: current.removals + Math.abs(diff)
-                        });
+                        removals += Math.abs(diff);
+                        runningTotal -= Math.abs(diff);
                     }
                     break;
             }
+
+            movementMap.set(activityDate, {
+                additions,
+                removals,
+                cumulativeNet: runningTotal
+            });
         });
 
         // Convert map to array and sort by date
@@ -542,10 +575,52 @@ const AdvancedAnalytics = () => {
                 date: format(new Date(date), 'MMM dd'),
                 additions: data.additions,
                 removals: data.removals,
-                net: data.additions - data.removals
+                net: data.additions - data.removals,
+                cumulativeNet: data.cumulativeNet
             }))
             .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     }, [activities, dateRange]);
+
+    // Update the Stock Movement chart JSX
+    const renderStockMovementChart = () => (
+        <ResponsiveContainer width="100%" height="100%">
+            <LineChart
+                data={stockMovementData}
+                margin={{top: 5, right: 30, left: 20, bottom: 5}}
+            >
+                <CartesianGrid strokeDasharray="3 3"/>
+                <XAxis dataKey="date"/>
+                <YAxis/>
+                <RechartsTooltip content={<CustomTooltip/>}/>
+                <Legend/>
+                <Line
+                    type="monotone"
+                    dataKey="additions"
+                    name="Stock Added"
+                    stroke="#4ade80"
+                    strokeWidth={2}
+                    dot={{ r: 4 }}
+                    activeDot={{r: 8}}
+                />
+                <Line
+                    type="monotone"
+                    dataKey="removals"
+                    name="Stock Removed"
+                    stroke="#f87171"
+                    strokeWidth={2}
+                    dot={{ r: 4 }}
+                />
+                <Line
+                    type="monotone"
+                    dataKey="cumulativeNet"
+                    name="Running Total"
+                    stroke="#60a5fa"
+                    strokeWidth={2}
+                    dot={{ r: 4 }}
+                />
+            </LineChart>
+        </ResponsiveContainer>
+    );
 
     // Calculate inventory status data
     const inventoryStatusData = useMemo(() => {
@@ -930,42 +1005,11 @@ const AdvancedAnalytics = () => {
                                     <CardHeader>
                                         <CardTitle>Stock Movement</CardTitle>
                                         <CardDescription>
-                                            Stock additions and removals over time
+                                            Stock additions, removals, and running total over time
                                         </CardDescription>
                                     </CardHeader>
                                     <CardContent className="h-80">
-                                        <ResponsiveContainer width="100%" height="100%">
-                                            <LineChart
-                                                data={stockMovementData}
-                                                margin={{top: 5, right: 30, left: 20, bottom: 5}}
-                                            >
-                                                <CartesianGrid strokeDasharray="3 3"/>
-                                                <XAxis dataKey="date"/>
-                                                <YAxis/>
-                                                <RechartsTooltip content={<CustomTooltip/>}/>
-                                                <Legend/>
-                                                <Line
-                                                    type="monotone"
-                                                    dataKey="additions"
-                                                    name="Stock Added"
-                                                    stroke="#4ade80"
-                                                    activeDot={{r: 8}}
-                                                />
-                                                <Line
-                                                    type="monotone"
-                                                    dataKey="removals"
-                                                    name="Stock Removed"
-                                                    stroke="#f87171"
-                                                />
-                                                <Line
-                                                    type="monotone"
-                                                    dataKey="net"
-                                                    name="Net Change"
-                                                    stroke="#60a5fa"
-                                                    strokeDasharray="5 5"
-                                                />
-                                            </LineChart>
-                                        </ResponsiveContainer>
+                                        {renderStockMovementChart()}
                                     </CardContent>
                                 </Card>
 
