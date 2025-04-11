@@ -19,6 +19,7 @@ from django.utils import timezone
 import decimal
 from django.views.generic import TemplateView
 from django.conf import settings
+from django.db import models
 
 User = get_user_model()
 
@@ -300,15 +301,9 @@ class ProductViewSet(viewsets.ModelViewSet):
             )
         
         try:
-            threshold = int(request.query_params.get('threshold', 10))
-            low_stock_products = self.queryset.filter(quantity__lte=threshold)
+            low_stock_products = self.queryset.filter(quantity__lte=models.F('min_stock_level'))
             serializer = self.get_serializer(low_stock_products, many=True)
             return Response(serializer.data)
-        except ValueError:
-            return Response(
-                {"detail": "Invalid threshold value"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
         except Exception as e:
             return Response(
                 {"detail": str(e)},

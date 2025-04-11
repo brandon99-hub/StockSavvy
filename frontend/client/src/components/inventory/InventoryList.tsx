@@ -122,8 +122,10 @@ const InventoryList: React.FC<InventoryListProps> = ({
   const filteredProducts = products
     .filter(product => {
       const matchesCategory = !selectedCategory || product.category_id === selectedCategory;
-      const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          product.sku.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesSearch = !searchQuery || (
+        (product.name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+        (product.sku?.toLowerCase() || '').includes(searchQuery.toLowerCase())
+      );
       return matchesCategory && matchesSearch;
     })
     .sort((a, b) => {

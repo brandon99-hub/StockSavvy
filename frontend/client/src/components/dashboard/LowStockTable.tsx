@@ -18,7 +18,7 @@ import { Skeleton } from "../ui/skeleton";
 interface LowStockTableProps {
   products: Product[];
   onReorder: () => void;
-  categories: Array<{ id: number; name: string }>; // Add categories prop
+  categories: Array<{ id: number; name: string }>;
 }
 
 const LowStockTable = ({ products, onReorder, categories }: LowStockTableProps) => {
@@ -59,6 +59,7 @@ const LowStockTable = ({ products, onReorder, categories }: LowStockTableProps) 
     }
   };
 
+  // Filter low stock products
   const lowStockProducts = products.filter(
     (product) => product.quantity <= product.min_stock_level
   );
