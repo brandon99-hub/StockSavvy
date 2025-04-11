@@ -467,21 +467,21 @@ class ProductViewSet(viewsets.ModelViewSet):
             product_name = instance.name
             
             # Delete the product
-            response = super().destroy(request, *args, **kwargs)
+            self.perform_destroy(instance)
             
-            if response.status_code == 204:  # If product was deleted successfully
-                # Create activity log
-                Activity.objects.create(
-                    type='product_deleted',
-                    description=f'Product deleted: {product_name}',
-                    user_id=user_id,
-                    created_at=timezone.now(),
-                    status='completed'
-                )
+            # Create activity log
+            Activity.objects.create(
+                type='product_deleted',
+                description=f'Product deleted: {product_name}',
+                user_id=user_id,
+                created_at=timezone.now(),
+                status='completed'
+            )
             
-            return response
+            return Response({"message": "Product deleted successfully"}, status=status.HTTP_200_OK)
             
         except Exception as e:
+            print(f"Error deleting product: {str(e)}")
             return Response(
                 {"detail": f"Error deleting product: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
