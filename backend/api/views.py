@@ -189,10 +189,39 @@ class UserViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
             
         try:
+            # Get the user before deletion
             instance = self.get_object()
-            self.perform_destroy(instance)
+            username = instance.username
+            user_id = instance.id
+            
+            # Check for existing activities
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT COUNT(*) FROM activities WHERE user_id = %s", [user_id])
+                activity_count = cursor.fetchone()[0]
+                
+                if activity_count > 0:
+                    return Response(
+                        {"detail": "Cannot delete user with existing activities. Please delete related activities first."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            
+            # Delete the user
+            with connection.cursor() as cursor:
+                cursor.execute("DELETE FROM users WHERE id = %s", [user_id])
+            
+            # Create activity log
+            Activity.objects.create(
+                type='user_deleted',
+                description=f'User deleted: {username}',
+                user_id=user_id,
+                created_at=timezone.now(),
+                status='completed'
+            )
+            
             return Response({"message": "User deleted successfully"}, status=status.HTTP_200_OK)
+            
         except Exception as e:
+            print(f"Error deleting user: {str(e)}")
             return Response(
                 {"detail": f"Error deleting user: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -265,10 +294,39 @@ class CategoryViewSet(viewsets.ModelViewSet):
             )
             
         try:
+            # Get the category before deletion
             instance = self.get_object()
-            self.perform_destroy(instance)
+            category_name = instance.name
+            category_id = instance.id
+            
+            # Check for existing products
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT COUNT(*) FROM products WHERE category_id = %s", [category_id])
+                product_count = cursor.fetchone()[0]
+                
+                if product_count > 0:
+                    return Response(
+                        {"detail": "Cannot delete category with existing products. Please delete related products first."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            
+            # Delete the category
+            with connection.cursor() as cursor:
+                cursor.execute("DELETE FROM categories WHERE id = %s", [category_id])
+            
+            # Create activity log
+            Activity.objects.create(
+                type='category_deleted',
+                description=f'Category deleted: {category_name}',
+                user_id=user_id,
+                created_at=timezone.now(),
+                status='completed'
+            )
+            
             return Response({"message": "Category deleted successfully"}, status=status.HTTP_200_OK)
+            
         except Exception as e:
+            print(f"Error deleting category: {str(e)}")
             return Response(
                 {"detail": f"Error deleting category: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -465,9 +523,22 @@ class ProductViewSet(viewsets.ModelViewSet):
             # Get the product before deletion
             instance = self.get_object()
             product_name = instance.name
+            product_id = instance.id
+            
+            # Check for existing sale items
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT COUNT(*) FROM sale_items WHERE product_id = %s", [product_id])
+                sale_items_count = cursor.fetchone()[0]
+                
+                if sale_items_count > 0:
+                    return Response(
+                        {"detail": "Cannot delete product with existing sales. Please delete related sales first."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
             
             # Delete the product
-            self.perform_destroy(instance)
+            with connection.cursor() as cursor:
+                cursor.execute("DELETE FROM products WHERE id = %s", [product_id])
             
             # Create activity log
             Activity.objects.create(
@@ -592,7 +663,31 @@ class SaleViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_404_NOT_FOUND
                 )
         
-        return super().create(request, *args, **kwargs)
+        try:
+            # Create the sale
+            response = super().create(request, *args, **kwargs)
+            
+            if response.status_code == 201:  # If sale was created successfully
+                # Get the created sale data
+                sale_data = response.data
+                
+                # Create activity log
+                Activity.objects.create(
+                    type='sale',
+                    description=f'Sale created: {sale_data["total_amount"]}',
+                    user_id=user_id,
+                    created_at=timezone.now(),
+                    status='completed'
+                )
+            
+            return response
+            
+        except Exception as e:
+            print(f"Error creating sale: {str(e)}")
+            return Response(
+                {"detail": f"Error creating sale: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     def retrieve(self, request, *args, **kwargs):
         is_authenticated, user_id, is_authorized = self.check_token_auth(request)
