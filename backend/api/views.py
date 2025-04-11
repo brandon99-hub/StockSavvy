@@ -20,6 +20,7 @@ import decimal
 from django.views.generic import TemplateView
 from django.conf import settings
 from django.db import models
+from django.db import transaction
 
 User = get_user_model()
 
@@ -189,41 +190,50 @@ class UserViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
             
         try:
-            # Get the user before deletion
+            # Get the product before deletion
             instance = self.get_object()
-            username = instance.username
-            user_id = instance.id
+            product_name = instance.name
+            product_id = instance.id
             
-            # Check for existing activities
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT COUNT(*) FROM activities WHERE user_id = %s", [user_id])
-                activity_count = cursor.fetchone()[0]
+            # Start a transaction
+            with transaction.atomic():
+                # Check for existing sale items
+                with connection.cursor() as cursor:
+                    cursor.execute("""
+                        SELECT COUNT(*) 
+                        FROM sale_items 
+                        WHERE product_id = %s
+                    """, [product_id])
+                    sale_items_count = cursor.fetchone()[0]
+                    
+                    if sale_items_count > 0:
+                        return Response(
+                            {"detail": "Cannot delete product with existing sales. Please delete related sales first."},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
                 
-                if activity_count > 0:
-                    return Response(
-                        {"detail": "Cannot delete user with existing activities. Please delete related activities first."},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
+                # Delete the product
+                with connection.cursor() as cursor:
+                    cursor.execute("""
+                        DELETE FROM products 
+                        WHERE id = %s
+                    """, [product_id])
+                
+                # Create activity log
+                Activity.objects.create(
+                    type='product_deleted',
+                    description=f'Product deleted: {product_name}',
+                    user_id=user_id,
+                    created_at=timezone.now(),
+                    status='completed'
+                )
             
-            # Delete the user
-            with connection.cursor() as cursor:
-                cursor.execute("DELETE FROM users WHERE id = %s", [user_id])
-            
-            # Create activity log
-            Activity.objects.create(
-                type='user_deleted',
-                description=f'User deleted: {username}',
-                user_id=user_id,
-                created_at=timezone.now(),
-                status='completed'
-            )
-            
-            return Response({"message": "User deleted successfully"}, status=status.HTTP_200_OK)
+            return Response({"message": "Product deleted successfully"}, status=status.HTTP_200_OK)
             
         except Exception as e:
-            print(f"Error deleting user: {str(e)}")
+            print(f"Error deleting product: {str(e)}")
             return Response(
-                {"detail": f"Error deleting user: {str(e)}"},
+                {"detail": f"Error deleting product: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -525,29 +535,38 @@ class ProductViewSet(viewsets.ModelViewSet):
             product_name = instance.name
             product_id = instance.id
             
-            # Check for existing sale items
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT COUNT(*) FROM sale_items WHERE product_id = %s", [product_id])
-                sale_items_count = cursor.fetchone()[0]
+            # Start a transaction
+            with transaction.atomic():
+                # Check for existing sale items
+                with connection.cursor() as cursor:
+                    cursor.execute("""
+                        SELECT COUNT(*) 
+                        FROM sale_items 
+                        WHERE product_id = %s
+                    """, [product_id])
+                    sale_items_count = cursor.fetchone()[0]
+                    
+                    if sale_items_count > 0:
+                        return Response(
+                            {"detail": "Cannot delete product with existing sales. Please delete related sales first."},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
                 
-                if sale_items_count > 0:
-                    return Response(
-                        {"detail": "Cannot delete product with existing sales. Please delete related sales first."},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-            
-            # Delete the product
-            with connection.cursor() as cursor:
-                cursor.execute("DELETE FROM products WHERE id = %s", [product_id])
-            
-            # Create activity log
-            Activity.objects.create(
-                type='product_deleted',
-                description=f'Product deleted: {product_name}',
-                user_id=user_id,
-                created_at=timezone.now(),
-                status='completed'
-            )
+                # Delete the product
+                with connection.cursor() as cursor:
+                    cursor.execute("""
+                        DELETE FROM products 
+                        WHERE id = %s
+                    """, [product_id])
+                
+                # Create activity log
+                Activity.objects.create(
+                    type='product_deleted',
+                    description=f'Product deleted: {product_name}',
+                    user_id=user_id,
+                    created_at=timezone.now(),
+                    status='completed'
+                )
             
             return Response({"message": "Product deleted successfully"}, status=status.HTTP_200_OK)
             
@@ -629,47 +648,76 @@ class SaleViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        # Add user_id to the request data
-        request.data['user_id'] = user_id
-        
-        # Validate sale items
-        sale_items = request.data.get('sale_items', [])
-        if not sale_items:
-            return Response(
-                {"detail": "Sale items are required"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Check product quantities
-        for item in sale_items:
-            product_id = item.get('product_id')
-            quantity = item.get('quantity')
-            if not product_id or not quantity:
+        try:
+            # Validate sale items
+            sale_items = request.data.get('sale_items', [])
+            if not sale_items:
                 return Response(
-                    {"detail": "Product ID and quantity are required for each item"},
+                    {"detail": "Sale items are required"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            try:
-                product = Product.objects.get(id=product_id)
-                if product.quantity < quantity:
-                    return Response(
-                        {"detail": f"Insufficient quantity for product {product.name}"},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-            except Product.DoesNotExist:
-                return Response(
-                    {"detail": f"Product with ID {product_id} not found"},
-                    status=status.HTTP_404_NOT_FOUND
-                )
-        
-        try:
-            # Create the sale
-            response = super().create(request, *args, **kwargs)
-            
-            if response.status_code == 201:  # If sale was created successfully
-                # Get the created sale data
-                sale_data = response.data
+            # Start a transaction
+            with transaction.atomic():
+                # Create the sale
+                sale_data = {
+                    'sale_date': request.data.get('sale_date', timezone.now()),
+                    'total_amount': request.data.get('total_amount'),
+                    'original_amount': request.data.get('original_amount'),
+                    'discount': request.data.get('discount', 0),
+                    'discount_percentage': request.data.get('discount_percentage', 0),
+                    'customer_name': request.data.get('customer_name'),
+                    'payment_method': request.data.get('payment_method'),
+                    'user_id': user_id
+                }
+                
+                # Insert sale
+                with connection.cursor() as cursor:
+                    cursor.execute("""
+                        INSERT INTO sales (
+                            sale_date, total_amount, original_amount, discount,
+                            discount_percentage, customer_name, payment_method, user_id
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+                    """, [
+                        sale_data['sale_date'],
+                        sale_data['total_amount'],
+                        sale_data['original_amount'],
+                        sale_data['discount'],
+                        sale_data['discount_percentage'],
+                        sale_data['customer_name'],
+                        sale_data['payment_method'],
+                        sale_data['user_id']
+                    ])
+                    sale_id = cursor.fetchone()[0]
+                
+                # Create sale items and update product quantities
+                for item in sale_items:
+                    product_id = item.get('product_id')
+                    quantity = item.get('quantity')
+                    unit_price = item.get('unit_price')
+                    total_price = item.get('total_price')
+                    
+                    if not all([product_id, quantity, unit_price, total_price]):
+                        raise ValueError("Missing required fields in sale item")
+                    
+                    # Insert sale item
+                    with connection.cursor() as cursor:
+                        cursor.execute("""
+                            INSERT INTO sale_items (
+                                sale_id, product_id, quantity, unit_price, total_price
+                            ) VALUES (%s, %s, %s, %s, %s)
+                        """, [sale_id, product_id, quantity, unit_price, total_price])
+                        
+                        # Update product quantity
+                        cursor.execute("""
+                            UPDATE products 
+                            SET quantity = quantity - %s 
+                            WHERE id = %s AND quantity >= %s
+                            RETURNING id
+                        """, [quantity, product_id, quantity])
+                        
+                        if not cursor.fetchone():
+                            raise ValueError(f"Insufficient quantity for product {product_id}")
                 
                 # Create activity log
                 Activity.objects.create(
@@ -679,9 +727,14 @@ class SaleViewSet(viewsets.ModelViewSet):
                     created_at=timezone.now(),
                     status='completed'
                 )
-            
-            return response
-            
+                
+                return Response({"message": "Sale created successfully", "sale_id": sale_id}, status=status.HTTP_201_CREATED)
+                
+        except ValueError as e:
+            return Response(
+                {"detail": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         except Exception as e:
             print(f"Error creating sale: {str(e)}")
             return Response(
