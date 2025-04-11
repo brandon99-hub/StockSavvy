@@ -197,7 +197,11 @@ class UserViewSet(viewsets.ModelViewSet):
             
             # Start a transaction
             with transaction.atomic():
-                # Check for existing sale items
+                # First, delete related activities
+                with connection.cursor() as cursor:
+                    cursor.execute("DELETE FROM activities WHERE product_id = %s", [product_id])
+                
+                # Then check for existing sale items
                 with connection.cursor() as cursor:
                     cursor.execute("""
                         SELECT COUNT(*) 
@@ -212,14 +216,11 @@ class UserViewSet(viewsets.ModelViewSet):
                             status=status.HTTP_400_BAD_REQUEST
                         )
                 
-                # Delete the product
+                # Finally delete the product
                 with connection.cursor() as cursor:
-                    cursor.execute("""
-                        DELETE FROM products 
-                        WHERE id = %s
-                    """, [product_id])
+                    cursor.execute("DELETE FROM products WHERE id = %s", [product_id])
                 
-                # Create activity log
+                # Create final deletion activity log
                 Activity.objects.create(
                     type='product_deleted',
                     description=f'Product deleted: {product_name}',
@@ -537,7 +538,11 @@ class ProductViewSet(viewsets.ModelViewSet):
             
             # Start a transaction
             with transaction.atomic():
-                # Check for existing sale items
+                # First, delete related activities
+                with connection.cursor() as cursor:
+                    cursor.execute("DELETE FROM activities WHERE product_id = %s", [product_id])
+                
+                # Then check for existing sale items
                 with connection.cursor() as cursor:
                     cursor.execute("""
                         SELECT COUNT(*) 
@@ -552,14 +557,11 @@ class ProductViewSet(viewsets.ModelViewSet):
                             status=status.HTTP_400_BAD_REQUEST
                         )
                 
-                # Delete the product
+                # Finally delete the product
                 with connection.cursor() as cursor:
-                    cursor.execute("""
-                        DELETE FROM products 
-                        WHERE id = %s
-                    """, [product_id])
+                    cursor.execute("DELETE FROM products WHERE id = %s", [product_id])
                 
-                # Create activity log
+                # Create final deletion activity log
                 Activity.objects.create(
                     type='product_deleted',
                     description=f'Product deleted: {product_name}',
@@ -633,7 +635,53 @@ class SaleViewSet(viewsets.ModelViewSet):
                 {"detail": "Permission denied"},
                 status=status.HTTP_403_FORBIDDEN
             )
-        return super().list(request, *args, **kwargs)
+        
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    SELECT 
+                        s.id,
+                        s.sale_date,
+                        s.total_amount,
+                        s.original_amount,
+                        s.discount,
+                        s.discount_percentage,
+                        u.username as sold_by,
+                        COUNT(si.id) as items_count
+                    FROM sales s
+                    LEFT JOIN users u ON s.user_id = u.id
+                    LEFT JOIN sale_items si ON s.id = si.sale_id
+                    GROUP BY 
+                        s.id, 
+                        s.sale_date, 
+                        s.total_amount,
+                        s.original_amount,
+                        s.discount,
+                        s.discount_percentage,
+                        u.username
+                    ORDER BY s.sale_date DESC
+                """)
+                columns = [col[0] for col in cursor.description]
+                sales = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+                # Format decimal values and dates
+                for sale in sales:
+                    if 'sale_date' in sale and sale['sale_date']:
+                        sale['sale_date'] = sale['sale_date'].isoformat()
+                    for key in ['total_amount', 'original_amount', 'discount', 'discount_percentage']:
+                        if key in sale and sale[key] is not None:
+                            sale[key] = str(sale[key])
+                    # Set default username if none
+                    if not sale['sold_by']:
+                        sale['sold_by'] = 'Unknown'
+
+                return Response(sales)
+        except Exception as e:
+            print(f"Error in sale list: {str(e)}")
+            return Response(
+                {"detail": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     def create(self, request, *args, **kwargs):
         is_authenticated, user_id, is_authorized = self.check_token_auth(request)
@@ -886,45 +934,51 @@ class SaleItemViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
 
         try:
+            # Get sale_id from query params if provided
+            sale_id = request.query_params.get('sale_id')
+            
             with connection.cursor() as cursor:
-                cursor.execute("""
-                    WITH sale_details AS (
-                        SELECT 
-                            si.id,
-                            si.sale_id,
-                            si.product_id,
-                            si.quantity,
-                            si.unit_price,
-                            si.total_price,
-                            p.name as product_name,
-                            p.sku as product_sku,
-                            c.name as category_name,
-                            s.created_at as sale_date,
-                            s.total_amount as sale_total,
-                            u.username as sold_by
-                        FROM sale_items si
-                        JOIN products p ON si.product_id = p.id
-                        LEFT JOIN categories c ON p.category_id = c.id
-                        JOIN sales s ON si.sale_id = s.id
-                        LEFT JOIN users u ON s.user_id = u.id
-                    )
+                base_query = """
                     SELECT 
-                        *,
-                        COUNT(*) OVER() as total_count,
-                        SUM(total_price) OVER() as total_value
-                    FROM sale_details
-                    ORDER BY sale_date DESC
-                """)
+                        si.id,
+                        si.sale_id,
+                        si.product_id,
+                        si.quantity,
+                        si.unit_price,
+                        si.total_price,
+                        p.name as product_name,
+                        p.sku as product_sku,
+                        c.name as category_name,
+                        s.created_at as sale_date,
+                        s.total_amount as sale_total,
+                        u.username as sold_by
+                    FROM sale_items si
+                    JOIN products p ON si.product_id = p.id
+                    LEFT JOIN categories c ON p.category_id = c.id
+                    JOIN sales s ON si.sale_id = s.id
+                    LEFT JOIN users u ON s.user_id = u.id
+                """
+                
+                if sale_id:
+                    # If sale_id provided, filter by that sale
+                    cursor.execute(base_query + " WHERE si.sale_id = %s ORDER BY si.id", [sale_id])
+                else:
+                    # Otherwise, get all sale items
+                    cursor.execute(base_query + " ORDER BY s.created_at DESC")
+                
                 columns = [col[0] for col in cursor.description]
                 results = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
                 # Format decimal values and dates
                 for row in results:
-                    for key, value in row.items():
-                        if isinstance(value, (datetime.date, datetime.datetime)):
-                            row[key] = value.isoformat()
-                        elif isinstance(value, decimal.Decimal):
-                            row[key] = str(value)
+                    if 'sale_date' in row and row['sale_date']:
+                        row['sale_date'] = row['sale_date'].isoformat()
+                    for key in ['unit_price', 'total_price', 'sale_total']:
+                        if key in row and row[key] is not None:
+                            row[key] = str(row[key])
+                    # Set default username if none
+                    if not row['sold_by']:
+                        row['sold_by'] = 'Unknown'
 
                 if not results:
                     return Response({
@@ -935,12 +989,15 @@ class SaleItemViewSet(viewsets.ModelViewSet):
                         }
                     })
 
+                # Calculate summary
+                total_items = len(results)
+                total_value = sum(float(row['total_price']) for row in results)
+
                 return Response({
-                    'items': [{k: v for k, v in row.items() if k not in ['total_count', 'total_value']}
-                              for row in results],
+                    'items': results,
                     'summary': {
-                        'totalItems': results[0]['total_count'],
-                        'totalValue': str(results[0]['total_value'])
+                        'totalItems': total_items,
+                        'totalValue': str(total_value)
                     }
                 })
 
