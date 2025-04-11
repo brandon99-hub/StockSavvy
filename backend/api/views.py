@@ -814,41 +814,43 @@ class RestockRuleViewSet(viewsets.ModelViewSet):
                             row = cursor.fetchone()
                             if row:
                                 is_staff, is_superuser, role = row
-                                return True, user_id, is_staff or is_superuser or role in ['admin', 'manager']
+                                # Allow access if user is staff, superuser, admin, or manager
+                                is_authorized = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager'])
+                                return True, user_id, is_authorized
                 except (IndexError, ValueError) as e:
                     print(f"Token validation error: {str(e)}")
                     pass
         return False, None, False
 
     def list(self, request, *args, **kwargs):
-        is_authenticated, _, is_admin = self.check_token_auth(request)
+        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
         if not is_authenticated:
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin:
+        if not is_authorized:
             return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
         return super().list(request, *args, **kwargs)
 
     def create(self, request, *args, **kwargs):
-        is_authenticated, _, is_admin = self.check_token_auth(request)
+        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
         if not is_authenticated:
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin:
+        if not is_authorized:
             return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
         return super().create(request, *args, **kwargs)
 
     def update(self, request, *args, **kwargs):
-        is_authenticated, _, is_admin = self.check_token_auth(request)
+        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
         if not is_authenticated:
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin:
+        if not is_authorized:
             return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
         return super().update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
-        is_authenticated, _, is_admin = self.check_token_auth(request)
+        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
         if not is_authenticated:
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin:
+        if not is_authorized:
             return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
         return super().destroy(request, *args, **kwargs)
 

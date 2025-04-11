@@ -66,6 +66,7 @@ interface InventoryListProps {
   searchQuery: string;
   onSearch: (query: string) => void;
   isLoading?: boolean;
+  onEdit: (product: Product) => void;
 }
 
 const InventoryList: React.FC<InventoryListProps> = ({
@@ -76,6 +77,7 @@ const InventoryList: React.FC<InventoryListProps> = ({
   searchQuery,
   onSearch,
   isLoading = false,
+  onEdit,
 }) => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -143,35 +145,41 @@ const InventoryList: React.FC<InventoryListProps> = ({
   const paginatedProducts = filteredProducts.slice(startIndex, startIndex + itemsPerPage);
   
   // Delete product mutation
-  const handleDelete = async (product: Product) => {
-    try {
-      await apiRequest(`/products/${product.id}/`, { method: "DELETE" });
-      
-      // Invalidate queries
-      queryClient.invalidateQueries({ queryKey: ['/products'] });
-      queryClient.invalidateQueries({ queryKey: ['/products/low-stock'] });
-      queryClient.invalidateQueries({ queryKey: ['/dashboard/stats'] });
-      queryClient.invalidateQueries({ queryKey: ['/dashboard/category-chart'] });
+  const deleteMutation = useMutation({
+    mutationFn: async (productId: number) => {
+      return await apiRequest('DELETE', `/api/products/${productId}`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/products'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/products/low-stock'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/dashboard/stats'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/dashboard/category-chart'] });
       
       toast({
-        title: 'Success',
-        description: 'Product deleted successfully',
+        title: 'Product deleted',
+        description: 'The product has been successfully deleted.',
       });
       
       setShowDeleteDialog(false);
       setProductToDelete(null);
-    } catch (error) {
+    },
+    onError: (_error) => {
       toast({
         title: 'Error',
-        description: 'Failed to delete product',
+        description: 'Failed to delete the product. Please try again.',
         variant: 'destructive',
       });
     }
+  });
+  
+  const handleDelete = (product: Product) => {
+    setProductToDelete(product);
+    setShowDeleteDialog(true);
   };
   
   const confirmDelete = () => {
     if (productToDelete) {
-      handleDelete(productToDelete);
+      deleteMutation.mutate(productToDelete.id);
     }
   };
   
@@ -277,18 +285,17 @@ const InventoryList: React.FC<InventoryListProps> = ({
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete Product</DialogTitle>
+            <DialogTitle>Confirm Deletion</DialogTitle>
           </DialogHeader>
-          <p>Are you sure you want to delete {productToDelete?.name}? This action cannot be undone.</p>
+          <p className="py-4">
+            Are you sure you want to delete <strong>{productToDelete?.name}</strong>? This action cannot be undone.
+          </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
               Cancel
             </Button>
-            <Button 
-              variant="destructive" 
-              onClick={confirmDelete}
-            >
-              Delete
+            <Button variant="destructive" onClick={confirmDelete} disabled={deleteMutation.isPending}>
+              {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
             </Button>
           </DialogFooter>
         </DialogContent>
