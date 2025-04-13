@@ -1543,7 +1543,6 @@ class ReportViewSet(viewsets.ViewSet):
 
         try:
             with connection.cursor() as cursor:
-                # Get sales data
                 cursor.execute("""
                     SELECT 
                         DATE_TRUNC('day', s.created_at)::date as date,
@@ -1559,35 +1558,6 @@ class ReportViewSet(viewsets.ViewSet):
                 columns = [col[0] for col in cursor.description]
                 results = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
-                # Get top performing product
-                cursor.execute("""
-                    SELECT 
-                        p.id,
-                        p.name,
-                        c.name as category,
-                        COUNT(si.id) as units_sold,
-                        COALESCE(SUM(si.total_price), 0) as revenue
-                    FROM products p
-                    JOIN sale_items si ON p.id = si.product_id
-                    JOIN sales s ON si.sale_id = s.id
-                    LEFT JOIN categories c ON p.category_id = c.id
-                    WHERE s.created_at >= NOW() - INTERVAL '30 days'
-                    GROUP BY p.id, p.name, c.name
-                    ORDER BY revenue DESC
-                    LIMIT 1
-                """)
-                top_product = None
-                if cursor.rowcount > 0:
-                    columns = [col[0] for col in cursor.description]
-                    top_product_data = dict(zip(columns, cursor.fetchone()))
-                    top_product = {
-                        'id': top_product_data['id'],
-                        'name': top_product_data['name'],
-                        'category': top_product_data['category'] or 'Uncategorized',
-                        'unitsSold': top_product_data['units_sold'],
-                        'revenue': str(top_product_data['revenue'])
-                    }
-
                 # Format dates and decimal values
                 for row in results:
                     if 'date' in row and row['date'] is not None:
@@ -1600,8 +1570,7 @@ class ReportViewSet(viewsets.ViewSet):
                     'summary': {
                         'totalItems': sum(row['transaction_count'] for row in results),
                         'totalValue': str(sum(float(row['amount']) for row in results))
-                    },
-                    'topProduct': top_product
+                    }
                 })
         except Exception as e:
             print(f"Error in sales_chart: {str(e)}")
