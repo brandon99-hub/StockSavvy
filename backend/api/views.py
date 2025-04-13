@@ -393,10 +393,44 @@ class ProductViewSet(viewsets.ModelViewSet):
             )
         
         try:
-            low_stock_products = self.queryset.filter(quantity__lte=models.F('min_stock_level'))
-            serializer = self.get_serializer(low_stock_products, many=True)
-            return Response(serializer.data)
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    SELECT 
+                        p.id,
+                        p.name,
+                        p.sku,
+                        p.quantity,
+                        p.min_stock_level,
+                        p.sell_price::float as sell_price,
+                        c.name as category_name,
+                        CASE 
+                            WHEN p.quantity = 0 THEN 'Out of Stock'
+                            WHEN p.quantity <= p.min_stock_level THEN 'Low Stock'
+                            ELSE 'In Stock'
+                        END as status
+                    FROM products p
+                    LEFT JOIN categories c ON p.category_id = c.id
+                    WHERE p.quantity <= p.min_stock_level
+                    ORDER BY 
+                        CASE 
+                            WHEN p.quantity = 0 THEN 1
+                            WHEN p.quantity <= p.min_stock_level THEN 2
+                            ELSE 3
+                        END,
+                        p.quantity ASC,
+                        p.name ASC
+                """)
+                columns = [col[0] for col in cursor.description]
+                low_stock_items = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+                # Format the response
+                for item in low_stock_items:
+                    if 'sell_price' in item and item['sell_price'] is not None:
+                        item['sell_price'] = str(item['sell_price'])
+
+                return Response(low_stock_items)
         except Exception as e:
+            print(f"Error in low stock: {str(e)}")
             return Response(
                 {"detail": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -1632,28 +1666,66 @@ class ReportViewSet(viewsets.ViewSet):
 
         try:
             with connection.cursor() as cursor:
-                # Get current month stats
+                # Get current month stats with proper low stock counting
                 cursor.execute("""
                     SELECT 
                         COALESCE((SELECT COUNT(*) FROM products), 0) as total_products,
-                        COALESCE((SELECT COUNT(*) FROM products WHERE quantity <= min_stock_level), 0) as low_stock_products,
-                        COALESCE((SELECT SUM(total_amount) FROM sales WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)), 0) as total_sales,
-                        COALESCE((SELECT COUNT(*) FROM sales WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)), 0) as total_orders
+                        COALESCE((
+                            SELECT COUNT(*) 
+                            FROM products 
+                            WHERE quantity <= min_stock_level 
+                            AND quantity > 0
+                        ), 0) as low_stock_products,
+                        COALESCE((
+                            SELECT COUNT(*) 
+                            FROM products 
+                            WHERE quantity = 0
+                        ), 0) as out_of_stock_products,
+                        COALESCE((
+                            SELECT SUM(total_amount) 
+                            FROM sales 
+                            WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)
+                        ), 0) as total_sales,
+                        COALESCE((
+                            SELECT COUNT(*) 
+                            FROM sales 
+                            WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)
+                        ), 0) as total_orders
                 """)
                 current_stats = cursor.fetchone()
 
                 # Get last month stats for comparison
                 cursor.execute("""
                     SELECT 
-                        COALESCE((SELECT COUNT(*) FROM products WHERE created_at < DATE_TRUNC('month', CURRENT_DATE)), 0) as last_month_products,
-                        COALESCE((SELECT COUNT(*) FROM products WHERE quantity <= min_stock_level AND created_at < DATE_TRUNC('month', CURRENT_DATE)), 0) as last_month_low_stock,
-                        COALESCE((SELECT SUM(total_amount) FROM sales WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') AND created_at < DATE_TRUNC('month', CURRENT_DATE)), 0) as last_month_sales,
-                        COALESCE((SELECT COUNT(*) FROM sales WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') AND created_at < DATE_TRUNC('month', CURRENT_DATE)), 0) as last_month_orders
+                        COALESCE((
+                            SELECT COUNT(*) 
+                            FROM products 
+                            WHERE created_at < DATE_TRUNC('month', CURRENT_DATE)
+                        ), 0) as last_month_products,
+                        COALESCE((
+                            SELECT COUNT(*) 
+                            FROM products 
+                            WHERE quantity <= min_stock_level 
+                            AND quantity > 0 
+                            AND created_at < DATE_TRUNC('month', CURRENT_DATE)
+                        ), 0) as last_month_low_stock,
+                        COALESCE((
+                            SELECT SUM(total_amount) 
+                            FROM sales 
+                            WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') 
+                            AND created_at < DATE_TRUNC('month', CURRENT_DATE)
+                        ), 0) as last_month_sales,
+                        COALESCE((
+                            SELECT COUNT(*) 
+                            FROM sales 
+                            WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') 
+                            AND created_at < DATE_TRUNC('month', CURRENT_DATE)
+                        ), 0) as last_month_orders
                 """)
                 last_month_stats = cursor.fetchone()
 
                 if current_stats and last_month_stats:
-                    total_products, low_stock_products, total_sales, total_orders = current_stats
+                    total_products, low_stock_products, out_of_stock_products, total_sales, total_orders = current_stats
                     last_month_products, last_month_low_stock, last_month_sales, last_month_orders = last_month_stats
 
                     # Calculate percentage changes
@@ -1665,6 +1737,7 @@ class ReportViewSet(viewsets.ViewSet):
                     return Response({
                         'totalProducts': total_products,
                         'lowStockCount': low_stock_products,
+                        'outOfStockCount': out_of_stock_products,
                         'totalSales': float(total_sales),
                         'pendingOrders': total_orders,
                         'compareLastMonth': {
