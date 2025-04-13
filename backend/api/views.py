@@ -643,20 +643,25 @@ class SaleViewSet(viewsets.ModelViewSet):
                         SELECT 
                             sale_id,
                             COUNT(*) as items_count,
-                            SUM(quantity) as total_quantity
-                        FROM sale_items
+                            SUM(quantity) as total_quantity,
+                            STRING_AGG(p.name, ', ') as product_names
+                        FROM sale_items si
+                        JOIN products p ON si.product_id = p.id
                         GROUP BY sale_id
                     )
                     SELECT 
                         s.id,
                         s.sale_date,
-                        s.total_amount,
-                        s.original_amount,
-                        s.discount,
-                        s.discount_percentage,
+                        s.total_amount::float,
+                        s.original_amount::float,
+                        s.discount::float,
+                        s.discount_percentage::float,
+                        s.user_id,
                         u.username as sold_by,
                         COALESCE(sic.items_count, 0) as items_count,
-                        COALESCE(sic.total_quantity, 0) as total_quantity
+                        COALESCE(sic.total_quantity, 0) as total_quantity,
+                        COALESCE(sic.product_names, '') as product_names,
+                        s.created_at
                     FROM sales s
                     LEFT JOIN users u ON s.user_id = u.id
                     LEFT JOIN sale_items_count sic ON s.id = sic.sale_id
@@ -665,18 +670,30 @@ class SaleViewSet(viewsets.ModelViewSet):
                 columns = [col[0] for col in cursor.description]
                 sales = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
-                # Format decimal values and dates
+                # Format the data
                 for sale in sales:
+                    # Format dates
                     if 'sale_date' in sale and sale['sale_date']:
                         sale['sale_date'] = sale['sale_date'].isoformat()
-                    for key in ['total_amount', 'original_amount', 'discount', 'discount_percentage']:
-                        if key in sale and sale[key] is not None:
-                            sale[key] = str(sale[key])
+                    if 'created_at' in sale and sale['created_at']:
+                        sale['created_at'] = sale['created_at'].isoformat()
+                    
                     # Set default username if none
                     if not sale['sold_by']:
                         sale['sold_by'] = 'System'
+                    
                     # Format items display
                     sale['items'] = f"{sale['total_quantity']} items" if sale['total_quantity'] else "0 items"
+                    
+                    # Format product names (limit to first 3 products)
+                    if sale['product_names']:
+                        products = sale['product_names'].split(', ')
+                        if len(products) > 3:
+                            sale['product_names'] = ', '.join(products[:3]) + f' and {len(products) - 3} more'
+                        else:
+                            sale['product_names'] = ', '.join(products)
+                    else:
+                        sale['product_names'] = 'No products'
 
                 return Response(sales)
         except Exception as e:
