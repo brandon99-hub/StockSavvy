@@ -643,7 +643,7 @@ class SaleViewSet(viewsets.ModelViewSet):
                         SELECT 
                             sale_id,
                             COUNT(*) as items_count,
-                            SUM(quantity) as total_quantity,
+                            SUM(si.quantity) as total_quantity,
                             STRING_AGG(p.name, ', ') as product_names
                         FROM sale_items si
                         JOIN products p ON si.product_id = p.id
