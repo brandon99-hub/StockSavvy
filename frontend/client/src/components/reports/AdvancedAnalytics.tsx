@@ -102,11 +102,12 @@ interface StockMovementData {
 }
 
 interface TopProductData {
-    id: string;
+    id: number;
     name: string;
+    category: string;
     sales: number;
     revenue: number;
-    profit: number;
+    profit?: number;
 }
 
 interface DashboardStats {
@@ -126,12 +127,42 @@ interface ApiSale {
     unique_products: number;
 }
 
+interface TopProduct {
+    id: number;
+    name: string;
+    category: string;
+    unitsSold: number;
+    revenue: string;
+}
+
 interface ApiResponse {
     items: ApiSale[];
     summary?: {
         total_sales: number;
         total_items: number;
     };
+    topProduct?: TopProduct;
+}
+
+interface ActivityDetails {
+    product_name?: string;
+    old_quantity?: number;
+    new_quantity?: number;
+    amount?: string;
+    items?: number;
+    quantity?: number;
+}
+
+interface LocalActivity {
+    id: number;
+    type: string;
+    description: string;
+    created_at: string;
+    status: string;
+    user_name?: string;
+    activity_type: string;
+    quantity?: number;
+    details?: ActivityDetails;
 }
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658', '#8dd1e1'];
@@ -270,7 +301,7 @@ const AdvancedAnalytics = () => {
         queryFn: () => apiRequest('/api/sales/')
     });
 
-    const { data: activities = [], isLoading: isActivitiesLoading } = useQuery<Activity[]>({
+    const { data: activities = [], isLoading: isActivitiesLoading } = useQuery<LocalActivity[]>({
         queryKey: ['/api/activities/'],
         queryFn: () => apiRequest('/api/activities/')
     });
@@ -726,29 +757,19 @@ const AdvancedAnalytics = () => {
 
     // Calculate top products with safety checks
     const topProducts = useMemo((): TopProductData[] => {
-        if (!salesQuery.data?.items) {
-            console.log('No sales data available for top products calculation');
+        if (!salesQuery.data?.topProduct) {
+            console.log('No top product data available');
             return [];
         }
         
-        const salesArray = salesQuery.data.items;
-        if (!Array.isArray(salesArray)) {
-            console.error('Sales data structure:', salesQuery.data);
-            return [];
-        }
-        
-        // Transform the sales data into a format suitable for the chart
-        return salesArray.map(item => {
-            const date = format(new Date(item.date), 'MMM dd, yyyy');
-            const revenue = parseFloat(item.amount);
-            return {
-                id: item.date,
-                name: date,
-                sales: item.transaction_count,
-                revenue,
-                profit: revenue * 0.3 // Assuming 30% profit margin
-            } satisfies TopProductData;
-        }).sort((a, b) => b.revenue - a.revenue);
+        const topProduct = salesQuery.data.topProduct;
+        return [{
+            id: topProduct.id,
+            name: topProduct.name,
+            category: topProduct.category,
+            sales: topProduct.unitsSold,
+            revenue: parseFloat(topProduct.revenue)
+        }];
     }, [salesQuery.data]);
 
     // Update the profit analysis table to use the correct data
@@ -907,31 +928,30 @@ const AdvancedAnalytics = () => {
 
                                 <Card>
                                     <CardHeader>
-                                        <CardTitle>Top Selling Products</CardTitle>
+                                        <CardTitle>Top Selling Product</CardTitle>
                                         <CardDescription>
-                                            Products with highest sales volume
+                                            Best performing product by revenue
                                         </CardDescription>
                                     </CardHeader>
-                                    <CardContent className="h-80">
-                                        <ResponsiveContainer width="100%" height="100%">
-                                            <BarChart
-                                                data={topProducts}
-                                                layout="vertical"
-                                                margin={{top: 5, right: 30, left: 20, bottom: 5}}
-                                            >
-                                                <CartesianGrid strokeDasharray="3 3"/>
-                                                <XAxis type="number"/>
-                                                <YAxis type="category" dataKey="name" width={100}/>
-                                                <RechartsTooltip content={<CustomTooltip/>}/>
-                                                <Legend/>
-                                                <Bar
-                                                    dataKey="sales"
-                                                    name="Units Sold"
-                                                    fill="#8884d8"
-                                                    radius={[0, 4, 4, 0]}
-                                                />
-                                            </BarChart>
-                                        </ResponsiveContainer>
+                                    <CardContent>
+                                        {topProducts.length > 0 ? (
+                                            <div className="space-y-4">
+                                                <div className="flex justify-between items-center">
+                                                    <div>
+                                                        <h4 className="text-lg font-semibold">{topProducts[0].name}</h4>
+                                                        <p className="text-sm text-gray-600">{topProducts[0].category}</p>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <p className="text-lg font-semibold">{formatCurrency(topProducts[0].revenue)}</p>
+                                                        <p className="text-sm text-gray-600">{topProducts[0].sales} units sold</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="text-center text-gray-500">
+                                                No product data available
+                                            </div>
+                                        )}
                                     </CardContent>
                                 </Card>
                             </div>
@@ -1167,18 +1187,18 @@ const AdvancedAnalytics = () => {
                                     <CardContent className="h-80">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <BarChart
-                                                data={topProducts.sort((a, b) => b.profit - a.profit)}
+                                                data={topProducts.sort((a, b) => b.revenue - a.revenue)}
                                                 layout="vertical"
                                                 margin={{top: 5, right: 30, left: 20, bottom: 5}}
                                             >
                                                 <CartesianGrid strokeDasharray="3 3"/>
-                                                <XAxis type="number" tickFormatter={(value) => formatCurrency(value)}/>
+                                                <XAxis type="number"/>
                                                 <YAxis type="category" dataKey="name" width={100}/>
                                                 <RechartsTooltip content={<CustomTooltip/>}/>
                                                 <Legend/>
                                                 <Bar
-                                                    dataKey="profit"
-                                                    name="Profit"
+                                                    dataKey="revenue"
+                                                    name="Revenue"
                                                     fill="#82ca9d"
                                                     radius={[0, 4, 4, 0]}
                                                 />
@@ -1402,9 +1422,9 @@ const AdvancedAnalytics = () => {
                                         <AlertCircle className="h-4 w-4"/>
                                         <AlertTitle>Top Performing Product</AlertTitle>
                                         <AlertDescription>
-                                            {topProducts[0]?.name || 'Unknown'} is your best-selling product
-                                            with {topProducts[0]?.sales || 0} units sold,
-                                            generating {formatCurrency(topProducts[0]?.revenue || 0)} in revenue.
+                                            {topProducts[0].name} ({topProducts[0].category}) is your best-selling product
+                                            with {topProducts[0].sales} units sold,
+                                            generating {formatCurrency(topProducts[0].revenue)} in revenue.
                                         </AlertDescription>
                                     </Alert>
                                 ) : null}
