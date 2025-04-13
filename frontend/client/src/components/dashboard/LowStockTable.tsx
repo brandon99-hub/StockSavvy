@@ -59,10 +59,20 @@ const LowStockTable = ({ products, onReorder, categories }: LowStockTableProps) 
     }
   };
 
-  // Filter low stock products
-  const lowStockProducts = products.filter(
-    (product) => product.quantity <= product.min_stock_level
-  );
+  // Filter and sort low stock products
+  const lowStockProducts = products
+    .filter(product => 
+      product.quantity <= product.min_stock_level
+    )
+    .sort((a, b) => {
+      // Sort by status (out of stock first, then low stock)
+      if (a.quantity === 0 && b.quantity !== 0) return -1;
+      if (a.quantity !== 0 && b.quantity === 0) return 1;
+      // Then sort by how far below min_stock_level they are
+      const aDiff = a.quantity - a.min_stock_level;
+      const bDiff = b.quantity - b.min_stock_level;
+      return aDiff - bDiff;
+    });
 
   return (
     <Card className="p-6 shadow-sm">
@@ -101,7 +111,11 @@ const LowStockTable = ({ products, onReorder, categories }: LowStockTableProps) 
                   </Badge>
                 </TableCell>
                 <TableCell className="text-right">
-                  <span className="font-mono">{product.quantity}</span>
+                  <span className={`font-mono ${
+                    product.quantity === 0 ? 'text-red-600' : 
+                    product.quantity <= product.min_stock_level / 2 ? 'text-amber-600' : 
+                    'text-yellow-600'
+                  }`}>{product.quantity}</span>
                 </TableCell>
                 <TableCell className="text-right">
                   <span className="font-mono">{product.min_stock_level}</span>
@@ -109,9 +123,15 @@ const LowStockTable = ({ products, onReorder, categories }: LowStockTableProps) 
                 <TableCell className="text-right">
                   <Badge
                     variant={product.quantity === 0 ? "destructive" : "secondary"}
-                    className="capitalize"
+                    className={`capitalize ${
+                      product.quantity === 0 ? 'bg-red-100 text-red-800' : 
+                      product.quantity <= product.min_stock_level / 2 ? 'bg-amber-100 text-amber-800' : 
+                      'bg-yellow-100 text-yellow-800'
+                    }`}
                   >
-                    {product.quantity === 0 ? "Out of Stock" : "Low Stock"}
+                    {product.quantity === 0 ? "Out of Stock" : 
+                     product.quantity <= product.min_stock_level / 2 ? "Critical" : 
+                     "Low Stock"}
                   </Badge>
                 </TableCell>
                 <TableCell className="text-right">
