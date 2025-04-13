@@ -10,6 +10,7 @@ import RecentActivityTable from "./RecentActivityTable";
 import {Skeleton} from "../ui/skeleton";
 import { apiRequest } from "../../lib/queryClient";
 import { Loader2 } from "lucide-react";
+import { Button } from "../ui/button";
 
 // Response type interfaces
 interface LowStockResponse {
@@ -59,10 +60,20 @@ const Dashboard = () => {
 
     // Low stock products query
     const {data: lowStockData, isLoading: isLowStockLoading} =
-        useQuery<LowStockResponse>({
+        useQuery<Product[]>({
             queryKey: ["dashboard", "low-stock"],
-            queryFn: () => apiRequest('/api/products/low-stock/')
+            queryFn: async () => {
+                const response = await apiRequest('/api/products/low-stock/');
+                return Array.isArray(response) ? response : [];
+            }
         });
+
+    // Categories query
+    const {data: categories = [], isLoading: isCategoriesLoading} = useQuery<Category[]>({
+        queryKey: ["dashboard", "categories"],
+        queryFn: () => apiRequest('/api/categories/'),
+        staleTime: 300000 // Categories don't change often
+    });
 
     // Sales chart data query
     const {data: salesData = [], isLoading: isSalesDataLoading} = useQuery<SalesChartData[]>({
@@ -70,7 +81,6 @@ const Dashboard = () => {
         queryFn: async () => {
             try {
                 const response = await apiRequest('/api/dashboard/sales-chart/');
-                // The API returns { items: [], summary: {} }
                 const salesArray = response?.items || [];
                 
                 if (!Array.isArray(salesArray)) {
@@ -88,39 +98,27 @@ const Dashboard = () => {
             }
         },
         refetchInterval: 60000,
-        staleTime: 55000 // Add staleTime to prevent unnecessary refetches
+        staleTime: 55000
     });
 
     // Category chart data query
-    const {data: categoryData = [], isLoading: isCategoryDataLoading} = useQuery<CategoryChartData[]>({
+    const {data: categoryData = [], isLoading: isCategoryDataLoading} = useQuery({
         queryKey: ["dashboard", "category-chart"],
         queryFn: async () => {
             try {
                 const response = await apiRequest('/api/dashboard/category-chart/');
-                console.log('Raw Category API response:', JSON.stringify(response, null, 2));
-                
                 if (!Array.isArray(response)) {
                     console.error('Category data is not an array:', response);
                     return [];
                 }
-                
-                // Transform the data to match the CategoryChartData interface
-                const validCategories = response.map(item => ({
-                    id: item.id,
-                    name: item.name,
-                    value: parseFloat(item.total_value) || 0,
-                    percentage: item.percentage || 0
-                }));
-
-                console.log('Processed category data:', validCategories);
-                return validCategories;
+                return response;
             } catch (error) {
                 console.error('Error fetching category data:', error);
                 return [];
             }
         },
         refetchInterval: 60000,
-        staleTime: 55000 // Add staleTime to prevent unnecessary refetches
+        staleTime: 55000
     });
 
     // Recent activities query
@@ -140,13 +138,7 @@ const Dashboard = () => {
             }
         },
         refetchInterval: 30000,
-        staleTime: 25000 // Add staleTime to prevent unnecessary refetches
-    });
-
-    const {data: categories = []} = useQuery<Category[]>({
-        queryKey: ["dashboard", "categories"],
-        queryFn: () => apiRequest('/api/categories/'),
-        staleTime: 300000 // Categories don't change often, cache for 5 minutes
+        staleTime: 25000
     });
 
     // Loading state
@@ -155,7 +147,8 @@ const Dashboard = () => {
         isLowStockLoading ||
         isSalesDataLoading ||
         isCategoryDataLoading ||
-        isActivitiesLoading;
+        isActivitiesLoading ||
+        isCategoriesLoading;
 
     if (isLoading) {
         return (
@@ -228,7 +221,7 @@ const Dashboard = () => {
                 <StatCard
                     title="Pending Orders"
                     value={stats?.pendingOrders || 0}
-                    icon="clipboard-list"
+                    icon="clock"
                     iconBg="bg-purple-100"
                     iconColor="text-purple-500"
                     change={stats?.compareLastMonth.orders || 0}
@@ -237,48 +230,42 @@ const Dashboard = () => {
             </div>
 
             {/* Charts Row */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-                <div className="lg:col-span-2 bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
                     {isSalesDataLoading ? (
                         <div className="h-80 flex items-center justify-center">
                             <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
                         </div>
                     ) : (
                         <>
-                            <div className="flex justify-end space-x-2 mb-4">
-                                <button 
-                                    type="button"
-                                    className={`px-3 py-1.5 text-sm font-medium rounded transition-colors ${
-                                        view === 'day' 
-                                            ? 'bg-blue-50 text-blue-600' 
-                                            : 'text-gray-600 hover:bg-gray-100'
-                                    }`}
-                                    onClick={() => setView('day')}
-                                >
-                                    Day
-                                </button>
-                                <button 
-                                    type="button"
-                                    className={`px-3 py-1.5 text-sm font-medium rounded transition-colors ${
-                                        view === 'week' 
-                                            ? 'bg-blue-50 text-blue-600' 
-                                            : 'text-gray-600 hover:bg-gray-100'
-                                    }`}
-                                    onClick={() => setView('week')}
-                                >
-                                    Week
-                                </button>
-                                <button 
-                                    type="button"
-                                    className={`px-3 py-1.5 text-sm font-medium rounded transition-colors ${
-                                        view === 'month' 
-                                            ? 'bg-blue-50 text-blue-600' 
-                                            : 'text-gray-600 hover:bg-gray-100'
-                                    }`}
-                                    onClick={() => setView('month')}
-                                >
-                                    Month
-                                </button>
+                            <div className="flex justify-between items-center mb-4">
+                                <div>
+                                    <h3 className="text-lg font-semibold">Sales Overview</h3>
+                                    <p className="text-sm text-gray-600">Track your sales performance</p>
+                                </div>
+                                <div className="flex gap-2">
+                                    <Button
+                                        variant={view === 'day' ? 'default' : 'outline'}
+                                        size="sm"
+                                        onClick={() => setView('day')}
+                                    >
+                                        Day
+                                    </Button>
+                                    <Button
+                                        variant={view === 'week' ? 'default' : 'outline'}
+                                        size="sm"
+                                        onClick={() => setView('week')}
+                                    >
+                                        Week
+                                    </Button>
+                                    <Button
+                                        variant={view === 'month' ? 'default' : 'outline'}
+                                        size="sm"
+                                        onClick={() => setView('month')}
+                                    >
+                                        Month
+                                    </Button>
+                                </div>
                             </div>
                             <SalesChart data={salesData || []} view={view} />
                         </>
@@ -298,11 +285,13 @@ const Dashboard = () => {
             {/* Tables Row */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <LowStockTable
-                    products={lowStockData?.items || []}
+                    products={lowStockData || []}
                     categories={categories || []}
-                    onReorder={() =>
-                        queryClient.invalidateQueries({ queryKey: ["/api/products"] })
-                    }
+                    onReorder={() => {
+                        queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+                        queryClient.invalidateQueries({ queryKey: ["dashboard", "low-stock"] });
+                        queryClient.invalidateQueries({ queryKey: ["dashboard", "stats"] });
+                    }}
                 />
                 <RecentActivityTable
                     activities={activities || []}
