@@ -102,16 +102,28 @@ const Dashboard = () => {
     });
 
     // Category chart data query
-    const {data: categoryData = [], isLoading: isCategoryDataLoading} = useQuery({
+    const {data: categoryData = [], isLoading: isCategoryDataLoading} = useQuery<CategoryChartData[]>({
         queryKey: ["dashboard", "category-chart"],
         queryFn: async () => {
             try {
                 const response = await apiRequest('/api/dashboard/category-chart/');
+                console.log('Raw Category API response:', JSON.stringify(response, null, 2));
+                
                 if (!Array.isArray(response)) {
                     console.error('Category data is not an array:', response);
                     return [];
                 }
-                return response;
+                
+                // Transform the data to match the CategoryChartData interface
+                const validCategories = response.map(item => ({
+                    id: item.id,
+                    name: item.name,
+                    value: parseFloat(item.total_value) || 0,
+                    percentage: item.percentage || 0
+                }));
+
+                console.log('Processed category data:', validCategories);
+                return validCategories;
             } catch (error) {
                 console.error('Error fetching category data:', error);
                 return [];
