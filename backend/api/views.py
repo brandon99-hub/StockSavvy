@@ -793,7 +793,7 @@ class SaleViewSet(viewsets.ModelViewSet):
                         logger.warning(f'Product not found: {product_id}')
                         raise APIError(f'Product {product_id} not found')
 
-                    if product.stock < quantity:
+                    if product.quantity < quantity:
                         logger.warning(f'Insufficient stock for product {product_id}')
                         raise APIError(f'Insufficient stock for {product.name}')
 
@@ -807,7 +807,7 @@ class SaleViewSet(viewsets.ModelViewSet):
                     )
 
                     # Update product stock
-                    product.stock -= quantity
+                    product.quantity -= quantity
                     product.save()
 
                 # Log activity
