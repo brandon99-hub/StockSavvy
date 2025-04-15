@@ -21,8 +21,24 @@ from django.views.generic import TemplateView
 from django.conf import settings
 from django.db import models
 from django.db import transaction
+import logging
+from rest_framework.exceptions import APIException
+from django.core.exceptions import ValidationError
 
 User = get_user_model()
+
+# Add logging configuration
+logger = logging.getLogger(__name__)
+
+class APIError(APIException):
+    status_code = 400
+    default_detail = 'An error occurred'
+    default_code = 'error'
+
+    def __init__(self, detail=None, code=None, status_code=None):
+        if status_code is not None:
+            self.status_code = status_code
+        super().__init__(detail, code)
 
 
 class FrontendAppView(TemplateView):
@@ -629,33 +645,35 @@ class SaleViewSet(viewsets.ModelViewSet):
     permission_classes = []
 
     def check_token_auth(self, request):
-        auth_header = request.headers.get('Authorization')
-        if not auth_header or not auth_header.startswith('Bearer '):
-            return False, None, False
-
-        token = auth_header.split(' ')[1]
-        if not token.startswith('token_'):
-            return False, None, False
-
         try:
-            parts = token.split('_')
-            user_id = int(parts[1])
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
-                    [user_id]
-                )
-                row = cursor.fetchone()
-                if row:
-                    is_staff, is_superuser, role = row
-                    # Allow access if user is staff, superuser, admin, or manager
-                    is_authorized = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager', 'staff'])
-                    return True, user_id, is_authorized
-        except (IndexError, ValueError, Exception) as e:
-            print(f"Token validation error: {str(e)}")
-            return False, None, False
+            auth_header = request.headers.get('Authorization')
+            if not auth_header or not auth_header.startswith('Bearer '):
+                logger.warning('Missing or invalid authorization header')
+                return False, None, False
 
-        return False, None, False
+            token = auth_header.split(' ')[1]
+            if not token or not token.startswith('token_'):
+                logger.warning('Invalid token format')
+                return False, None, False
+
+            try:
+                parts = token.split('_')
+                user_id = int(parts[1])
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT is_staff, is_superuser FROM users WHERE id = %s",
+                        [user_id]
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        is_staff, is_superuser = row
+                        return True, user_id, is_staff or is_superuser
+            except (IndexError, ValueError) as e:
+                logger.error(f'Error parsing token: {str(e)}')
+                return False, None, False
+        except Exception as e:
+            logger.error(f'Unexpected error in token authentication: {str(e)}')
+            return False, None, False
 
     def list(self, request, *args, **kwargs):
         is_authenticated, user_id, is_authorized = self.check_token_auth(request)
@@ -738,127 +756,86 @@ class SaleViewSet(viewsets.ModelViewSet):
             )
 
     def create(self, request, *args, **kwargs):
-        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response(
-                {"detail": "Authentication required"},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-        if not is_authorized:
-            return Response(
-                {"detail": "Permission denied"},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
         try:
+            is_authenticated, user_id, is_admin = self.check_token_auth(request)
+            if not is_authenticated:
+                logger.warning(f'Unauthorized sale creation attempt by user {user_id}')
+                return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+
             # Validate sale items
             sale_items = request.data.get('sale_items', [])
             if not sale_items:
-                return Response(
-                    {"detail": "Sale items are required"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Start a transaction
+                logger.warning('Attempt to create sale with no items')
+                raise APIError('Sale must contain at least one item')
+
+            # Start transaction
             with transaction.atomic():
-                # Calculate amounts
-                original_amount = request.data.get('original_amount')
-                discount = request.data.get('discount', 0)
-                total_amount = float(original_amount) - float(discount)
-                discount_percentage = (float(discount) / float(original_amount) * 100) if float(original_amount) > 0 else 0
-                
-                # Create the sale
-                sale_data = {
-                    'sale_date': request.data.get('sale_date', timezone.now()),
-                    'total_amount': str(total_amount),
-                    'original_amount': original_amount,
-                    'discount': str(discount),
-                    'discount_percentage': str(discount_percentage),
-                    'user_id': user_id,
-                    'created_at': timezone.now()
-                }
-                
-                # Insert sale
-                with connection.cursor() as cursor:
-                    cursor.execute("""
-                        INSERT INTO sales (
-                            sale_date, total_amount, original_amount, discount,
-                            discount_percentage, user_id, created_at
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id
-                    """, [
-                        sale_data['sale_date'],
-                        sale_data['total_amount'],
-                        sale_data['original_amount'],
-                        sale_data['discount'],
-                        sale_data['discount_percentage'],
-                        sale_data['user_id'],
-                        sale_data['created_at']
-                    ])
-                    sale_id = cursor.fetchone()[0]
-                
-                # Create sale items and update product quantities
-                for item in sale_items:
-                    product_id = item.get('product_id')
-                    quantity = int(item.get('quantity', 0))
-                    unit_price = item.get('unit_price')
-                    total_price = item.get('total_price')
-                    
-                    if not all([product_id, quantity, unit_price, total_price]):
-                        raise ValueError("Missing required fields in sale item")
-                    
-                    # Insert sale item
-                    with connection.cursor() as cursor:
-                        # First check if we have enough quantity
-                        cursor.execute("""
-                            SELECT quantity, name FROM products WHERE id = %s
-                        """, [product_id])
-                        product = cursor.fetchone()
-                        if not product or product[0] < quantity:
-                            raise ValueError(f"Insufficient quantity for product {product[1] if product else product_id}")
-                        
-                        # Insert the sale item
-                        cursor.execute("""
-                            INSERT INTO sale_items (
-                                sale_id, product_id, quantity, unit_price, total_price
-                            ) VALUES (%s, %s, %s, %s, %s)
-                        """, [sale_id, product_id, quantity, unit_price, total_price])
-                        
-                        # Update product quantity
-                        cursor.execute("""
-                            UPDATE products 
-                            SET quantity = quantity - %s 
-                            WHERE id = %s
-                        """, [quantity, product_id])
-                
-                # Get user information for activity log
-                with connection.cursor() as cursor:
-                    cursor.execute("SELECT username FROM users WHERE id = %s", [user_id])
-                    username = cursor.fetchone()[0]
-                
-                # Create activity log
-                Activity.objects.create(
-                    type='sale',
-                    description=f'Sale created by {username}: KSh {sale_data["total_amount"]}',
-                    user_id=user_id,
-                    created_at=timezone.now(),
-                    status='completed'
-                )
-                
-                return Response({
-                    "message": "Sale created successfully", 
-                    "sale_id": sale_id,
-                    "items_count": len(sale_items)
-                }, status=status.HTTP_201_CREATED)
-                
-        except ValueError as e:
-            return Response(
-                {"detail": str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+                # Create sale
+                sale_serializer = self.get_serializer(data=request.data)
+                if not sale_serializer.is_valid():
+                    logger.warning(f'Invalid sale data: {sale_serializer.errors}')
+                    raise APIError(sale_serializer.errors)
+
+                sale = sale_serializer.save()
+
+                # Create sale items and update stock
+                for item_data in sale_items:
+                    product_id = item_data.get('product_id')
+                    quantity = item_data.get('quantity')
+
+                    if not product_id or not quantity:
+                        logger.warning(f'Missing product_id or quantity in sale item: {item_data}')
+                        raise APIError('Invalid sale item data')
+
+                    try:
+                        product = Product.objects.get(id=product_id)
+                    except Product.DoesNotExist:
+                        logger.warning(f'Product not found: {product_id}')
+                        raise APIError(f'Product {product_id} not found')
+
+                    if product.stock < quantity:
+                        logger.warning(f'Insufficient stock for product {product_id}')
+                        raise APIError(f'Insufficient stock for {product.name}')
+
+                    # Create sale item
+                    SaleItem.objects.create(
+                        sale=sale,
+                        product=product,
+                        quantity=quantity,
+                        unit_price=product.sell_price,
+                        total_price=quantity * product.sell_price
+                    )
+
+                    # Update product stock
+                    product.stock -= quantity
+                    product.save()
+
+                # Log activity
+                try:
+                    Activity.objects.create(
+                        type='sale_created',
+                        description=f'Sale #{sale.id} created',
+                        user_id=user_id,
+                        created_at=timezone.now(),
+                        status='completed'
+                    )
+                except Exception as e:
+                    logger.error(f'Error logging sale activity: {str(e)}')
+                    # Don't fail the sale if activity logging fails
+
+                logger.info(f'Sale #{sale.id} created successfully')
+                return Response(sale_serializer.data, status=status.HTTP_201_CREATED)
+
+        except APIError as e:
+            logger.error(f'Sale creation error: {str(e)}')
+            return Response({"detail": str(e)}, status=e.status_code)
+        except ValidationError as e:
+            logger.error(f'Validation error in sale creation: {str(e)}')
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
-            print(f"Error creating sale: {str(e)}")
+            logger.error(f'Unexpected error in sale creation: {str(e)}')
             return Response(
-                {"detail": f"Error creating sale: {str(e)}"},
+                {"detail": "An unexpected error occurred"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
