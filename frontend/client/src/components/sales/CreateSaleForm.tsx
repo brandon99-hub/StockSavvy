@@ -169,6 +169,7 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
             
             const saleData = {
                 sale_date: new Date().toISOString(),
+                created_at: new Date().toISOString(),
                 total_amount: finalAmount,
                 original_amount: subtotal,
                 discount: discountAmount,
