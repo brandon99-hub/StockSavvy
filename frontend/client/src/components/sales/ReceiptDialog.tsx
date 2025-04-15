@@ -171,21 +171,23 @@ const ReceiptDialog: React.FC<ReceiptDialogProps> = ({ isOpen, onClose, saleId, 
 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="sm:max-w-[425px]">
+            <DialogContent aria-describedby="receipt-dialog-description">
                 <DialogHeader>
-                    <DialogTitle>Print Receipt</DialogTitle>
+                    <DialogTitle>Receipt</DialogTitle>
                 </DialogHeader>
-                <div className="py-4 flex justify-center">
+                <div id="receipt-dialog-description">
                     {isLoading ? (
-                        <div className="text-center">Loading receipt data...</div>
+                        <div className="flex justify-center items-center h-64">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+                        </div>
                     ) : receiptData ? (
-                        <Receipt 
-                            sale={receiptData.sale} 
+                        <Receipt
+                            sale={receiptData.sale}
                             items={receiptData.items}
-                            storeName={storeName} 
+                            storeName={storeName}
                         />
                     ) : (
-                        <div className="text-center">No receipt data available</div>
+                        <div className="text-center text-gray-500">No receipt data available</div>
                     )}
                 </div>
                 <DialogFooter className="flex gap-2">

@@ -879,8 +879,16 @@ class SaleViewSet(viewsets.ModelViewSet):
                     JOIN users u ON s.user_id = u.id
                     WHERE s.id = %s
                 """, [pk])
+                sale_row = cursor.fetchone()
+                
+                if not sale_row:
+                    return Response(
+                        {"detail": "Sale not found"},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+                
                 columns = [col[0] for col in cursor.description]
-                sale = dict(zip(columns, cursor.fetchone()))
+                sale = dict(zip(columns, sale_row))
 
                 # Get sale items
                 cursor.execute("""
@@ -912,14 +920,14 @@ class SaleViewSet(viewsets.ModelViewSet):
             return Response(receipt_data)
 
         except Exception as e:
-            print(f"Error generating receipt: {str(e)}")
+            logger.error(f"Error generating receipt: {str(e)}")
             return Response(
-                {"detail": "Error generating receipt"},
+                {"detail": f"Error generating receipt: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
 
-class ActivityViewSet(viewsets.ReadOnlyModelViewSet):
+class ActivityViewSet(viewsets.ModelViewSet):
     queryset = Activity.objects.all()
     serializer_class = ActivitySerializer
     permission_classes = []
