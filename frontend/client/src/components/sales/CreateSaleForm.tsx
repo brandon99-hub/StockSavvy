@@ -45,6 +45,7 @@ import {
     X
 } from 'lucide-react';
 import { AxiosResponse } from 'axios';
+import ReceiptDialog from './ReceiptDialog';
 
 type SaleItem = {
     productId: number;
@@ -82,6 +83,9 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
     const [discountPercent, setDiscountPercent] = useState(0);
     const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'MPESA' | 'BANK'>('CASH');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [showReceiptDialog, setShowReceiptDialog] = useState(false);
+    const [currentSale, setCurrentSale] = useState<any>(null);
+    const STORE_NAME = "StockSavvy"; // You can make this configurable later
 
     const calculateSubtotal = () => {
         return selectedItems.reduce((total, item) => 
@@ -165,21 +169,19 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
             
             const saleData = {
                 sale_date: new Date().toISOString(),
-                total_amount: finalAmount.toString(),
-                original_amount: subtotal.toString(),
-                discount: discountAmount.toString(),
-                discount_percentage: discountPercent.toString(),
+                total_amount: finalAmount.toFixed(2),
+                original_amount: subtotal.toFixed(2),
+                discount: discountAmount.toFixed(2),
+                discount_percentage: discountPercent.toFixed(2),
                 customer_name: customerName.trim() || null,
                 payment_method: paymentMethod,
                 sale_items: selectedItems.map(item => ({
                     product_id: item.productId,
                     quantity: item.quantity,
-                    unit_price: item.unitPrice.toString(),
-                    total_price: (item.quantity * item.unitPrice).toString()
+                    unit_price: item.unitPrice.toFixed(2),
+                    total_price: (item.quantity * item.unitPrice).toFixed(2)
                 }))
             };
-
-            console.log('Sending sale data:', saleData);
 
             const response = await apiRequest('/api/sales/', {
                 method: 'POST',
@@ -195,6 +197,7 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                     `${item.quantity}x ${item.productName}`
                 ).join(', ');
 
+                // Show success toast
                 toast({
                     title: '✅ Sale Created Successfully',
                     description: [
@@ -206,6 +209,24 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                     variant: 'default',
                 });
 
+                // Show the receipt dialog with the new sale ID
+                setCurrentSale(response.sale_id);
+                setShowReceiptDialog(true);
+
+                // Log activity
+                await apiRequest('/api/activities/', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        type: 'sale',
+                        description: `Sale created: KSh ${finalAmount.toFixed(2)}`,
+                        status: 'completed'
+                    }),
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                // Invalidate relevant queries
                 await Promise.all([
                     queryClient.invalidateQueries({ queryKey: ['/api/sales'] }),
                     queryClient.invalidateQueries({ queryKey: ['/api/products'] }),
@@ -213,13 +234,12 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                     queryClient.invalidateQueries({ queryKey: ['dashboard', 'activities'] })
                 ]);
 
+                // Reset form
                 setCustomerName('');
                 setSelectedItems([]);
                 setDiscountAmount(0);
                 setDiscountPercent(0);
                 setPaymentMethod('CASH');
-
-                onClose?.();
             }
         } catch (error: any) {
             console.error('Error creating sale:', error);
@@ -234,138 +254,149 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
     };
 
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Left Column - Form */}
-            <div className="space-y-6">
-                <div>
-                    <Label>Customer Name (Optional)</Label>
-                    <Input
-                        placeholder="Enter customer name"
-                        value={customerName}
-                        onChange={(e) => setCustomerName(e.target.value)}
-                    />
-                </div>
+        <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Left Column - Form */}
+                <div className="space-y-6">
+                    <div>
+                        <Label>Customer Name (Optional)</Label>
+                        <Input
+                            placeholder="Enter customer name"
+                            value={customerName}
+                            onChange={(e) => setCustomerName(e.target.value)}
+                        />
+                    </div>
 
-                <div>
-                    <Label>Payment Method</Label>
-                    <Select
-                        value={paymentMethod}
-                        onValueChange={(value: 'CASH' | 'MPESA' | 'BANK') => setPaymentMethod(value)}
+                    <div>
+                        <Label>Payment Method</Label>
+                        <Select
+                            value={paymentMethod}
+                            onValueChange={(value: 'CASH' | 'MPESA' | 'BANK') => setPaymentMethod(value)}
+                        >
+                            <SelectTrigger>
+                                <SelectValue placeholder="Select payment method" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="CASH">Cash</SelectItem>
+                                <SelectItem value="MPESA">M-PESA</SelectItem>
+                                <SelectItem value="BANK">Bank Transfer</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    <div>
+                        <Label>Product</Label>
+                        <Select onValueChange={(value) => {
+                            const product = products.find(p => p.id === parseInt(value));
+                            if (product) {
+                                handleAddItem(product);
+                            }
+                        }}>
+                            <SelectTrigger>
+                                <SelectValue placeholder="Select a product" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {products.map((product) => (
+                                    <SelectItem key={product.id} value={product.id.toString()}>
+                                        {product.name} - KSh {product.sell_price.toFixed(2)}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    <Button 
+                        className="w-full" 
+                        onClick={handleCreateSale}
+                        disabled={isSubmitting || selectedItems.length === 0}
                     >
-                        <SelectTrigger>
-                            <SelectValue placeholder="Select payment method" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="CASH">Cash</SelectItem>
-                            <SelectItem value="MPESA">M-PESA</SelectItem>
-                            <SelectItem value="BANK">Bank Transfer</SelectItem>
-                        </SelectContent>
-                    </Select>
+                        {isSubmitting ? 'Creating Sale...' : 'Complete Sale'}
+                    </Button>
                 </div>
 
+                {/* Right Column - Summary */}
                 <div>
-                    <Label>Product</Label>
-                    <Select onValueChange={(value) => {
-                        const product = products.find(p => p.id === parseInt(value));
-                        if (product) {
-                            handleAddItem(product);
-                        }
-                    }}>
-                        <SelectTrigger>
-                            <SelectValue placeholder="Select a product" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {products.map((product) => (
-                                <SelectItem key={product.id} value={product.id.toString()}>
-                                    {product.name} - KSh {product.sell_price.toFixed(2)}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                </div>
-
-                <Button 
-                    className="w-full" 
-                    onClick={handleCreateSale}
-                    disabled={isSubmitting || selectedItems.length === 0}
-                >
-                    {isSubmitting ? 'Creating Sale...' : 'Complete Sale'}
-                </Button>
-            </div>
-
-            {/* Right Column - Summary */}
-            <div>
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Sale Summary</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        {selectedItems.map((item) => (
-                            <div key={item.productId} className="flex items-center justify-between">
-                                <div>
-                                    <p className="font-medium">{item.productName}</p>
-                                    <p className="text-sm text-gray-500">
-                                        KSh {item.unitPrice.toFixed(2)} × {item.quantity}
-                                    </p>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <Input
-                                        type="number"
-                                        value={item.quantity}
-                                        onChange={(e) => handleQuantityChange(item.productId, parseInt(e.target.value))}
-                                        className="w-20"
-                                        min="1"
-                                    />
-                                    <Button
-                                        variant="destructive"
-                                        size="icon"
-                                        onClick={() => handleRemoveItem(item.productId)}
-                                    >
-                                        <X className="h-4 w-4" />
-                                    </Button>
-                                </div>
-                            </div>
-                        ))}
-
-                        <Separator />
-
-                        <div className="space-y-2">
-                            <div className="flex justify-between">
-                                <span>Subtotal:</span>
-                                <span>KSh {calculateSubtotal().toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between">
-                                <span>Discount:</span>
-                                <div className="flex items-center gap-2">
-                                    <Input
-                                        type="number"
-                                        value={discountAmount}
-                                        onChange={(e) => handleDiscountChange(parseFloat(e.target.value) || 0)}
-                                        className="w-24"
-                                        min="0"
-                                        max={calculateSubtotal()}
-                                    />
-                                    <div className="flex items-center">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Sale Summary</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            {selectedItems.map((item) => (
+                                <div key={item.productId} className="flex items-center justify-between">
+                                    <div>
+                                        <p className="font-medium">{item.productName}</p>
+                                        <p className="text-sm text-gray-500">
+                                            KSh {item.unitPrice.toFixed(2)} × {item.quantity}
+                                        </p>
+                                    </div>
+                                    <div className="flex items-center gap-2">
                                         <Input
                                             type="number"
-                                            value={discountPercent}
-                                            onChange={(e) => handleDiscountPercentChange(parseFloat(e.target.value) || 0)}
-                                            className="w-16"
-                                            min="0"
-                                            max="100"
+                                            value={item.quantity}
+                                            onChange={(e) => handleQuantityChange(item.productId, parseInt(e.target.value))}
+                                            className="w-20"
+                                            min="1"
                                         />
-                                        <span className="ml-1">%</span>
+                                        <Button
+                                            variant="destructive"
+                                            size="icon"
+                                            onClick={() => handleRemoveItem(item.productId)}
+                                        >
+                                            <X className="h-4 w-4" />
+                                        </Button>
                                     </div>
                                 </div>
+                            ))}
+
+                            <Separator />
+
+                            <div className="space-y-2">
+                                <div className="flex justify-between">
+                                    <span>Subtotal:</span>
+                                    <span>KSh {calculateSubtotal().toFixed(2)}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span>Discount:</span>
+                                    <div className="flex items-center gap-2">
+                                        <Input
+                                            type="number"
+                                            value={discountAmount}
+                                            onChange={(e) => handleDiscountChange(parseFloat(e.target.value) || 0)}
+                                            className="w-24"
+                                            min="0"
+                                            max={calculateSubtotal()}
+                                        />
+                                        <div className="flex items-center">
+                                            <Input
+                                                type="number"
+                                                value={discountPercent}
+                                                onChange={(e) => handleDiscountPercentChange(parseFloat(e.target.value) || 0)}
+                                                className="w-16"
+                                                min="0"
+                                                max="100"
+                                            />
+                                            <span className="ml-1">%</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="flex justify-between font-bold">
+                                    <span>Total:</span>
+                                    <span>KSh {calculateTotal().toFixed(2)}</span>
+                                </div>
                             </div>
-                            <div className="flex justify-between font-bold">
-                                <span>Total:</span>
-                                <span>KSh {calculateTotal().toFixed(2)}</span>
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
+                        </CardContent>
+                    </Card>
+                </div>
             </div>
-        </div>
+            
+            {currentSale && (
+                <ReceiptDialog
+                    isOpen={showReceiptDialog}
+                    onClose={() => setShowReceiptDialog(false)}
+                    saleId={currentSale}
+                    storeName={STORE_NAME}
+                />
+            )}
+        </>
     );
 }

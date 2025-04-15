@@ -876,6 +876,71 @@ class SaleViewSet(viewsets.ModelViewSet):
             )
         return super().retrieve(request, *args, **kwargs)
 
+    @action(detail=True, methods=['get'])
+    def receipt(self, request, pk=None):
+        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
+        if not is_authenticated:
+            return Response(
+                {"detail": "Authentication required"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        if not is_authorized:
+            return Response(
+                {"detail": "Permission denied"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        try:
+            # Get sale details
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    SELECT 
+                        s.id, s.sale_date, s.total_amount, s.original_amount, s.discount,
+                        s.discount_percentage, s.created_at,
+                        u.username as cashier_name
+                    FROM sales s
+                    JOIN users u ON s.user_id = u.id
+                    WHERE s.id = %s
+                """, [pk])
+                columns = [col[0] for col in cursor.description]
+                sale = dict(zip(columns, cursor.fetchone()))
+
+                # Get sale items
+                cursor.execute("""
+                    SELECT 
+                        si.id, si.quantity, si.unit_price, si.total_price,
+                        p.name as product_name, p.sku
+                    FROM sale_items si
+                    JOIN products p ON si.product_id = p.id
+                    WHERE si.sale_id = %s
+                """, [pk])
+                columns = [col[0] for col in cursor.description]
+                items = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+            # Format the receipt data
+            receipt_data = {
+                'sale': {
+                    'id': sale['id'],
+                    'sale_date': sale['sale_date'].isoformat(),
+                    'total_amount': str(sale['total_amount']),
+                    'original_amount': str(sale['original_amount']),
+                    'discount': str(sale['discount']),
+                    'discount_percentage': str(sale['discount_percentage']),
+                    'created_at': sale['created_at'].isoformat(),
+                    'cashier_name': sale['cashier_name']
+                },
+                'items': items
+            }
+
+            return Response(receipt_data)
+
+        except Exception as e:
+            print(f"Error generating receipt: {str(e)}")
+            return Response(
+                {"detail": "Error generating receipt"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 
 class ActivityViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Activity.objects.all()
