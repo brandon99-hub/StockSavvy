@@ -771,7 +771,9 @@ class SaleViewSet(viewsets.ModelViewSet):
             # Start transaction
             with transaction.atomic():
                 # Create sale
-                sale_serializer = self.get_serializer(data=request.data)
+                sale_data = request.data.copy()
+                sale_data['user_id'] = user_id
+                sale_serializer = self.get_serializer(data=sale_data)
                 if not sale_serializer.is_valid():
                     logger.warning(f'Invalid sale data: {sale_serializer.errors}')
                     raise APIError(sale_serializer.errors)
