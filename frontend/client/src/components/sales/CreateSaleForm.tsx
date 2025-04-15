@@ -226,9 +226,11 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                     await apiRequest('/api/activities/', {
                         method: 'POST',
                         body: JSON.stringify({
-                            type: 'sale',
-                            description: `Sale created: KSh ${finalAmount.toFixed(2)}`,
-                            status: 'completed'
+                            type: 'sale_created',
+                            description: `Sale #${response.id} created`,
+                            status: 'completed',
+                            user_id: user?.id,
+                            created_at: new Date().toISOString()
                         }),
                         headers: {
                             'Content-Type': 'application/json'

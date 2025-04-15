@@ -139,24 +139,25 @@ const ReceiptDialog: React.FC<ReceiptDialogProps> = ({ isOpen, onClose, saleId, 
             });
 
             // Log receipt printing activity
-            try {
-                await apiRequest('/api/activities/', {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        type: 'receipt_printed',
-                        description: `Receipt printed for sale #${saleId}`,
-                        status: 'completed'
-                    }),
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                });
+            await apiRequest('/api/activities/', {
+                method: 'POST',
+                body: JSON.stringify({
+                    type: 'receipt_printed',
+                    description: `Receipt printed for sale #${saleId}`,
+                    status: 'completed',
+                    user_id: receiptData?.sale?.user_id,
+                    created_at: new Date().toISOString()
+                }),
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            }).catch(error => {
+                console.error('Error logging activity:', error);
+                // Don't show error toast for activity logging failures
+            });
 
-                // Refresh activities
-                await queryClient.invalidateQueries({ queryKey: ['/api/activities'] });
-            } catch (error) {
-                console.error('Error logging receipt printing:', error);
-            }
+            // Refresh activities
+            await queryClient.invalidateQueries({ queryKey: ['/api/activities'] });
 
             onClose();
         } catch (error) {
