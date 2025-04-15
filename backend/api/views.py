@@ -150,7 +150,7 @@ class UserViewSet(viewsets.ModelViewSet):
 
             if user is not None and user.is_active:
                 # Generate token and return user data
-                token = f"token_{user.id}_{user.username}"
+                token = f"token_{user.id}"
                 
                 # Create user data response
                 user_data = {
