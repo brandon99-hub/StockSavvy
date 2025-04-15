@@ -11,6 +11,7 @@ import Receipt from './Receipt';
 import { useToast } from '../../hooks/use-toast';
 import { Printer, X } from 'lucide-react';
 import { apiRequest } from '../../lib/queryClient';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface ReceiptDialogProps {
     isOpen: boolean;
@@ -21,8 +22,10 @@ interface ReceiptDialogProps {
 
 const ReceiptDialog: React.FC<ReceiptDialogProps> = ({ isOpen, onClose, saleId, storeName }) => {
     const { toast } = useToast();
+    const queryClient = useQueryClient();
     const [receiptData, setReceiptData] = useState<any>(null);
     const [isLoading, setIsLoading] = useState(false);
+    const [isPrinting, setIsPrinting] = useState(false);
 
     useEffect(() => {
         if (isOpen && saleId) {
@@ -49,7 +52,8 @@ const ReceiptDialog: React.FC<ReceiptDialogProps> = ({ isOpen, onClose, saleId, 
         }
     };
 
-    const handlePrint = () => {
+    const handlePrint = async () => {
+        setIsPrinting(true);
         const printWindow = window.open('', '_blank');
         if (!printWindow) {
             toast({
@@ -57,11 +61,15 @@ const ReceiptDialog: React.FC<ReceiptDialogProps> = ({ isOpen, onClose, saleId, 
                 description: "Could not open print window. Please check your browser settings.",
                 variant: "destructive"
             });
+            setIsPrinting(false);
             return;
         }
 
         const receiptElement = document.getElementById('receipt');
-        if (!receiptElement) return;
+        if (!receiptElement) {
+            setIsPrinting(false);
+            return;
+        }
 
         const printContent = `
             <html>
@@ -101,15 +109,64 @@ const ReceiptDialog: React.FC<ReceiptDialogProps> = ({ isOpen, onClose, saleId, 
 
         printWindow.document.write(printContent);
         printWindow.document.close();
+
+        // Wait for print to complete
+        const printComplete = new Promise<void>((resolve) => {
+            printWindow.onbeforeunload = () => {
+                resolve();
+            };
+        });
+
+        await printComplete;
+        setIsPrinting(false);
     };
 
-    const handlePrintBoth = () => {
-        handlePrint();
-        toast({
-            title: "Receipts Generated",
-            description: "Two copies of the receipt have been generated for printing.",
-        });
-        onClose();
+    const handlePrintBoth = async () => {
+        try {
+            // Print first copy
+            await handlePrint();
+            
+            // Small delay before printing second copy
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Print second copy
+            await handlePrint();
+
+            // Show success notification
+            toast({
+                title: "Receipts Generated",
+                description: "Two copies of the receipt have been generated for printing.",
+            });
+
+            // Log receipt printing activity
+            try {
+                await apiRequest('/api/activities/', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        type: 'receipt_printed',
+                        description: `Receipt printed for sale #${saleId}`,
+                        status: 'completed'
+                    }),
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                // Refresh activities
+                await queryClient.invalidateQueries({ queryKey: ['/api/activities'] });
+            } catch (error) {
+                console.error('Error logging receipt printing:', error);
+            }
+
+            onClose();
+        } catch (error) {
+            console.error('Error printing receipts:', error);
+            toast({
+                title: "Error",
+                description: "Failed to print receipts. Please try again.",
+                variant: "destructive"
+            });
+        }
     };
 
     return (
@@ -138,10 +195,10 @@ const ReceiptDialog: React.FC<ReceiptDialogProps> = ({ isOpen, onClose, saleId, 
                     </Button>
                     <Button 
                         onClick={handlePrintBoth}
-                        disabled={!receiptData || isLoading}
+                        disabled={!receiptData || isLoading || isPrinting}
                     >
                         <Printer className="mr-2 h-4 w-4" />
-                        Print Both Copies
+                        {isPrinting ? 'Printing...' : 'Print Both Copies'}
                     </Button>
                 </DialogFooter>
             </DialogContent>

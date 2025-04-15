@@ -85,7 +85,7 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [showReceiptDialog, setShowReceiptDialog] = useState(false);
     const [currentSale, setCurrentSale] = useState<any>(null);
-    const STORE_NAME = "StockSavvy"; // You can make this configurable later
+    const STORE_NAME = "Mahatma Clothing";
 
     const calculateSubtotal = () => {
         return selectedItems.reduce((total, item) => 
@@ -213,33 +213,37 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                 setCurrentSale(response.sale_id);
                 setShowReceiptDialog(true);
 
-                // Log activity
-                await apiRequest('/api/activities/', {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        type: 'sale',
-                        description: `Sale created: KSh ${finalAmount.toFixed(2)}`,
-                        status: 'completed'
-                    }),
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                });
-
-                // Invalidate relevant queries
-                await Promise.all([
-                    queryClient.invalidateQueries({ queryKey: ['/api/sales'] }),
-                    queryClient.invalidateQueries({ queryKey: ['/api/products'] }),
-                    queryClient.invalidateQueries({ queryKey: ['/api/activities'] }),
-                    queryClient.invalidateQueries({ queryKey: ['dashboard', 'activities'] })
-                ]);
-
                 // Reset form
                 setCustomerName('');
                 setSelectedItems([]);
                 setDiscountAmount(0);
                 setDiscountPercent(0);
                 setPaymentMethod('CASH');
+
+                // Log activity and invalidate queries after successful sale creation
+                try {
+                    await apiRequest('/api/activities/', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            type: 'sale',
+                            description: `Sale created: KSh ${finalAmount.toFixed(2)}`,
+                            status: 'completed'
+                        }),
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    });
+
+                    await Promise.all([
+                        queryClient.invalidateQueries({ queryKey: ['/api/sales'] }),
+                        queryClient.invalidateQueries({ queryKey: ['/api/products'] }),
+                        queryClient.invalidateQueries({ queryKey: ['/api/activities'] }),
+                        queryClient.invalidateQueries({ queryKey: ['dashboard', 'activities'] })
+                    ]);
+                } catch (error) {
+                    console.error('Error logging activity:', error);
+                    // Don't show error toast for activity logging failure
+                }
             }
         } catch (error: any) {
             console.error('Error creating sale:', error);
