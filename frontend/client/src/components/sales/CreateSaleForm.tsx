@@ -211,7 +211,7 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                 });
 
                 // Show the receipt dialog with the new sale ID
-                setCurrentSale(response.sale_id);
+                setCurrentSale(response.id);
                 setShowReceiptDialog(true);
 
                 // Reset form
