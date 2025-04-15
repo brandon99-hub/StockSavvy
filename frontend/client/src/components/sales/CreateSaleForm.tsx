@@ -85,6 +85,7 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [showReceiptDialog, setShowReceiptDialog] = useState(false);
     const [currentSale, setCurrentSale] = useState<any>(null);
+    const [saleResponse, setSaleResponse] = useState<any>(null);
     const STORE_NAME = "Mahatma Clothing";
 
     const calculateSubtotal = () => {
@@ -169,13 +170,13 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
             
             const saleData = {
                 sale_date: new Date().toISOString(),
-                created_at: new Date().toISOString(),
                 total_amount: finalAmount,
                 original_amount: subtotal,
                 discount: discountAmount,
                 discount_percentage: discountPercent,
                 customer_name: customerName.trim() || null,
                 payment_method: paymentMethod,
+                user_id: user?.id,
                 sale_items: selectedItems.map(item => ({
                     product_id: item.productId,
                     quantity: item.quantity,
@@ -211,7 +212,8 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                 });
 
                 // Show the receipt dialog with the new sale ID
-                setCurrentSale(response.id);
+                setSaleResponse(response.data);
+                setCurrentSale(response.data.id);
                 setShowReceiptDialog(true);
 
                 // Reset form
@@ -227,7 +229,7 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                         method: 'POST',
                         body: JSON.stringify({
                             type: 'sale_created',
-                            description: `Sale #${response.id} created`,
+                            description: `Sale #${response.data.id} created`,
                             status: 'completed',
                             user_id: user?.id,
                             created_at: new Date().toISOString()
@@ -396,12 +398,11 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                 </div>
             </div>
             
-            {currentSale && (
+            {currentSale && showReceiptDialog && (
                 <ReceiptDialog
+                    sale={response.data}
                     isOpen={showReceiptDialog}
                     onClose={() => setShowReceiptDialog(false)}
-                    saleId={currentSale}
-                    storeName={STORE_NAME}
                 />
             )}
         </>
