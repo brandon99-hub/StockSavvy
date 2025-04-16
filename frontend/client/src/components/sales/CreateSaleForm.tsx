@@ -47,6 +47,8 @@ import {
 import { AxiosResponse } from 'axios';
 import ReceiptDialog from './ReceiptDialog';
 
+const STORE_NAME = "Mahatma Clothing";
+
 type SaleItem = {
     productId: number;
     quantity: number;
@@ -86,7 +88,6 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
     const [showReceiptDialog, setShowReceiptDialog] = useState(false);
     const [currentSale, setCurrentSale] = useState<any>(null);
     const [saleResponse, setSaleResponse] = useState<any>(null);
-    const STORE_NAME = "Mahatma Clothing";
 
     const calculateSubtotal = () => {
         return selectedItems.reduce((total, item) => 
@@ -406,9 +407,12 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
             
             {currentSale && showReceiptDialog && (
                 <ReceiptDialog
-                    saleId={currentSale}
                     isOpen={showReceiptDialog}
-                    onClose={() => setShowReceiptDialog(false)}
+                    saleId={currentSale}
+                    onClose={() => {
+                        setShowReceiptDialog(false);
+                        setCurrentSale(null);
+                    }}
                     storeName={STORE_NAME}
                 />
             )}

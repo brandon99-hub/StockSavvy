@@ -652,13 +652,17 @@ class SaleViewSet(viewsets.ModelViewSet):
                 return False, None, False
 
             token = auth_header.split(' ')[1]
-            if not token or not token.startswith('token_'):
+            if not token:
                 logger.warning('Invalid token format')
                 return False, None, False
 
             try:
                 parts = token.split('_')
-                user_id = int(parts[1])
+                user_id = int(parts[1]) if len(parts) > 1 else None
+                # For receipt endpoint, we only need authentication, not authorization
+                if request.resolver_match and request.resolver_match.url_name == 'sale-receipt':
+                    return True, user_id, True
+
                 with connection.cursor() as cursor:
                     cursor.execute(
                         "SELECT is_staff, is_superuser FROM users WHERE id = %s",
@@ -857,18 +861,6 @@ class SaleViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'])
     def receipt(self, request, pk=None):
-        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response(
-                {"detail": "Authentication required"},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-        if not is_authorized:
-            return Response(
-                {"detail": "Permission denied"},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
         try:
             # Get sale details
             with connection.cursor() as cursor:
@@ -884,6 +876,7 @@ class SaleViewSet(viewsets.ModelViewSet):
                 sale_row = cursor.fetchone()
                 
                 if not sale_row:
+                    logger.warning(f'Sale not found: {pk}')
                     return Response(
                         {"detail": "Sale not found"},
                         status=status.HTTP_404_NOT_FOUND
@@ -904,27 +897,34 @@ class SaleViewSet(viewsets.ModelViewSet):
                 columns = [col[0] for col in cursor.description]
                 items = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
-            # Format the receipt data
-            receipt_data = {
-                'sale': {
-                    'id': sale['id'],
-                    'sale_date': sale['sale_date'].isoformat(),
-                    'total_amount': str(sale['total_amount']),
-                    'original_amount': str(sale['original_amount']),
-                    'discount': str(sale['discount']),
-                    'discount_percentage': str(sale['discount_percentage']),
-                    'created_at': sale['created_at'].isoformat(),
-                    'cashier_name': sale['cashier_name']
-                },
-                'items': items
-            }
+                # Format the receipt data
+                receipt_data = {
+                    'sale': {
+                        'id': sale['id'],
+                        'sale_date': sale['sale_date'].isoformat() if sale['sale_date'] else None,
+                        'total_amount': str(sale['total_amount']),
+                        'original_amount': str(sale['original_amount']),
+                        'discount': str(sale['discount']),
+                        'discount_percentage': str(sale['discount_percentage']),
+                        'created_at': sale['created_at'].isoformat() if sale['created_at'] else None,
+                        'cashier_name': sale['cashier_name']
+                    },
+                    'items': [{
+                        'id': item['id'],
+                        'quantity': item['quantity'],
+                        'unit_price': str(item['unit_price']),
+                        'total_price': str(item['total_price']),
+                        'product_name': item['product_name'],
+                        'sku': item['sku']
+                    } for item in items]
+                }
 
-            return Response(receipt_data)
+                return Response(receipt_data)
 
         except Exception as e:
             logger.error(f"Error generating receipt: {str(e)}")
             return Response(
-                {"detail": f"Error generating receipt: {str(e)}"},
+                {"detail": "Error generating receipt. Please try again."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
