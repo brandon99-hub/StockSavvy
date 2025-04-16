@@ -876,9 +876,9 @@ class SaleViewSet(viewsets.ModelViewSet):
                     SELECT 
                         s.id, s.sale_date, s.total_amount, s.original_amount, s.discount,
                         s.discount_percentage, s.created_at,
-                        u.username as cashier_name
+                        COALESCE(u.username, 'System') as cashier_name
                     FROM sales s
-                    JOIN users u ON s.user_id = u.id
+                    LEFT JOIN users u ON s.user_id = u.id
                     WHERE s.id = %s
                 """, [pk])
                 sale_row = cursor.fetchone()
