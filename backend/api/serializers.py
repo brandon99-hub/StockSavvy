@@ -83,9 +83,9 @@ class ProductSerializer(serializers.ModelSerializer):
         validated_data['buy_price'] = str(validated_data['buy_price'])
         validated_data['sell_price'] = str(validated_data['sell_price'])
         
-        # Set timestamps
-        validated_data['created_at'] = datetime.datetime.now()
-        validated_data['updated_at'] = datetime.datetime.now()
+        # Set timestamps with timezone awareness
+        validated_data['created_at'] = timezone.now()
+        validated_data['updated_at'] = timezone.now()
         
         return super().create(validated_data)
 
@@ -103,8 +103,8 @@ class ProductSerializer(serializers.ModelSerializer):
         if 'sell_price' in validated_data:
             validated_data['sell_price'] = str(validated_data['sell_price'])
         
-        # Update timestamp
-        validated_data['updated_at'] = datetime.datetime.now()
+        # Update timestamp with timezone awareness
+        validated_data['updated_at'] = timezone.now()
         
         return super().update(instance, validated_data)
 

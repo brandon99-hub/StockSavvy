@@ -194,7 +194,7 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                 }
             });
             
-            if (response && response.data) {
+            if (response) {
                 const itemCount = selectedItems.reduce((sum, item) => sum + item.quantity, 0);
                 const itemSummary = selectedItems.map(item => 
                     `${item.quantity}x ${item.productName}`
@@ -213,7 +213,7 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                 });
 
                 // Set the sale ID and show the receipt dialog
-                const saleId = response.data.id;
+                const saleId = response.id;
                 if (saleId) {
                     setCurrentSale(saleId);
                     setShowReceiptDialog(true);
