@@ -110,20 +110,20 @@ class RestockRule(models.Model):
         db_table = 'restock_rules'
 
 class SaleItem(models.Model):
-    sale = models.ForeignKey('Sale', on_delete=models.CASCADE, related_name='items')
-    product = models.ForeignKey(Product, on_delete=models.PROTECT)
+    sale = models.ForeignKey('Sale', models.DO_NOTHING, db_constraint=False)
+    product = models.ForeignKey(Product, models.DO_NOTHING, db_constraint=False)
     quantity = models.IntegerField()
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
     total_price = models.DecimalField(max_digits=10, decimal_places=2)
 
     class Meta:
-        managed = True
+        managed = False
         db_table = 'sale_items'
 
 class Sale(models.Model):
     sale_date = models.DateTimeField()
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
-    user = models.ForeignKey(User, on_delete=models.SET_NULL, blank=True, null=True)
+    user = models.ForeignKey(User, models.DO_NOTHING, blank=True, null=True, db_constraint=False)
     created_at = models.DateTimeField()
     discount = models.DecimalField(max_digits=10, decimal_places=2)
     discount_percentage = models.DecimalField(max_digits=10, decimal_places=2)
@@ -132,7 +132,7 @@ class Sale(models.Model):
     payment_method = models.CharField(max_length=10, choices=[('CASH', 'Cash'), ('MPESA', 'M-PESA'), ('BANK', 'Bank Transfer')], default='CASH')
 
     class Meta:
-        managed = True
+        managed = False
         db_table = 'sales'
 
 class Activity(models.Model):
