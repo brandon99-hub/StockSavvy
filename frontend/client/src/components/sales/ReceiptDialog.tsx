@@ -160,7 +160,7 @@ const ReceiptDialog: React.FC<ReceiptDialogProps> = ({ isOpen, onClose, saleId, 
             await queryClient.invalidateQueries({ queryKey: ['/api/activities'] });
 
             onClose();
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error printing receipts:', error);
             toast({
                 title: "Error",
