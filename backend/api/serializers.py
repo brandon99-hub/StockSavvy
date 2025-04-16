@@ -131,6 +131,7 @@ class SaleItemSerializer(serializers.ModelSerializer):
 
 class SaleSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
+    user_id = serializers.IntegerField(write_only=True)
     items = SaleItemSerializer(many=True, read_only=True)
     total_amount = serializers.DecimalField(max_digits=10, decimal_places=2, coerce_to_string=True)
     discount = serializers.DecimalField(max_digits=10, decimal_places=2, coerce_to_string=True, required=False)
@@ -142,7 +143,7 @@ class SaleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Sale
         fields = [
-            'id', 'sale_date', 'total_amount', 'user', 'created_at',
+            'id', 'sale_date', 'total_amount', 'user', 'user_id', 'created_at',
             'discount', 'discount_percentage', 'original_amount', 'items'
         ]
 

@@ -702,7 +702,7 @@ class SaleViewSet(viewsets.ModelViewSet):
                             sale_id,
                             COUNT(*) as items_count,
                             SUM(si.quantity) as total_quantity,
-                            STRING_AGG(p.name, ', ') as product_names
+                            STRING_AGG(CONCAT(p.name, ' (', si.quantity, ')'), ', ') as product_names
                         FROM sale_items si
                         JOIN products p ON si.product_id = p.id
                         GROUP BY sale_id
@@ -718,12 +718,12 @@ class SaleViewSet(viewsets.ModelViewSet):
                         u.name as sold_by,
                         COALESCE(sic.items_count, 0) as items_count,
                         COALESCE(sic.total_quantity, 0) as total_quantity,
-                        COALESCE(sic.product_names, '') as product_names,
+                        COALESCE(sic.product_names, 'No items') as product_names,
                         s.created_at
                     FROM sales s
                     LEFT JOIN users u ON s.user_id = u.id
                     LEFT JOIN sale_items_count sic ON s.id = sic.sale_id
-                    ORDER BY s.sale_date DESC
+                    ORDER BY s.created_at DESC
                 """)
                 columns = [col[0] for col in cursor.description]
                 sales = [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -736,22 +736,11 @@ class SaleViewSet(viewsets.ModelViewSet):
                     if 'created_at' in sale and sale['created_at']:
                         sale['created_at'] = sale['created_at'].isoformat()
                     
-                    # Set default username if none
-                    if not sale['sold_by']:
-                        sale['sold_by'] = 'System'
-                    
                     # Format items display
-                    sale['items'] = f"{sale['total_quantity']} items" if sale['total_quantity'] else "0 items"
-                    
-                    # Format product names (limit to first 3 products)
-                    if sale['product_names']:
-                        products = sale['product_names'].split(', ')
-                        if len(products) > 3:
-                            sale['product_names'] = ', '.join(products[:3]) + f' and {len(products) - 3} more'
-                        else:
-                            sale['product_names'] = ', '.join(products)
+                    if sale['total_quantity'] > 0:
+                        sale['items'] = sale['product_names']
                     else:
-                        sale['product_names'] = 'No products'
+                        sale['items'] = 'No items'
 
                 return Response(sales)
         except Exception as e:
