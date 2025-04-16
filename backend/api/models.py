@@ -128,8 +128,6 @@ class Sale(models.Model):
     discount = models.DecimalField(max_digits=10, decimal_places=2)
     discount_percentage = models.DecimalField(max_digits=10, decimal_places=2)
     original_amount = models.DecimalField(max_digits=10, decimal_places=2)
-    customer_name = models.CharField(max_length=255, null=True, blank=True)
-    payment_method = models.CharField(max_length=10, choices=[('CASH', 'Cash'), ('MPESA', 'M-PESA'), ('BANK', 'Bank Transfer')], default='CASH')
 
     class Meta:
         managed = False
