@@ -5,6 +5,7 @@ from .models import (
     SaleItem, Sale, Activity
 )
 import datetime
+from django.utils import timezone
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -136,7 +137,7 @@ class SaleSerializer(serializers.ModelSerializer):
     discount_percentage = serializers.DecimalField(max_digits=5, decimal_places=2, coerce_to_string=True, required=False)
     original_amount = serializers.DecimalField(max_digits=10, decimal_places=2, coerce_to_string=True, required=False)
     sale_date = serializers.DateTimeField(format='iso-8601')
-    created_at = serializers.DateTimeField(format='iso-8601')
+    created_at = serializers.DateTimeField(format='iso-8601', required=False)
     
     class Meta:
         model = Sale
@@ -144,6 +145,10 @@ class SaleSerializer(serializers.ModelSerializer):
             'id', 'sale_date', 'total_amount', 'user', 'created_at',
             'discount', 'discount_percentage', 'original_amount', 'items'
         ]
+
+    def create(self, validated_data):
+        validated_data['created_at'] = timezone.now()
+        return super().create(validated_data)
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
