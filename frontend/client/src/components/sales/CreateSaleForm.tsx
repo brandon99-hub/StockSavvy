@@ -211,10 +211,14 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                     variant: 'default',
                 });
 
-                // Show the receipt dialog with the new sale ID
-                setSaleResponse(response.data);
-                setCurrentSale(response.data.id);
-                setShowReceiptDialog(true);
+                // Set the sale ID and show the receipt dialog
+                const saleId = response.data.id;
+                if (saleId) {
+                    setCurrentSale(saleId);
+                    setShowReceiptDialog(true);
+                } else {
+                    throw new Error('Invalid sale ID received from server');
+                }
 
                 // Reset form
                 setCustomerName('');
@@ -229,7 +233,7 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                         method: 'POST',
                         body: JSON.stringify({
                             type: 'sale_created',
-                            description: `Sale #${response.data.id} created`,
+                            description: `Sale #${saleId} created`,
                             status: 'completed',
                             user_id: user?.id,
                             created_at: new Date().toISOString()
