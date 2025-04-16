@@ -193,7 +193,7 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                 }
             });
             
-            if (response) {
+            if (response && response.data) {
                 const itemCount = selectedItems.reduce((sum, item) => sum + item.quantity, 0);
                 const itemSummary = selectedItems.map(item => 
                     `${item.quantity}x ${item.productName}`
@@ -249,6 +249,8 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                     console.error('Error logging activity:', error);
                     // Don't show error toast for activity logging failure
                 }
+            } else {
+                throw new Error('Invalid response from server');
             }
         } catch (error: any) {
             console.error('Error creating sale:', error);
