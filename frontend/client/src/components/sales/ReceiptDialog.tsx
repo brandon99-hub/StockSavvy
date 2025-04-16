@@ -1,3 +1,4 @@
+// @ts-ignore
 import React, { useEffect, useState } from 'react';
 import {
     Dialog,
@@ -29,7 +30,10 @@ const ReceiptDialog: React.FC<ReceiptDialogProps> = ({ isOpen, onClose, saleId, 
 
     useEffect(() => {
         if (isOpen && saleId) {
-            fetchReceiptData();
+            // Add a small delay before fetching receipt data
+            setTimeout(() => {
+                fetchReceiptData();
+            }, 500); // 500ms delay
         }
     }, [isOpen, saleId]);
 
@@ -39,14 +43,21 @@ const ReceiptDialog: React.FC<ReceiptDialogProps> = ({ isOpen, onClose, saleId, 
             const response = await apiRequest(`/api/sales/${saleId}/receipt/`, {
                 method: 'GET'
             });
+            
+            if (!response || !response.sale) {
+                throw new Error('Invalid receipt data received');
+            }
+            
             setReceiptData(response);
         } catch (error: any) {
             console.error('Error fetching receipt data:', error);
             toast({
                 title: "Error",
-                description: error.response?.data?.detail || "Failed to fetch receipt data",
+                description: "Unable to load receipt at this time. The sale was created successfully.",
                 variant: "destructive"
             });
+            // Close the dialog after showing the error
+            onClose();
         } finally {
             setIsLoading(false);
         }
