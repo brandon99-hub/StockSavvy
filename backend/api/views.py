@@ -665,13 +665,15 @@ class SaleViewSet(viewsets.ModelViewSet):
 
                 with connection.cursor() as cursor:
                     cursor.execute(
-                        "SELECT is_staff, is_superuser FROM users WHERE id = %s",
+                        "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
                         [user_id]
                     )
                     row = cursor.fetchone()
                     if row:
-                        is_staff, is_superuser = row
-                        return True, user_id, is_staff or is_superuser
+                        is_staff, is_superuser, role = row
+                        # Allow access if user is staff, superuser, admin, or manager
+                        is_authorized = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager', 'staff'])
+                        return True, user_id, is_authorized
             except (IndexError, ValueError) as e:
                 logger.error(f'Error parsing token: {str(e)}')
                 return False, None, False
@@ -713,7 +715,7 @@ class SaleViewSet(viewsets.ModelViewSet):
                         s.discount::float,
                         s.discount_percentage::float,
                         s.user_id,
-                        u.username as sold_by,
+                        u.name as sold_by,
                         COALESCE(sic.items_count, 0) as items_count,
                         COALESCE(sic.total_quantity, 0) as total_quantity,
                         COALESCE(sic.product_names, '') as product_names,
@@ -868,7 +870,7 @@ class SaleViewSet(viewsets.ModelViewSet):
                     SELECT 
                         s.id, s.sale_date, s.total_amount, s.original_amount, s.discount,
                         s.discount_percentage, s.created_at,
-                        COALESCE(u.username, 'System') as cashier_name
+                        COALESCE(u.name, 'Administrator') as cashier_name
                     FROM sales s
                     LEFT JOIN users u ON s.user_id = u.id
                     WHERE s.id = %s
@@ -985,7 +987,7 @@ class ActivityViewSet(viewsets.ModelViewSet):
                         a.description,
                         a.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Nairobi' as created_at,
                         a.status,
-                        u.username as user_name,
+                        u.name as user_name,
                         CASE 
                             WHEN a.type = 'sale' THEN 'sale'
                             WHEN a.type = 'restock' THEN 'restock'
@@ -1425,7 +1427,7 @@ class AnalyticsViewSet(viewsets.ViewSet):
                         a.description,
                         a.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Nairobi' as created_at,
                         a.status,
-                        u.username as user_name,
+                        u.name as user_name,
                         CASE 
                             WHEN a.type = 'sale' THEN 'sale'
                             WHEN a.type = 'restock' THEN 'restock'
