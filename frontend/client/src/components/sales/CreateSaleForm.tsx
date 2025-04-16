@@ -400,9 +400,10 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
             
             {currentSale && showReceiptDialog && (
                 <ReceiptDialog
-                    sale={response.data}
+                    saleId={currentSale}
                     isOpen={showReceiptDialog}
                     onClose={() => setShowReceiptDialog(false)}
+                    storeName={STORE_NAME}
                 />
             )}
         </>
