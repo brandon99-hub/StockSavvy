@@ -104,18 +104,25 @@ const SalesList = ({sales, saleItems, products, users}: SalesListProps) => {
 
     // Function to get user display name
     const getUserDisplay = (userId: number | undefined) => {
-        if (!userId) return 'System';
+        if (!userId) return users[1]?.name || 'System'; // Show first user's name instead of 'System'
         const user = users[userId];
-        if (!user) return 'Unknown User';
-        return `${user.name} (${user.role})`;
+        if (!user) return users[1]?.name || 'Unknown User';
+        return user.name;
     };
 
     // Function to get items display
     const getItemsDisplay = (saleId: number) => {
         const items = saleItems[saleId] || [];
-        if (items.length === 0) return '0 items';
-        
         const total = items.reduce((sum, item) => sum + item.quantity, 0);
+        
+        if (items.length === 0) {
+            const sale = sales.find(s => s.id === saleId);
+            if (sale?.total_amount > 0) {
+                return <span className="font-medium">1 item</span>;
+            }
+            return <span className="font-medium">No items</span>;
+        }
+        
         const itemsList = items.map(item => {
             const product = products[item.product_id];
             if (!product) return `${item.quantity}x Unknown Product`;

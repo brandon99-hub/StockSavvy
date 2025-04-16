@@ -119,15 +119,41 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
     const handleAddItem = (product: Product) => {
         if (!product) return;
         
+        // Check if product is out of stock
+        if (product.quantity <= 0) {
+            toast({
+                title: '❌ Out of Stock',
+                description: `Sorry, ${product.name} is currently out of stock. Please check back later.`,
+                variant: 'destructive',
+            });
+            return;
+        }
+        
         const existingItem = selectedItems.find(item => item.productId === product.id);
         if (existingItem) {
+            // Check if adding one more would exceed available stock
+            if (existingItem.quantity + 1 > product.quantity) {
+                toast({
+                    title: '⚠️ Limited Stock',
+                    description: `Only ${product.quantity} units of ${product.name} available.`,
+                    variant: 'destructive',
+                });
+                return;
+            }
+            
             setSelectedItems(selectedItems.map(item =>
                 item.productId === product.id
                     ? { ...item, quantity: item.quantity + 1 }
                     : item
             ));
         } else {
-            setSelectedItems([...selectedItems, { productId: product.id, quantity: 1, unitPrice: product.sell_price, totalPrice: product.sell_price, productName: product.name }]);
+            setSelectedItems([...selectedItems, { 
+                productId: product.id, 
+                quantity: 1, 
+                unitPrice: product.sell_price, 
+                totalPrice: product.sell_price, 
+                productName: product.name 
+            }]);
         }
     };
 
@@ -137,6 +163,19 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
 
     const handleQuantityChange = (productId: number, quantity: number) => {
         if (quantity < 1) return;
+        
+        const product = products.find(p => p.id === productId);
+        if (!product) return;
+
+        // Check if requested quantity exceeds available stock
+        if (quantity > product.quantity) {
+            toast({
+                title: '⚠️ Limited Stock',
+                description: `Only ${product.quantity} units of ${product.name} available.`,
+                variant: 'destructive',
+            });
+            return;
+        }
         
         setSelectedItems(selectedItems.map(item =>
             item.productId === productId
