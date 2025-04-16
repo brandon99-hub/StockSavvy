@@ -718,7 +718,10 @@ class SaleViewSet(viewsets.ModelViewSet):
                         u.name as sold_by,
                         COALESCE(sic.items_count, 0) as items_count,
                         COALESCE(sic.total_quantity, 0) as total_quantity,
-                        COALESCE(sic.product_names, 'No items') as product_names,
+                        CASE 
+                            WHEN sic.product_names IS NULL THEN 'No items'
+                            ELSE sic.product_names
+                        END as items,
                         s.created_at
                     FROM sales s
                     LEFT JOIN users u ON s.user_id = u.id
@@ -735,12 +738,6 @@ class SaleViewSet(viewsets.ModelViewSet):
                         sale['sale_date'] = sale['sale_date'].isoformat()
                     if 'created_at' in sale and sale['created_at']:
                         sale['created_at'] = sale['created_at'].isoformat()
-                    
-                    # Format items display
-                    if sale['total_quantity'] > 0:
-                        sale['items'] = sale['product_names']
-                    else:
-                        sale['items'] = 'No items'
 
                 return Response(sales)
         except Exception as e:
