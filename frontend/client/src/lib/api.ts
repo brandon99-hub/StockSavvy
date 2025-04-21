@@ -26,31 +26,31 @@ class APIError extends Error {
 }
 
 export const createApiClient = (): AxiosInstance => {
-    const api = axios.create({
+const api = axios.create({
         baseURL: BASE_URL,
-        headers: {
-            'Content-Type': 'application/json',
+  headers: {
+    'Content-Type': 'application/json',
         },
-    });
+});
 
     // Request interceptor
-    api.interceptors.request.use(
-        (config) => {
+api.interceptors.request.use(
+  (config) => {
             const { getToken } = useAuth();
             const token = getToken();
-            if (token) {
+    if (token) {
                 config.headers.Authorization = `Bearer ${token}`;
-            }
-            return config;
-        },
-        (error) => {
-            return Promise.reject(error);
-        }
-    );
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
 
     // Response interceptor
-    api.interceptors.response.use(
-        (response) => response,
+api.interceptors.response.use(
+  (response) => response,
         (error: AxiosError<ErrorResponse>) => {
             if (error.response) {
                 const { status, data } = error.response;
@@ -59,7 +59,7 @@ export const createApiClient = (): AxiosInstance => {
                 if (status === 401) {
                     const { logout } = useAuth();
                     logout();
-                    window.location.href = '/login';
+      window.location.href = '/login';
                     return Promise.reject(new APIError('Session expired', status));
                 }
 

@@ -46,6 +46,16 @@ import {
 } from 'lucide-react';
 import { AxiosResponse } from 'axios';
 import ReceiptDialog from './ReceiptDialog';
+import {
+    Command,
+    CommandDialog,
+    CommandEmpty,
+    CommandGroup,
+    CommandInput,
+    CommandItem,
+    CommandList,
+} from '../ui/command';
+import {Popover, PopoverContent, PopoverTrigger} from '../ui/popover';
 
 const STORE_NAME = "Mahatma Clothing";
 
@@ -88,6 +98,7 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
     const [showReceiptDialog, setShowReceiptDialog] = useState(false);
     const [currentSale, setCurrentSale] = useState<any>(null);
     const [saleResponse, setSaleResponse] = useState<any>(null);
+    const [open, setOpen] = useState(false);
 
     const calculateSubtotal = () => {
         return selectedItems.reduce((total, item) => 
@@ -110,7 +121,8 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
 
     const handleDiscountPercentChange = (percent: number) => {
         const subtotal = calculateSubtotal();
-        const validPercent = Math.min(percent, 100);
+        // Ensure percent is between 0 and 100, and format to have max 7 digits before decimal
+        const validPercent = Math.min(Math.max(0, Number(percent.toFixed(2))), 100);
         const discountValue = (validPercent / 100) * subtotal;
         setDiscountAmount(discountValue);
         setDiscountPercent(validPercent);
@@ -213,7 +225,7 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                 total_amount: finalAmount,
                 original_amount: subtotal,
                 discount: discountAmount,
-                discount_percentage: discountPercent,
+                discount_percentage: Number(discountPercent.toFixed(2)),
                 customer_name: customerName.trim() || null,
                 payment_method: paymentMethod,
                 user_id: user?.id,
@@ -310,139 +322,168 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
 
     return (
         <>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Left Column - Form */}
-                <div className="space-y-6">
-                    <div>
-                        <Label>Customer Name (Optional)</Label>
-                        <Input
-                            placeholder="Enter customer name"
-                            value={customerName}
-                            onChange={(e) => setCustomerName(e.target.value)}
-                        />
-                    </div>
-
-                    <div>
-                        <Label>Payment Method</Label>
-                        <Select
-                            value={paymentMethod}
-                            onValueChange={(value: 'CASH' | 'MPESA' | 'BANK') => setPaymentMethod(value)}
-                        >
-                            <SelectTrigger>
-                                <SelectValue placeholder="Select payment method" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="CASH">Cash</SelectItem>
-                                <SelectItem value="MPESA">M-PESA</SelectItem>
-                                <SelectItem value="BANK">Bank Transfer</SelectItem>
-                            </SelectContent>
-                        </Select>
-                    </div>
-
-                    <div>
-                        <Label>Product</Label>
-                        <Select onValueChange={(value) => {
-                            const product = products.find(p => p.id === parseInt(value));
-                            if (product) {
-                                handleAddItem(product);
-                            }
-                        }}>
-                            <SelectTrigger>
-                                <SelectValue placeholder="Select a product" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {products.map((product) => (
-                                    <SelectItem key={product.id} value={product.id.toString()}>
-                                        {product.name} - KSh {product.sell_price.toFixed(2)}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    </div>
-
-                    <Button 
-                        className="w-full" 
-                        onClick={handleCreateSale}
-                        disabled={isSubmitting || selectedItems.length === 0}
-                    >
-                        {isSubmitting ? 'Creating Sale...' : 'Complete Sale'}
-                    </Button>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Left Column - Form */}
+            <div className="space-y-6">
+                <div>
+                    <Label>Customer Name (Optional)</Label>
+                    <Input
+                        placeholder="Enter customer name"
+                        value={customerName}
+                        onChange={(e) => setCustomerName(e.target.value)}
+                    />
                 </div>
 
-                {/* Right Column - Summary */}
                 <div>
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Sale Summary</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            {selectedItems.map((item) => (
-                                <div key={item.productId} className="flex items-center justify-between">
-                                    <div>
-                                        <p className="font-medium">{item.productName}</p>
-                                        <p className="text-sm text-gray-500">
-                                            KSh {item.unitPrice.toFixed(2)} × {item.quantity}
-                                        </p>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <Input
-                                            type="number"
-                                            value={item.quantity}
-                                            onChange={(e) => handleQuantityChange(item.productId, parseInt(e.target.value))}
-                                            className="w-20"
-                                            min="1"
-                                        />
-                                        <Button
-                                            variant="destructive"
-                                            size="icon"
-                                            onClick={() => handleRemoveItem(item.productId)}
-                                        >
-                                            <X className="h-4 w-4" />
-                                        </Button>
-                                    </div>
-                                </div>
-                            ))}
+                    <Label>Payment Method</Label>
+                    <Select
+                        value={paymentMethod}
+                        onValueChange={(value: 'CASH' | 'MPESA' | 'BANK') => setPaymentMethod(value)}
+                    >
+                        <SelectTrigger>
+                            <SelectValue placeholder="Select payment method" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="CASH">Cash</SelectItem>
+                            <SelectItem value="MPESA">M-PESA</SelectItem>
+                            <SelectItem value="BANK">Bank Transfer</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
 
-                            <Separator />
+                <div>
+                    <Label>Product</Label>
+                        <Popover open={open} onOpenChange={setOpen}>
+                            <PopoverTrigger asChild>
+                                <Button
+                                    variant="outline"
+                                    role="combobox"
+                                    aria-expanded={open}
+                                    className="w-full justify-between"
+                                >
+                                    Select a product...
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[400px] p-0">
+                                <Command>
+                                    <CommandInput placeholder="Search products..." />
+                                    <CommandList>
+                                        <CommandEmpty>No products found.</CommandEmpty>
+                                        <CommandGroup>
+                                            {products.map((product) => (
+                                                <CommandItem
+                                                    key={product.id}
+                                                    value={`${product.name} ${product.description || ''}`}
+                                                    onSelect={() => {
+                            handleAddItem(product);
+                                                        setOpen(false);
+                                                    }}
+                                                >
+                                                    <div className="flex flex-col w-full">
+                                                        <div className="flex justify-between">
+                                                            <span className="font-medium">{product.name}</span>
+                                                            <span className="text-muted-foreground">
+                                                                KSh {product.sell_price.toFixed(2)}
+                                                            </span>
+                                                        </div>
+                                                        {product.description && (
+                                                            <span className="text-sm text-muted-foreground">
+                                                                {product.description}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </CommandItem>
+                                            ))}
+                                        </CommandGroup>
+                                    </CommandList>
+                                </Command>
+                            </PopoverContent>
+                        </Popover>
+                </div>
 
-                            <div className="space-y-2">
-                                <div className="flex justify-between">
-                                    <span>Subtotal:</span>
-                                    <span>KSh {calculateSubtotal().toFixed(2)}</span>
+                <Button 
+                    className="w-full" 
+                    onClick={handleCreateSale}
+                    disabled={isSubmitting || selectedItems.length === 0}
+                >
+                    {isSubmitting ? 'Creating Sale...' : 'Complete Sale'}
+                </Button>
+            </div>
+
+            {/* Right Column - Summary */}
+            <div>
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Sale Summary</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        {selectedItems.map((item) => (
+                            <div key={item.productId} className="flex items-center justify-between">
+                                <div>
+                                    <p className="font-medium">{item.productName}</p>
+                                    <p className="text-sm text-gray-500">
+                                        KSh {item.unitPrice.toFixed(2)} × {item.quantity}
+                                    </p>
                                 </div>
-                                <div className="flex justify-between">
-                                    <span>Discount:</span>
-                                    <div className="flex items-center gap-2">
-                                        <Input
-                                            type="number"
-                                            value={discountAmount}
-                                            onChange={(e) => handleDiscountChange(parseFloat(e.target.value) || 0)}
-                                            className="w-24"
-                                            min="0"
-                                            max={calculateSubtotal()}
-                                        />
-                                        <div className="flex items-center">
-                                            <Input
-                                                type="number"
-                                                value={discountPercent}
-                                                onChange={(e) => handleDiscountPercentChange(parseFloat(e.target.value) || 0)}
-                                                className="w-16"
-                                                min="0"
-                                                max="100"
-                                            />
-                                            <span className="ml-1">%</span>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="flex justify-between font-bold">
-                                    <span>Total:</span>
-                                    <span>KSh {calculateTotal().toFixed(2)}</span>
+                                <div className="flex items-center gap-2">
+                                    <Input
+                                        type="number"
+                                        value={item.quantity}
+                                        onChange={(e) => handleQuantityChange(item.productId, parseInt(e.target.value))}
+                                        className="w-20"
+                                        min="1"
+                                    />
+                                    <Button
+                                        variant="destructive"
+                                        size="icon"
+                                        onClick={() => handleRemoveItem(item.productId)}
+                                    >
+                                        <X className="h-4 w-4" />
+                                    </Button>
                                 </div>
                             </div>
-                        </CardContent>
-                    </Card>
-                </div>
+                        ))}
+
+                        <Separator />
+
+                        <div className="space-y-2">
+                            <div className="flex justify-between">
+                                <span>Subtotal:</span>
+                                <span>KSh {calculateSubtotal().toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span>Discount:</span>
+                                <div className="flex items-center gap-2">
+                                    <Input
+                                        type="number"
+                                        value={discountAmount}
+                                        onChange={(e) => handleDiscountChange(parseFloat(e.target.value) || 0)}
+                                        className="w-24"
+                                        min="0"
+                                        max={calculateSubtotal()}
+                                    />
+                                    <div className="flex items-center">
+                                        <Input
+                                            type="number"
+                                            value={discountPercent}
+                                            onChange={(e) => handleDiscountPercentChange(parseFloat(e.target.value) || 0)}
+                                            className="w-16"
+                                            min="0"
+                                            max="100"
+                                        />
+                                        <span className="ml-1">%</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex justify-between font-bold">
+                                <span>Total:</span>
+                                <span>KSh {calculateTotal().toFixed(2)}</span>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
             </div>
+        </div>
             
             {currentSale && showReceiptDialog && (
                 <ReceiptDialog

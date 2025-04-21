@@ -47,6 +47,7 @@ interface Product {
   sell_price?: number;
   status?: string;
   sku?: string;
+  description?: string;
 }
 
 interface Category {
@@ -84,6 +85,21 @@ const ReportGenerator = () => {
         end: endOfDay(new Date())
     });
     const [calendarOpen, setCalendarOpen] = useState(false);
+    const [currentPage, setCurrentPage] = useState(1);
+
+    // Fetch data based on report type and pagination
+    const { data: inventoryData, isLoading: isInventoryLoading } = useQuery({
+        queryKey: ["reports", "inventory", currentPage],
+        queryFn: async () => {
+            const response = await apiRequest(`/api/reports/inventory/?page=${currentPage}`);
+            if (!response?.products || !Array.isArray(response.products)) {
+                console.error('Invalid inventory data format:', response);
+                return { products: [], pagination: { currentPage: 1, totalPages: 1 } };
+            }
+            return response;
+        },
+        staleTime: 60000
+    });
 
     // Fetch data based on report type
     const { data: stats = {}, isLoading: isStatsLoading } = useQuery({
@@ -215,7 +231,7 @@ const ReportGenerator = () => {
     }, {} as Record<number, Product>);
 
     // Generate inventory report data
-    const inventoryData = products.map(product => ({
+    const inventoryDataForReport = inventoryData?.products.map(product => ({
         ...product,
         categoryName: product.category_name || 'Uncategorized',
         status: product.status || 'Unknown',
@@ -247,7 +263,7 @@ const ReportGenerator = () => {
     const handleExportPDF = () => {
         switch (reportType) {
             case 'inventory':
-                exportInventoryToPDF(inventoryData, categoryMap);
+                exportInventoryToPDF(inventoryDataForReport, categoryMap);
                 break;
             case 'sales':
         exportSalesToPDF(sales, {}, productMap);
@@ -266,7 +282,7 @@ const ReportGenerator = () => {
 
         switch (reportType) {
             case 'inventory':
-                data = inventoryData.map(item => ({
+                data = inventoryDataForReport.map(item => ({
                     SKU: item.sku || '',
                     Name: item.name,
                     Category: item.category_name || 'Uncategorized',
@@ -304,6 +320,39 @@ const ReportGenerator = () => {
         exportToCSV(data, filename);
     };
 
+    // Handle page change
+    const handlePageChange = (newPage: number) => {
+        setCurrentPage(newPage);
+    };
+
+    // Render pagination controls
+    const renderPagination = () => {
+        if (!inventoryData?.pagination) return null;
+        const { currentPage, totalPages } = inventoryData.pagination;
+
+        return (
+            <div className="flex justify-center items-center gap-2 mt-4">
+                <Button
+                    variant="outline"
+                    onClick={() => handlePageChange(currentPage - 1)}
+                    disabled={currentPage <= 1}
+                >
+                    Previous
+                </Button>
+                <span className="text-sm">
+                    Page {currentPage} of {totalPages}
+                </span>
+                <Button
+                    variant="outline"
+                    onClick={() => handlePageChange(currentPage + 1)}
+                    disabled={currentPage >= totalPages}
+                >
+                    Next
+                </Button>
+            </div>
+        );
+    };
+
     return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -322,6 +371,7 @@ const ReportGenerator = () => {
         onValueChange={value => {
             if (value === 'inventory' || value === 'sales' || value === 'profit') {
                 setReportType(value);
+                setCurrentPage(1); // Reset page when changing report type
             }
         }}
         className="space-y-4"
@@ -338,42 +388,47 @@ const ReportGenerator = () => {
               <CardTitle>Inventory Status</CardTitle>
             </CardHeader>
             <CardContent>
-              {isLoading ? (
+              {isInventoryLoading ? (
                 <div className="flex justify-center items-center h-64">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reorder Level</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {inventoryReportData.map((item, index) => (
-                        <tr key={index}>
-                          <td className="px-6 py-4 whitespace-nowrap">{item.name}</td>
-                          <td className="px-6 py-4 whitespace-nowrap">{item.category}</td>
-                          <td className="px-6 py-4 whitespace-nowrap">{item.quantity}</td>
-                          <td className="px-6 py-4 whitespace-nowrap">{item.reorderLevel}</td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
-                              ${item.status === 'In Stock' ? 'bg-green-100 text-green-800' : 
-                                item.status === 'Low Stock' ? 'bg-yellow-100 text-yellow-800' : 
-                                'bg-red-100 text-red-800'}`}>
-                              {item.status}
-                            </span>
-                          </td>
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reorder Level</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                        </div>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {inventoryData?.products.map((item, index) => (
+                          <tr key={index}>
+                            <td className="px-6 py-4 whitespace-nowrap">{item.name}</td>
+                            <td className="px-6 py-4 whitespace-nowrap">{item.category_name}</td>
+                            <td className="px-6 py-4 whitespace-nowrap">{item.description || '-'}</td>
+                            <td className="px-6 py-4 whitespace-nowrap">{item.quantity}</td>
+                            <td className="px-6 py-4 whitespace-nowrap">{item.min_stock_level}</td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
+                                ${item.status === 'In Stock' ? 'bg-green-100 text-green-800' : 
+                                  item.status === 'Low Stock' ? 'bg-yellow-100 text-yellow-800' : 
+                                  'bg-red-100 text-red-800'}`}>
+                                {item.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {renderPagination()}
+                </>
               )}
             </CardContent>
           </Card>

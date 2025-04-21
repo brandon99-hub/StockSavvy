@@ -12,6 +12,8 @@ import { apiRequest } from '../lib/queryClient';
 const InventoryPage = () => {
   const [activeTab, setActiveTab] = useState<string>('list');
   const [editProduct, setEditProduct] = useState<Product | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const { user } = useAuth();
   const canEdit = user?.role === 'admin' || user?.role === 'manager';
 
@@ -78,7 +80,11 @@ const InventoryPage = () => {
             <InventoryList 
               products={products} 
               categories={categories} 
-              onEdit={handleEditProduct} 
+              onEdit={handleEditProduct}
+              searchQuery={searchQuery}
+              onSearch={setSearchQuery}
+              selectedCategory={selectedCategory}
+              onCategoryChange={setSelectedCategory}
             />
           )}
         </TabsContent>

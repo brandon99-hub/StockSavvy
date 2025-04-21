@@ -41,12 +41,10 @@ export interface RestockRule {
 
 export interface SaleItem {
   id: number;
-  sale_id: number;
-  product_id: number;
   quantity: number;
   unit_price: number;
   total_price: number;
-  product?: Product;
+  product_name: string;
 }
 
 export interface Sale {
@@ -57,9 +55,12 @@ export interface Sale {
   discount: number;
   discount_percentage: number;
   user_id: number;
+  sold_by: string;
+  items_count: number;
+  total_quantity: number;
+  items: string;  // This is a comma-separated string of product names and quantities
   created_at: string;
-  items?: SaleItem[];
-  user?: User;
+  items_details?: SaleItem[];  // Optional detailed items array
 }
 
 export interface Activity {

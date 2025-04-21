@@ -28,15 +28,25 @@ import {
     DialogContent,
     DialogHeader,
     DialogTitle,
+    DialogDescription,
+    DialogFooter,
 } from "../ui/dialog";
 import {Badge} from '../ui/badge';
 import {Input} from '../ui/input';
+import { useQueryClient } from '@tanstack/react-query';
+import { apiRequest } from '../../lib/queryClient';
+import { useToast } from '../../hooks/use-toast';
 import {
     Sale,
     SaleItem,
     Product,
-    User
-} from '../types';
+    User,
+    Activity
+} from '@/types';
+import { Skeleton } from '@/components/ui/skeleton';
+import { ReceiptDialog } from './ReceiptDialog';
+import { useAuth } from '@/contexts/AuthContext';
+import { ActivityLog } from '@/components/activity/ActivityLog';
 
 interface SalesListProps {
     sales: Sale[];
@@ -49,8 +59,13 @@ const SalesList = ({sales, saleItems, products, users}: SalesListProps) => {
     const [page, setPage] = useState(1);
     const [searchTerm, setSearchTerm] = useState('');
     const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+    const [clearDialogOpen, setClearDialogOpen] = useState(false);
     const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+    const [isClearing, setIsClearing] = useState(false);
+    const queryClient = useQueryClient();
+    const { toast } = useToast();
     const itemsPerPage = 10;
+    const [receiptData, setReceiptData] = useState<Record<number, any>>({});
 
     // Filter sales
     const filteredSales = sales.filter(sale => {
@@ -110,27 +125,61 @@ const SalesList = ({sales, saleItems, products, users}: SalesListProps) => {
         return user.name;
     };
 
+    // Fetch receipt data for a sale
+    const fetchReceiptData = async (saleId: number) => {
+        try {
+            const response = await apiRequest(`/api/sales/${saleId}/receipt/`, {
+                method: 'GET'
+            });
+            
+            if (response && response.items) {
+                setReceiptData(prev => ({
+                    ...prev,
+                    [saleId]: response
+                }));
+            }
+        } catch (error) {
+            console.error('Error fetching receipt data:', error);
+        }
+    };
+
     // Function to get items display
     const getItemsDisplay = (saleId: number) => {
-        const items = saleItems[saleId] || [];
-        const total = items.reduce((sum, item) => sum + item.quantity, 0);
-        
-        if (items.length === 0) return <span className="font-medium">No items</span>;
-        
-        const itemsList = items.map(item => {
-            const product = products[item.product_id];
-            if (!product) return `${item.quantity}x Unknown Product`;
-            return `${item.quantity}x ${product.name}`;
+        const sale = sales.find(s => s.id === saleId);
+        if (!sale || !sale.items || sale.items.length === 0) return 'No items';
+
+        const totalQuantity = sale.items.reduce((sum, item) => sum + item.quantity, 0);
+        const itemsDisplay = sale.items.map(item => {
+            return `${item.product_name} (${item.quantity})`;
         }).join(', ');
-        
-        return (
-            <div className="flex flex-col">
-                <span className="font-medium">{total} item{total === 1 ? '' : 's'}</span>
-                <span className="text-sm text-gray-500 truncate" title={itemsList}>
-                    {itemsList}
-                </span>
-            </div>
-        );
+
+        return `${totalQuantity} items: ${itemsDisplay}`;
+    };
+
+    // Handle clear all sales
+    const handleClearAll = async () => {
+        try {
+            setIsClearing(true);
+            await apiRequest('/api/sales/clear_all/', {
+                method: 'POST'
+            });
+            toast({
+                title: "Success",
+                description: "All sales have been cleared successfully",
+                variant: "default",
+            });
+            queryClient.invalidateQueries({ queryKey: ['/api/sales/'] });
+            queryClient.invalidateQueries({ queryKey: ['/api/sales-items/'] });
+            setClearDialogOpen(false);
+        } catch (error) {
+            toast({
+                title: "Error",
+                description: "Failed to clear sales",
+                variant: "destructive",
+            });
+        } finally {
+            setIsClearing(false);
+        }
     };
 
     return (
@@ -140,6 +189,13 @@ const SalesList = ({sales, saleItems, products, users}: SalesListProps) => {
                     <div className="flex justify-between items-center flex-wrap gap-4">
                         <h2 className="text-xl font-semibold">Sales History</h2>
                         <div className="flex space-x-2">
+                            <Button
+                                variant="destructive"
+                                onClick={() => setClearDialogOpen(true)}
+                                disabled={sales.length === 0}
+                            >
+                                <i className="fas fa-trash mr-2"></i> Clear All Sales
+                            </Button>
                             <Input
                                 placeholder="Search by ID, date, items, amount..."
                                 value={searchTerm}
@@ -339,6 +395,40 @@ const SalesList = ({sales, saleItems, products, users}: SalesListProps) => {
                             </div>
                         </div>
                     )}
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Clear All Sales</DialogTitle>
+                        <DialogDescription>
+                            Are you sure you want to clear all sales data? This action cannot be undone.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            onClick={() => setClearDialogOpen(false)}
+                            disabled={isClearing}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="destructive"
+                            onClick={handleClearAll}
+                            disabled={isClearing}
+                        >
+                            {isClearing ? (
+                                <>
+                                    <i className="fas fa-spinner fa-spin mr-2"></i>
+                                    Clearing...
+                                </>
+                            ) : (
+                                'Clear All Sales'
+                            )}
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </>

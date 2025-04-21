@@ -135,7 +135,7 @@ class SaleSerializer(serializers.ModelSerializer):
     items = SaleItemSerializer(many=True, read_only=True)
     total_amount = serializers.DecimalField(max_digits=10, decimal_places=2, coerce_to_string=True)
     discount = serializers.DecimalField(max_digits=10, decimal_places=2, coerce_to_string=True, required=False)
-    discount_percentage = serializers.DecimalField(max_digits=5, decimal_places=2, coerce_to_string=True, required=False)
+    discount_percentage = serializers.DecimalField(max_digits=10, decimal_places=2, coerce_to_string=True, required=False)
     original_amount = serializers.DecimalField(max_digits=10, decimal_places=2, coerce_to_string=True, required=False)
     sale_date = serializers.DateTimeField(format='iso-8601')
     created_at = serializers.DateTimeField(format='iso-8601', required=False)

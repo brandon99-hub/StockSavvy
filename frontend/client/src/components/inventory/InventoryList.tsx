@@ -210,7 +210,18 @@ const InventoryList: React.FC<InventoryListProps> = ({
   return (
     <Card>
       <CardHeader className="border-b border-gray-200 px-6 py-4">
-        <h3 className="text-lg font-semibold text-gray-800">Inventory Items</h3>
+        <div className="flex justify-between items-center">
+          <h3 className="text-lg font-semibold text-gray-800">Inventory Items</h3>
+          <div className="relative w-64">
+            <SearchIcon className="absolute left-2 top-2.5 h-4 w-4 text-gray-500" />
+            <Input
+              placeholder="Search by name or SKU..."
+              value={searchQuery}
+              onChange={(e) => onSearch(e.target.value)}
+              className="pl-8"
+            />
+          </div>
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         <Table>
@@ -228,6 +239,7 @@ const InventoryList: React.FC<InventoryListProps> = ({
               >
                 SKU {sortField === 'sku' && (sortDirection === 'asc' ? '↑' : '↓')}
               </TableHead>
+              <TableHead>Description</TableHead>
               <TableHead>Category</TableHead>
               <TableHead 
                 className="cursor-pointer hover:bg-gray-100 text-right"
@@ -273,6 +285,7 @@ const InventoryList: React.FC<InventoryListProps> = ({
                   <TableRow key={product.id} className="hover:bg-gray-50">
                     <TableCell className="font-medium">{product.name}</TableCell>
                     <TableCell>{product.sku}</TableCell>
+                    <TableCell>{product.description || '-'}</TableCell>
                     <TableCell>{category?.name || 'Uncategorized'}</TableCell>
                     <TableCell className="text-right">{product.quantity}</TableCell>
                     <TableCell className="text-right">KSH {product.buy_price.toFixed(2)}</TableCell>

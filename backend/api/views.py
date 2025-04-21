@@ -213,27 +213,15 @@ class UserViewSet(viewsets.ModelViewSet):
             
             # Start a transaction
             with transaction.atomic():
-                # First, delete related activities
+                # Delete related activities first
                 with connection.cursor() as cursor:
+                    # Delete related sale items
+                    cursor.execute("DELETE FROM sale_items WHERE product_id = %s", [product_id])
+                    
+                    # Delete related activities
                     cursor.execute("DELETE FROM activities WHERE product_id = %s", [product_id])
                 
-                # Then check for existing sale items
-                with connection.cursor() as cursor:
-                    cursor.execute("""
-                        SELECT COUNT(*) 
-                        FROM sale_items 
-                        WHERE product_id = %s
-                    """, [product_id])
-                    sale_items_count = cursor.fetchone()[0]
-                    
-                    if sale_items_count > 0:
-                        return Response(
-                            {"detail": "Cannot delete product with existing sales. Please delete related sales first."},
-                            status=status.HTTP_400_BAD_REQUEST
-                        )
-                
-                # Finally delete the product
-                with connection.cursor() as cursor:
+                    # Delete the product
                     cursor.execute("DELETE FROM products WHERE id = %s", [product_id])
                 
                 # Create final deletion activity log
@@ -326,19 +314,20 @@ class CategoryViewSet(viewsets.ModelViewSet):
             category_name = instance.name
             category_id = instance.id
             
-            # Check for existing products
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT COUNT(*) FROM products WHERE category_id = %s", [category_id])
-                product_count = cursor.fetchone()[0]
+            # Start transaction
+            with transaction.atomic(), connection.cursor() as cursor:
+                # Get all product IDs in this category
+                cursor.execute("SELECT id FROM products WHERE category_id = %s", [category_id])
+                product_ids = [row[0] for row in cursor.fetchall()]
                 
-                if product_count > 0:
-                    return Response(
-                        {"detail": "Cannot delete category with existing products. Please delete related products first."},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
+                # Delete related sale items for all products in this category
+                if product_ids:
+                    cursor.execute("DELETE FROM sale_items WHERE product_id = ANY(%s)", [product_ids])
+                
+                # Delete all products in this category
+                cursor.execute("DELETE FROM products WHERE category_id = %s", [category_id])
             
             # Delete the category
-            with connection.cursor() as cursor:
                 cursor.execute("DELETE FROM categories WHERE id = %s", [category_id])
             
             # Create activity log
@@ -460,7 +449,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         try:
             with connection.cursor() as cursor:
                 cursor.execute("""
-                    SELECT p.*, c.name as category_name
+                    SELECT p.*, c.name as category_name, p.description
                     FROM products p
                     LEFT JOIN categories c ON p.category_id = c.id
                     ORDER BY p.name
@@ -588,27 +577,15 @@ class ProductViewSet(viewsets.ModelViewSet):
             
             # Start a transaction
             with transaction.atomic():
-                # First, delete related activities
+                # Delete related activities first
                 with connection.cursor() as cursor:
+                    # Delete related sale items
+                    cursor.execute("DELETE FROM sale_items WHERE product_id = %s", [product_id])
+                    
+                    # Delete related activities
                     cursor.execute("DELETE FROM activities WHERE product_id = %s", [product_id])
                 
-                # Then check for existing sale items
-                with connection.cursor() as cursor:
-                    cursor.execute("""
-                        SELECT COUNT(*) 
-                        FROM sale_items 
-                        WHERE product_id = %s
-                    """, [product_id])
-                    sale_items_count = cursor.fetchone()[0]
-                    
-                    if sale_items_count > 0:
-                        return Response(
-                            {"detail": "Cannot delete product with existing sales. Please delete related sales first."},
-                            status=status.HTTP_400_BAD_REQUEST
-                        )
-                
-                # Finally delete the product
-                with connection.cursor() as cursor:
+                    # Delete the product
                     cursor.execute("DELETE FROM products WHERE id = %s", [product_id])
                 
                 # Create final deletion activity log
@@ -659,6 +636,7 @@ class SaleViewSet(viewsets.ModelViewSet):
             try:
                 parts = token.split('_')
                 user_id = int(parts[1]) if len(parts) > 1 else None
+                
                 # For receipt endpoint, we only need authentication, not authorization
                 if request.resolver_match and request.resolver_match.url_name == 'sale-receipt':
                     return True, user_id, True
@@ -674,8 +652,9 @@ class SaleViewSet(viewsets.ModelViewSet):
                         # Allow access if user is staff, superuser, admin, or manager
                         is_authorized = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager', 'staff'])
                         return True, user_id, is_authorized
+                return False, None, False
             except (IndexError, ValueError) as e:
-                logger.error(f'Error parsing token: {str(e)}')
+                logger.warning(f'Error parsing token: {str(e)}')
                 return False, None, False
         except Exception as e:
             logger.error(f'Unexpected error in token authentication: {str(e)}')
@@ -738,6 +717,22 @@ class SaleViewSet(viewsets.ModelViewSet):
                         sale['sale_date'] = sale['sale_date'].isoformat()
                     if 'created_at' in sale and sale['created_at']:
                         sale['created_at'] = sale['created_at'].isoformat()
+                    
+                    # Get sale items
+                    cursor.execute("""
+                        SELECT 
+                            si.id,
+                            si.quantity,
+                            si.unit_price,
+                            si.total_price,
+                            p.name as product_name
+                        FROM sale_items si
+                        JOIN products p ON si.product_id = p.id
+                        WHERE si.sale_id = %s
+                    """, [sale['id']])
+                    items_columns = [col[0] for col in cursor.description]
+                    items = [dict(zip(items_columns, row)) for row in cursor.fetchall()]
+                    sale['items'] = items
 
                 return Response(sales)
         except Exception as e:
@@ -805,18 +800,14 @@ class SaleViewSet(viewsets.ModelViewSet):
                     product.save()
 
                 # Log activity
-                try:
-                    Activity.objects.create(
-                        type='sale_created',
-                        description=f'Sale #{sale.id} created',
-                        user_id=user_id,
-                        created_at=timezone.now(),
-                        status='completed'
-                    )
-                except Exception as e:
-                    logger.error(f'Error logging sale activity: {str(e)}')
-                    # Don't fail the sale if activity logging fails
-
+                Activity.objects.create(
+                    type='sale_created',
+                    description=f'Sale #{sale.id} created',
+                    user_id=user_id,
+                    created_at=timezone.now(),
+                    status='completed'
+                )
+                
                 logger.info(f'Sale #{sale.id} created successfully')
                 return Response(sale_serializer.data, status=status.HTTP_201_CREATED)
 
@@ -854,7 +845,10 @@ class SaleViewSet(viewsets.ModelViewSet):
             with connection.cursor() as cursor:
                 cursor.execute("""
                     SELECT 
-                        s.id, s.sale_date, s.total_amount, s.original_amount, s.discount,
+                        s.id, s.sale_date,
+                        (s.original_amount - COALESCE(s.discount, 0)) as total_amount,
+                        s.original_amount,
+                        s.discount,
                         s.discount_percentage, s.created_at,
                         COALESCE(u.name, 'Administrator') as cashier_name
                     FROM sales s
@@ -913,6 +907,45 @@ class SaleViewSet(viewsets.ModelViewSet):
             logger.error(f"Error generating receipt: {str(e)}")
             return Response(
                 {"detail": "Error generating receipt. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['post'])
+    def clear_all(self, request):
+        is_authenticated, user_id, is_admin = self.check_token_auth(request)
+        if not is_authenticated:
+            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+        if not is_admin:
+            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            # Start a transaction
+            with transaction.atomic():
+                with connection.cursor() as cursor:
+                    # Delete all sale items first
+                    cursor.execute("DELETE FROM sale_items")
+                    
+                    # Delete all sales
+                    cursor.execute("DELETE FROM sales")
+                    
+                    # Delete related activities
+                    cursor.execute("DELETE FROM activities WHERE type IN ('sale_created', 'sale_deleted')")
+                
+                # Create activity log
+                Activity.objects.create(
+                    type='sales_cleared',
+                    description='All sales data has been cleared',
+                    user_id=user_id,
+                    created_at=timezone.now(),
+                    status='completed'
+                )
+            
+            return Response({"message": "All sales data has been cleared successfully"}, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error clearing sales: {str(e)}")
+            return Response(
+                {"detail": f"Error clearing sales: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -1080,32 +1113,28 @@ class SaleItemViewSet(viewsets.ModelViewSet):
                 columns = [col[0] for col in cursor.description]
                 results = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
-                # Format decimal values
+                # Format decimal values and group by sale_id
+                grouped_items = {}
                 for row in results:
+                    sale_id = row['sale_id']
+                    if sale_id not in grouped_items:
+                        grouped_items[sale_id] = []
+                    
+                    # Format decimal values
                     for key in ['unit_price', 'total_price']:
                         if key in row and row[key] is not None:
                             row[key] = str(row[key])
 
-                if not results and sale_id:
-                    return Response({
-                        'items': [],
-                        'summary': {
-                            'totalItems': 0,
-                            'totalValue': '0.00'
-                        }
+                    grouped_items[sale_id].append({
+                        'id': row['id'],
+                        'product_id': row['product_id'],
+                        'quantity': row['quantity'],
+                        'unit_price': row['unit_price'],
+                        'total_price': row['total_price'],
+                        'product_name': row['product_name']
                     })
 
-                # Calculate summary
-                total_items = len(results)
-                total_value = sum(float(row['total_price']) for row in results if row.get('total_price'))
-
-                return Response({
-                    'items': results,
-                    'summary': {
-                        'totalItems': total_items,
-                        'totalValue': str(total_value)
-                    }
-                })
+                return Response(grouped_items)
 
         except Exception as e:
             print(f"Error in SaleItemViewSet list: {str(e)}")
@@ -1492,7 +1521,17 @@ class ReportViewSet(viewsets.ViewSet):
             return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
 
         try:
+            # Get page number from query params, default to 1
+            page = int(request.query_params.get('page', 1))
+            items_per_page = 6
+            offset = (page - 1) * items_per_page
+
             with connection.cursor() as cursor:
+                # Get total count for pagination
+                cursor.execute("SELECT COUNT(*) FROM products")
+                total_count = cursor.fetchone()[0]
+                total_pages = (total_count + items_per_page - 1) // items_per_page
+
                 # Get summary statistics
                 cursor.execute("""
                     SELECT 
@@ -1519,7 +1558,7 @@ class ReportViewSet(viewsets.ViewSet):
                 categories = [dict(zip([col[0] for col in cursor.description], row))
                               for row in cursor.fetchall()]
 
-                # Get product details
+                # Get paginated product details
                 cursor.execute("""
                     SELECT 
                         p.id,
@@ -1529,6 +1568,7 @@ class ReportViewSet(viewsets.ViewSet):
                         p.min_stock_level,
                         p.buy_price,
                         p.sell_price,
+                        p.description,
                         c.name as category_name,
                         CASE 
                             WHEN p.quantity = 0 THEN 'Out of Stock'
@@ -1544,7 +1584,8 @@ class ReportViewSet(viewsets.ViewSet):
                             ELSE 3
                         END,
                         p.name
-                """)
+                    LIMIT %s OFFSET %s
+                """, [items_per_page, offset])
                 products = [dict(zip([col[0] for col in cursor.description], row))
                             for row in cursor.fetchall()]
 
@@ -1563,7 +1604,13 @@ class ReportViewSet(viewsets.ViewSet):
                         'totalValue': str(summary['total_value'])
                     },
                     'categories': categories,
-                    'products': products
+                    'products': products,
+                    'pagination': {
+                        'currentPage': page,
+                        'totalPages': total_pages,
+                        'totalItems': total_count,
+                        'itemsPerPage': items_per_page
+                    }
                 })
 
         except Exception as e:
@@ -1582,7 +1629,22 @@ class ReportViewSet(viewsets.ViewSet):
             return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
 
         try:
+            # Get page number from query params, default to 1
+            page = int(request.query_params.get('page', 1))
+            items_per_page = 6
+            offset = (page - 1) * items_per_page
+
             with connection.cursor() as cursor:
+                # Get total count for pagination
+                cursor.execute("""
+                    SELECT COUNT(DISTINCT DATE_TRUNC('day', s.created_at)::date)
+                    FROM sales s
+                    WHERE s.created_at >= NOW() - INTERVAL '30 days'
+                """)
+                total_count = cursor.fetchone()[0]
+                total_pages = (total_count + items_per_page - 1) // items_per_page
+
+                # Get paginated sales data
                 cursor.execute("""
                     SELECT 
                         DATE_TRUNC('day', s.created_at)::date as date,
@@ -1593,8 +1655,9 @@ class ReportViewSet(viewsets.ViewSet):
                     LEFT JOIN sale_items si ON s.id = si.sale_id
                     WHERE s.created_at >= NOW() - INTERVAL '30 days'
                     GROUP BY DATE_TRUNC('day', s.created_at)
-                    ORDER BY date ASC
-                """)
+                    ORDER BY date DESC
+                    LIMIT %s OFFSET %s
+                """, [items_per_page, offset])
                 columns = [col[0] for col in cursor.description]
                 results = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
@@ -1610,6 +1673,12 @@ class ReportViewSet(viewsets.ViewSet):
                     'summary': {
                         'totalItems': sum(row['transaction_count'] for row in results),
                         'totalValue': str(sum(float(row['amount']) for row in results))
+                    },
+                    'pagination': {
+                        'currentPage': page,
+                        'totalPages': total_pages,
+                        'totalItems': total_count,
+                        'itemsPerPage': items_per_page
                     }
                 })
         except Exception as e:

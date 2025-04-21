@@ -248,7 +248,7 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
                         <SelectValue placeholder="Select a category" />
                       </SelectTrigger>
                     </FormControl>
-                    <SelectContent>
+                    <SelectContent position="popper" className="max-h-[300px]">
                       <SelectItem value="0">Uncategorized</SelectItem>
                       {categories.map((category) => (
                         <SelectItem key={category.id} value={category.id.toString()}>

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, FC } from "react";
 import { useToast } from "../../hooks/use-toast";
 import { apiRequest } from "../../lib/queryClient";
 import { Product } from "../../types";
@@ -14,22 +14,43 @@ import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { Card } from "../ui/card";
 import { Skeleton } from "../ui/skeleton";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationNext,
+  PaginationPrevious,
+} from "../ui/pagination";
 
 interface LowStockTableProps {
   products: Product[];
-  onReorder: () => void;
+  onReorder: (productId: number) => Promise<void>;
   categories: Array<{ id: number; name: string }>;
 }
 
-const LowStockTable = ({ products, onReorder, categories }: LowStockTableProps) => {
+const LowStockTable: FC<LowStockTableProps> = ({ products, onReorder, categories }) => {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [reorderingProduct, setReorderingProduct] = useState<number | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 6;
 
   // Get category name helper
-  const getCategoryName = (categoryId: number | undefined) => {
-    if (!categoryId) return "Uncategorized";
-    return categories.find(c => c.id === categoryId)?.name || "Uncategorized";
+  const getCategoryName = (product: Product) => {
+    // First check if we have category_name directly
+    if ('category_name' in product && product.category_name) {
+      return product.category_name;
+    }
+    // Then check if we have a category object
+    if (typeof product.category === 'object' && product.category !== null) {
+      return product.category.name;
+    }
+    // Then check if we have a category ID
+    if (typeof product.category === 'number') {
+      const category = categories.find(c => c.id === product.category);
+      return category ? category.name : "Uncategorized";
+    }
+    return "Uncategorized";
   };
 
   const handleReorder = async (productId: number) => {
@@ -46,7 +67,7 @@ const LowStockTable = ({ products, onReorder, categories }: LowStockTableProps) 
         description: "Product reordered successfully",
       });
 
-      onReorder();
+      onReorder(productId);
     } catch (error) {
       toast({
         title: "Error",
@@ -74,6 +95,11 @@ const LowStockTable = ({ products, onReorder, categories }: LowStockTableProps) 
       return aDiff - bDiff;
     });
 
+  // Calculate pagination
+  const totalPages = Math.ceil(lowStockProducts.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedProducts = lowStockProducts.slice(startIndex, startIndex + itemsPerPage);
+
   return (
     <Card className="p-6 shadow-sm">
       <div className="mb-4">
@@ -95,19 +121,19 @@ const LowStockTable = ({ products, onReorder, categories }: LowStockTableProps) 
           </TableRow>
         </TableHeader>
         <TableBody>
-          {lowStockProducts.length === 0 ? (
+          {paginatedProducts.length === 0 ? (
             <TableRow>
               <TableCell colSpan={6} className="text-center h-24 text-muted-foreground">
                 All products are well stocked
               </TableCell>
             </TableRow>
           ) : (
-            lowStockProducts.map((product) => (
+            paginatedProducts.map((product) => (
               <TableRow key={product.id}>
                 <TableCell className="font-medium">{product.name}</TableCell>
                 <TableCell>
                   <Badge variant="outline" className="text-xs">
-                    {getCategoryName(product.category_id)}
+                    {getCategoryName(product)}
                   </Badge>
                 </TableCell>
                 <TableCell className="text-right">
@@ -156,6 +182,39 @@ const LowStockTable = ({ products, onReorder, categories }: LowStockTableProps) 
           )}
         </TableBody>
       </Table>
+
+      {totalPages > 1 && (
+        <div className="mt-4 flex justify-center">
+          <Pagination>
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  className={currentPage <= 1 ? 'opacity-50 cursor-not-allowed' : ''}
+                />
+              </PaginationItem>
+              {Array.from({length: Math.min(totalPages, 3)}).map((_, index) => (
+                <PaginationItem key={index}>
+                  <Button
+                    variant={currentPage === index + 1 ? 'outline' : 'ghost'}
+                    size="icon"
+                    onClick={() => setCurrentPage(index + 1)}
+                    className="w-8 h-8"
+                  >
+                    {index + 1}
+                  </Button>
+                </PaginationItem>
+              ))}
+              <PaginationItem>
+                <PaginationNext
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  className={currentPage >= totalPages ? 'opacity-50 cursor-not-allowed' : ''}
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
+        </div>
+      )}
     </Card>
   );
 };
