@@ -28,7 +28,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     
     if (storedUser && storedToken) {
       try {
-        setUser(JSON.parse(storedUser));
+        const parsedUser = JSON.parse(storedUser);
+        setUser(parsedUser);
+        // Ensure token is properly formatted with user ID
+        if (!storedToken.includes('_')) {
+          localStorage.setItem('token', `${storedToken}_${parsedUser.id}`);
+        }
       } catch (error) {
         console.error('Error parsing stored user:', error);
         localStorage.removeItem('user');
@@ -48,7 +53,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(credentials),
-        credentials: 'include', // This is important for cookies
+        credentials: 'include',
       });
 
       if (!response || typeof response !== 'object') {
@@ -65,10 +70,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error('Invalid token format received from server');
       }
       
-      // Store user data and token
+      // Format token with user ID
+      const formattedToken = `${token}_${userData.id}`;
+      
+      // Store user data and formatted token
       setUser(userData);
       localStorage.setItem('user', JSON.stringify(userData));
-      localStorage.setItem('token', token);
+      localStorage.setItem('token', formattedToken);
       
       console.log('Login successful');
       return userData;

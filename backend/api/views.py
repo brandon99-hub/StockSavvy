@@ -78,25 +78,18 @@ class UserViewSet(viewsets.ModelViewSet):
         )
 
     def check_token_auth(self, request):
-        auth_header = request.headers.get('Authorization')
-        if auth_header and auth_header.startswith('Bearer '):
+        try:
+            auth_header = request.headers.get('Authorization')
+            if not auth_header or not auth_header.startswith('Bearer '):
+                return False, None, False
             token = auth_header.split(' ')[1]
-            if token and token.startswith('token_'):
-                try:
-                    parts = token.split('_')
-                    user_id = int(parts[1])
-                    with connection.cursor() as cursor:
-                        cursor.execute(
-                            "SELECT is_staff, is_superuser FROM users WHERE id = %s",
-                            [user_id]
-                        )
-                        row = cursor.fetchone()
-                        if row:
-                            is_staff, is_superuser = row
-                            return True, user_id, is_staff or is_superuser
-                except (IndexError, ValueError):
-                    pass
-        return False, None, False
+            if not token:
+                return False, None, False
+            parts = token.split('_')
+            user_id = int(parts[1]) if len(parts) > 1 else None
+            return True, user_id, True
+        except Exception as e:
+            return False, None, False
 
     def list(self, request, *args, **kwargs):
         is_authenticated, _, _ = self.check_token_auth(request)
@@ -355,33 +348,43 @@ class ProductViewSet(viewsets.ModelViewSet):
     permission_classes = []
 
     def check_token_auth(self, request):
-        auth_header = request.headers.get('Authorization')
-        if not auth_header or not auth_header.startswith('Bearer '):
-            return False, None, False
-
-        token = auth_header.split(' ')[1]
-        if not token.startswith('token_'):
-            return False, None, False
-
         try:
-            parts = token.split('_')
-            user_id = int(parts[1])
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
-                    [user_id]
-                )
-                row = cursor.fetchone()
-                if row:
-                    is_staff, is_superuser, role = row
-                    # Allow access if user is staff, superuser, admin, or manager
-                    is_authorized = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager', 'staff'])
-                    return True, user_id, is_authorized
-        except (IndexError, ValueError, Exception) as e:
-            print(f"Token validation error: {str(e)}")
-            return False, None, False
+            auth_header = request.headers.get('Authorization')
+            if not auth_header or not auth_header.startswith('Bearer '):
+                logger.warning('Missing or invalid authorization header')
+                return False, None, False
 
-        return False, None, False
+            token = auth_header.split(' ')[1]
+            if not token:
+                logger.warning('Invalid token format')
+                return False, None, False
+
+            try:
+                parts = token.split('_')
+                user_id = int(parts[1]) if len(parts) > 1 else None
+                
+                # For receipt endpoint, we only need authentication, not authorization
+                if request.resolver_match and request.resolver_match.url_name == 'sale-receipt':
+                    return True, user_id, True
+
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
+                        [user_id]
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        is_staff, is_superuser, role = row
+                        # Allow access if user is staff, superuser, admin, or manager
+                        is_authorized = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager', 'staff'])
+                        return True, user_id, is_authorized
+                return False, None, False
+            except (IndexError, ValueError) as e:
+                logger.warning(f'Error parsing token: {str(e)}')
+                return False, None, False
+        except Exception as e:
+            logger.error(f'Unexpected error in token authentication: {str(e)}')
+            return False, None, False
 
     @action(detail=False, methods=['get'])
     def low_stock(self, request):
@@ -541,18 +544,6 @@ class ProductViewSet(viewsets.ModelViewSet):
                     created_at=timezone.now(),
                     status='completed'
                 )
-                
-                # If quantity changed, create a stock update activity
-                new_quantity = product_data['quantity']
-                if new_quantity != old_quantity:
-                    Activity.objects.create(
-                        type='stock_updated',
-                        description=f'Stock updated for {product_data["name"]} from {old_quantity} to {new_quantity}',
-                        product_id=product_data['id'],
-                        user_id=user_id,
-                        created_at=timezone.now(),
-                        status='completed'
-                    )
             
             return response
             
@@ -570,37 +561,36 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
         
         try:
-            # Get the product before deletion
             instance = self.get_object()
-            product_name = instance.name
-            product_id = instance.id
             
-            # Start a transaction
-            with transaction.atomic():
-                # Delete related activities first
-                with connection.cursor() as cursor:
-                    # Delete related sale items
-                    cursor.execute("DELETE FROM sale_items WHERE product_id = %s", [product_id])
-                    
-                    # Delete related activities
-                    cursor.execute("DELETE FROM activities WHERE product_id = %s", [product_id])
-                
-                    # Delete the product
-                    cursor.execute("DELETE FROM products WHERE id = %s", [product_id])
-                
-                # Create final deletion activity log
-                Activity.objects.create(
-                    type='product_deleted',
-                    description=f'Product deleted: {product_name}',
-                    user_id=user_id,
-                    created_at=timezone.now(),
-                    status='completed'
+            # Check if product has any sales
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM sale_items WHERE product_id = %s",
+                    [instance.id]
                 )
+                sale_count = cursor.fetchone()[0]
+                
+                if sale_count > 0:
+                    return Response(
+                        {"detail": "Cannot delete product with existing sales"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
             
-            return Response({"message": "Product deleted successfully"}, status=status.HTTP_200_OK)
+            # Create activity log for product deletion
+            Activity.objects.create(
+                type='product_deleted',
+                description=f'Product deleted: {instance.name}',
+                product_id=instance.id,
+                user_id=user_id,
+                created_at=timezone.now(),
+                status='completed'
+            )
+            
+            self.perform_destroy(instance)
+            return Response(status=status.HTTP_204_NO_CONTENT)
             
         except Exception as e:
-            print(f"Error deleting product: {str(e)}")
             return Response(
                 {"detail": f"Error deleting product: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -613,7 +603,43 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
         if not is_admin:
             return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-        return super().restock(request, pk)
+        
+        try:
+            product = self.get_object()
+            quantity = int(request.data.get('quantity', 0))
+            
+            if quantity <= 0:
+                return Response(
+                    {"detail": "Quantity must be positive"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Update product quantity
+            product.quantity += quantity
+            product.save()
+            
+            # Create activity log for restock
+            Activity.objects.create(
+                type='product_restocked',
+                description=f'Product restocked: {product.name} (+{quantity})',
+                product_id=product.id,
+                user_id=user_id,
+                created_at=timezone.now(),
+                status='completed'
+            )
+            
+            return Response({
+                "id": product.id,
+                "name": product.name,
+                "quantity": product.quantity,
+                "message": f"Successfully restocked {quantity} units"
+            })
+            
+        except Exception as e:
+            return Response(
+                {"detail": f"Error restocking product: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class SaleViewSet(viewsets.ModelViewSet):
@@ -817,12 +843,6 @@ class SaleViewSet(viewsets.ModelViewSet):
         except ValidationError as e:
             logger.error(f'Validation error in sale creation: {str(e)}')
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            logger.error(f'Unexpected error in sale creation: {str(e)}')
-            return Response(
-                {"detail": "An unexpected error occurred"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
 
     def retrieve(self, request, *args, **kwargs):
         is_authenticated, user_id, is_authorized = self.check_token_auth(request)
@@ -859,7 +879,7 @@ class SaleViewSet(viewsets.ModelViewSet):
                 
                 if not sale_row:
                     logger.warning(f'Sale not found: {pk}')
-                    return Response(
+                return Response(
                         {"detail": "Sale not found"},
                         status=status.HTTP_404_NOT_FOUND
                     )

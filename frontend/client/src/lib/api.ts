@@ -1,5 +1,4 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
-import { useAuth } from './auth';
 import { APIResponse, ErrorResponse } from '../types';
 
 // Add type declaration for ImportMeta
@@ -25,41 +24,44 @@ class APIError extends Error {
     }
 }
 
+const getToken = () => {
+    return localStorage.getItem('token');
+};
+
 export const createApiClient = (): AxiosInstance => {
-const api = axios.create({
+    const api = axios.create({
         baseURL: BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
+        headers: {
+            'Content-Type': 'application/json',
         },
-});
+    });
 
     // Request interceptor
-api.interceptors.request.use(
-  (config) => {
-            const { getToken } = useAuth();
+    api.interceptors.request.use(
+        (config) => {
             const token = getToken();
-    if (token) {
+            if (token) {
                 config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
+            }
+            return config;
+        },
+        (error) => {
+            return Promise.reject(error);
+        }
+    );
 
     // Response interceptor
-api.interceptors.response.use(
-  (response) => response,
+    api.interceptors.response.use(
+        (response) => response,
         (error: AxiosError<ErrorResponse>) => {
             if (error.response) {
                 const { status, data } = error.response;
                 
                 // Handle token expiration
                 if (status === 401) {
-                    const { logout } = useAuth();
-                    logout();
-      window.location.href = '/login';
+                    localStorage.removeItem('token');
+                    localStorage.removeItem('user');
+                    window.location.href = '/login';
                     return Promise.reject(new APIError('Session expired', status));
                 }
 
@@ -170,45 +172,51 @@ function getCsrfToken(): string | null {
 
 // API request methods
 export const apiClient = {
-  // Login request
-  async login(username: string, password: string) {
-    const response = await apiClient.post('/api/users/login/', { username, password });
-    const { token, ...userData } = response.data;
-    localStorage.setItem('token', token);
-    localStorage.setItem('user', JSON.stringify(userData));
-    return response.data;
-  },
+    // Login request
+    async login(username: string, password: string) {
+        const api = createApiClient();
+        const response = await api.post('/api/users/login/', { username, password });
+        const { token, ...userData } = response.data;
+        localStorage.setItem('token', token);
+        localStorage.setItem('user', JSON.stringify(userData));
+        return response.data;
+    },
 
-  // Logout request
-  async logout() {
-    try {
-      await apiClient.post('/api/users/logout/');
-    } finally {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
+    // Logout request
+    async logout() {
+        try {
+            const api = createApiClient();
+            await api.post('/api/users/logout/');
+        } finally {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+        }
+    },
+
+    // Generic request methods
+    async get<T>(url: string, params = {}) {
+        const api = createApiClient();
+        const response = await api.get<T>(url, { params });
+        return response.data;
+    },
+
+    async post<T>(url: string, data = {}) {
+        const api = createApiClient();
+        const response = await api.post<T>(url, data);
+        return response.data;
+    },
+
+    async put<T>(url: string, data = {}) {
+        const api = createApiClient();
+        const response = await api.put<T>(url, data);
+        return response.data;
+    },
+
+    async delete<T>(url: string) {
+        const api = createApiClient();
+        const response = await api.delete<T>(url);
+        return response.data;
     }
-  },
-
-  // Generic request methods
-  async get<T>(url: string, params = {}) {
-    const response = await apiClient.get<T>(url, { params });
-    return response.data;
-  },
-
-  async post<T>(url: string, data = {}) {
-    const response = await apiClient.post<T>(url, data);
-    return response.data;
-  },
-
-  async put<T>(url: string, data = {}) {
-    const response = await apiClient.put<T>(url, data);
-    return response.data;
-  },
-
-  async delete<T>(url: string) {
-    const response = await apiClient.delete<T>(url);
-    return response.data;
-  }
 };
 
 export default apiClient;

@@ -6,6 +6,7 @@ from .views import (
     ReportViewSet, SaleItemViewSet,
     profit_report, test_connection
 )
+from .batch_views import ProductBatchViewSet, BatchSaleItemViewSet
 
 router = DefaultRouter()
 router.register(r'users', UserViewSet, basename='users')
@@ -17,6 +18,8 @@ router.register(r'restock-rules', RestockRuleViewSet, basename='restock-rules')
 router.register(r'analytics', AnalyticsViewSet, basename='analytics')
 router.register(r'reports', ReportViewSet, basename='reports')
 router.register(r'sales-items', SaleItemViewSet, basename='sale-items')
+router.register(r'product-batches', ProductBatchViewSet)
+router.register(r'batch-sale-items', BatchSaleItemViewSet)
 
 urlpatterns = [
     path('test/', test_connection),

@@ -23,9 +23,25 @@ export const apiRequest = async (url: string, options: RequestInit = {}) => {
   const baseURL = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
   const token = localStorage.getItem('token');
   
+  // Format token if it doesn't include user ID
+  let formattedToken = token;
+  if (token && !token.includes('_')) {
+    const user = localStorage.getItem('user');
+    if (user) {
+      try {
+        const userData = JSON.parse(user);
+        formattedToken = `${token}_${userData.id}`;
+        // Update the token in localStorage
+        localStorage.setItem('token', formattedToken);
+      } catch (error) {
+        console.error('Error parsing user data:', error);
+      }
+    }
+  }
+
   const headers = {
     'Content-Type': 'application/json',
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    ...(formattedToken ? { 'Authorization': `Bearer ${formattedToken}` } : {}),
     ...options.headers,
   };
 
@@ -40,6 +56,7 @@ export const apiRequest = async (url: string, options: RequestInit = {}) => {
         // Clear stored data on authentication error
         localStorage.removeItem('user');
         localStorage.removeItem('token');
+        handleUnauthorized();
       }
       throw new Error(`HTTP error! status: ${response.status}`);
     }

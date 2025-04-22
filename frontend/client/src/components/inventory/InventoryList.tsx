@@ -1,4 +1,3 @@
-// @ts-ignore
 import React, { useState } from 'react';
 import { 
   Table, 
@@ -50,7 +49,7 @@ import { Badge } from '../ui/badge';
 import { Product, Category } from '../../types';
 import { useToast } from '../../hooks/use-toast';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiRequest } from '../../lib/queryClient';
+import apiClient from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { Skeleton } from '../ui/skeleton';
 import {
@@ -74,8 +73,10 @@ import {
     Search, 
     AlertTriangle, 
     CheckCircle, 
-    XCircle 
+    XCircle,
+    Layers
 } from 'lucide-react';
+import { formatCurrency } from '../../lib/utils';
 
 interface InventoryListProps {
   products: Product[];
@@ -86,6 +87,7 @@ interface InventoryListProps {
   onSearch: (query: string) => void;
   isLoading?: boolean;
   onEdit: (product: Product) => void;
+  onViewBatches: (product: Product) => void;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -99,6 +101,7 @@ const InventoryList: React.FC<InventoryListProps> = ({
   onSearch,
   isLoading = false,
   onEdit,
+  onViewBatches,
 }) => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -165,9 +168,7 @@ const InventoryList: React.FC<InventoryListProps> = ({
     if (!productToDelete) return;
     
     try {
-      const response = await apiRequest(`/api/products/${productToDelete.id}/`, {
-        method: 'DELETE',
-      });
+      const response = await apiClient.delete(`/api/products/${productToDelete.id}/`);
       
       if (response) {
         queryClient.invalidateQueries({ queryKey: ['products'] });
@@ -288,8 +289,8 @@ const InventoryList: React.FC<InventoryListProps> = ({
                     <TableCell>{product.description || '-'}</TableCell>
                     <TableCell>{category?.name || 'Uncategorized'}</TableCell>
                     <TableCell className="text-right">{product.quantity}</TableCell>
-                    <TableCell className="text-right">KSH {product.buy_price.toFixed(2)}</TableCell>
-                    <TableCell className="text-right">KSH {product.sell_price.toFixed(2)}</TableCell>
+                    <TableCell className="text-right">KSH {formatCurrency(product.buy_price)}</TableCell>
+                    <TableCell className="text-right">KSH {formatCurrency(product.sell_price)}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
                         {getStockIcon(product.quantity, product.min_stock_level)}
@@ -308,6 +309,15 @@ const InventoryList: React.FC<InventoryListProps> = ({
                             className="text-blue-600 hover:text-blue-700"
                           >
                             <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => onViewBatches(product)}
+                            className="text-green-600 hover:text-green-700"
+                            title="View Batches"
+                          >
+                            <Layers className="h-4 w-4" />
                           </Button>
                           <Button
                             variant="ghost"

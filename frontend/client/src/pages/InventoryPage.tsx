@@ -8,10 +8,12 @@ import { Product, Category } from '../types';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { useAuth } from '../lib/auth';
 import { apiRequest } from '../lib/queryClient';
+import { ProductBatches } from '../components/inventory/ProductBatches';
 
 const InventoryPage = () => {
   const [activeTab, setActiveTab] = useState<string>('list');
   const [editProduct, setEditProduct] = useState<Product | null>(null);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const { user } = useAuth();
@@ -43,6 +45,12 @@ const InventoryPage = () => {
     setActiveTab('add');
   };
 
+  // Handle view batches
+  const handleViewBatches = (product: Product) => {
+    setSelectedProduct(product);
+    setActiveTab('batches');
+  };
+
   // Handle cancel
   const handleCancel = () => {
     setEditProduct(null);
@@ -72,6 +80,9 @@ const InventoryPage = () => {
           {canEdit && (
             <TabsTrigger value="restock">Restock Rules</TabsTrigger>
           )}
+          {selectedProduct && (
+            <TabsTrigger value="batches">Batches</TabsTrigger>
+          )}
         </TabsList>
         <TabsContent value="list">
           {isLoading ? (
@@ -81,6 +92,7 @@ const InventoryPage = () => {
               products={products} 
               categories={categories} 
               onEdit={handleEditProduct}
+              onViewBatches={handleViewBatches}
               searchQuery={searchQuery}
               onSearch={setSearchQuery}
               selectedCategory={selectedCategory}
@@ -107,6 +119,19 @@ const InventoryPage = () => {
                 lowStockProducts={lowStockProducts} 
               />
             )}
+          </TabsContent>
+        )}
+        {selectedProduct && (
+          <TabsContent value="batches">
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <h2 className="text-xl font-semibold">Batches for {selectedProduct.name}</h2>
+                <Button onClick={() => setActiveTab('list')}>
+                  Back to Products
+                </Button>
+              </div>
+              <ProductBatches productId={selectedProduct.id} />
+            </div>
           </TabsContent>
         )}
       </Tabs>
