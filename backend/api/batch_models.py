@@ -11,6 +11,13 @@ class ProductBatch(models.Model):
         decimal_places=2,
         validators=[MinValueValidator(0)]
     )
+    selling_price = models.DecimalField(
+        max_digits=10, 
+        decimal_places=2,
+        validators=[MinValueValidator(0)],
+        null=True,
+        blank=True
+    )
     quantity = models.IntegerField(validators=[MinValueValidator(1)])
     remaining_quantity = models.IntegerField(validators=[MinValueValidator(0)])
     purchase_date = models.DateTimeField()
@@ -24,7 +31,7 @@ class ProductBatch(models.Model):
     def clean(self):
         if self.remaining_quantity > self.quantity:
             raise ValidationError('Remaining quantity cannot be greater than initial quantity')
-        
+
         if self.purchase_price <= 0:
             raise ValidationError('Purchase price must be positive')
 

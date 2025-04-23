@@ -101,16 +101,21 @@ class ProductBatchViewSet(viewsets.ModelViewSet):
             product_id = request.data.get('product')
             quantity = int(request.data.get('quantity', 0))
             purchase_price = float(request.data.get('purchase_price', 0))
+            selling_price = request.data.get('selling_price')
 
             # Get the product
             with connection.cursor() as cursor:
-                cursor.execute("SELECT id, quantity FROM products WHERE id = %s", [product_id])
+                cursor.execute("SELECT id, quantity, sell_price FROM products WHERE id = %s", [product_id])
                 product = cursor.fetchone()
                 if not product:
                     return Response(
                         {"detail": "Product not found"},
                         status=status.HTTP_404_NOT_FOUND
                     )
+
+                # If selling_price is not provided, use the current product's selling price
+                if selling_price is None or selling_price == '':
+                    request.data['selling_price'] = product[2]  # product[2] is sell_price
 
             # Set remaining_quantity equal to quantity
             request.data['remaining_quantity'] = quantity
@@ -179,7 +184,7 @@ class ProductBatchViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         try:
             instance = self.get_object()
-            
+
             # Check if batch has any sales
             with connection.cursor() as cursor:
                 cursor.execute(
@@ -187,7 +192,7 @@ class ProductBatchViewSet(viewsets.ModelViewSet):
                     [instance.id]
                 )
                 sale_count = cursor.fetchone()[0]
-                
+
                 if sale_count > 0:
                     return Response(
                         {"detail": "Cannot delete batch with existing sales"},
@@ -205,9 +210,10 @@ class ProductBatchViewSet(viewsets.ModelViewSet):
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         except Exception as e:
-            logger.error(f"Error deleting batch: {str(e)}")
+            error_msg = str(e)
+            logger.error(f"Error deleting batch: {error_msg}")
             return Response(
-                {"detail": "Error deleting batch"},
+                {"detail": f"Error deleting batch: {error_msg}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -267,9 +273,27 @@ class BatchSaleItemViewSet(viewsets.ModelViewSet):
             return False, None, False
 
         try:
-            parts = token.split('_')
-            user_id = int(parts[1]) if len(parts) > 1 else None
-            
+            # Extract user_id from token, handling different formats
+            user_id = None
+            if token.startswith('token_'):
+                parts = token.split('_')
+                if len(parts) > 1:
+                    user_id = int(parts[1])
+            else:
+                # Try to extract user_id from other token formats
+                parts = token.split('_')
+                if len(parts) > 0:
+                    # Try to find a part that can be converted to an integer
+                    for part in parts:
+                        try:
+                            user_id = int(part)
+                            break
+                        except ValueError:
+                            continue
+
+            if user_id is None:
+                return False, None, False
+
             with connection.cursor() as cursor:
                 cursor.execute(
                     "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
@@ -339,7 +363,7 @@ class BatchSaleItemViewSet(viewsets.ModelViewSet):
             # Find the oldest batch with remaining quantity
             with connection.cursor() as cursor:
                 cursor.execute("""
-                    SELECT id, remaining_quantity
+                    SELECT id, remaining_quantity, selling_price
                     FROM product_batches
                     WHERE product_id = %s AND remaining_quantity > 0
                     ORDER BY purchase_date ASC
@@ -359,10 +383,36 @@ class BatchSaleItemViewSet(viewsets.ModelViewSet):
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
+                # Check if this batch has a custom selling price
+                batch_id = batch[0]
+                batch_selling_price = batch[2]
+
+                # If the batch has a custom selling price, update the product's selling price
+                if batch_selling_price is not None:
+                    with connection.cursor() as cursor:
+                        cursor.execute("""
+                            UPDATE products
+                            SET sell_price = %s
+                            WHERE id = %s
+                        """, [batch_selling_price, sale_item[1]])
+
+                        # Log the price change
+                        cursor.execute("""
+                            INSERT INTO activities (type, description, product_id, user_id, created_at, status)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                        """, [
+                            'price_updated',
+                            f'Product selling price updated to {batch_selling_price} from batch {batch_id}',
+                            sale_item[1],
+                            user_id,
+                            timezone.now(),
+                            'completed'
+                        ])
+
             # Create the batch sale item
             serializer = self.get_serializer(data={
                 'sale_item': sale_item_id,
-                'batch': batch[0],
+                'batch': batch_id,
                 'quantity': quantity
             })
             serializer.is_valid(raise_exception=True)
@@ -374,7 +424,7 @@ class BatchSaleItemViewSet(viewsets.ModelViewSet):
                     UPDATE product_batches
                     SET remaining_quantity = remaining_quantity - %s
                     WHERE id = %s
-                """, [quantity, batch[0]])
+                """, [quantity, batch_id])
 
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 

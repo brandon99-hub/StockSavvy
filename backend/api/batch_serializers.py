@@ -5,7 +5,7 @@ class ProductBatchSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductBatch
         fields = [
-            'id', 'product', 'batch_number', 'purchase_price',
+            'id', 'product', 'batch_number', 'purchase_price', 'selling_price',
             'quantity', 'remaining_quantity', 'purchase_date',
             'created_at', 'updated_at'
         ]
