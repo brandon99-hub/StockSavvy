@@ -3,6 +3,7 @@ export interface ProductBatch {
     product: number;
     batch_number: string;
     purchase_price: number;
+    selling_price?: number;
     quantity: number;
     remaining_quantity: number;
     purchase_date: string;

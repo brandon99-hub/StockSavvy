@@ -44,6 +44,7 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
     const [newBatch, setNewBatch] = useState({
         batch_number: '',
         purchase_price: '',
+        selling_price: '',
         quantity: '',
         purchase_date: new Date().toISOString().split('T')[0]
     });
@@ -79,17 +80,19 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
                     product: productId,
                     ...newBatch,
                     purchase_price: parseFloat(newBatch.purchase_price),
+                    selling_price: newBatch.selling_price ? parseFloat(newBatch.selling_price) : null,
                     quantity: parseInt(newBatch.quantity)
                 })
             });
-            
+
             // Invalidate and refetch queries
             queryClient.invalidateQueries({ queryKey: ['batches', productId] });
             queryClient.invalidateQueries({ queryKey: ['batch-stats', productId] });
-            
+
             setNewBatch({
                 batch_number: '',
                 purchase_price: '',
+                selling_price: '',
                 quantity: '',
                 purchase_date: new Date().toISOString().split('T')[0]
             });
@@ -117,6 +120,7 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
                 data: {
                     ...editingBatch,
                     purchase_price: parseFloat(editingBatch.purchase_price.toString()),
+                    selling_price: editingBatch.selling_price !== null ? parseFloat(editingBatch.selling_price.toString()) : null,
                     quantity: parseInt(editingBatch.quantity.toString())
                 }
             });
@@ -245,6 +249,16 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
                                 />
                             </div>
                             <div>
+                                <Label htmlFor="selling_price">Selling Price (Optional)</Label>
+                                <Input
+                                    id="selling_price"
+                                    type="number"
+                                    step="0.01"
+                                    value={newBatch.selling_price}
+                                    onChange={(e) => setNewBatch({ ...newBatch, selling_price: e.target.value })}
+                                />
+                            </div>
+                            <div>
                                 <Label htmlFor="quantity">Quantity</Label>
                                 <Input
                                     id="quantity"
@@ -274,6 +288,7 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
                             <TableRow>
                                 <TableHead>Batch Number</TableHead>
                                 <TableHead>Purchase Price</TableHead>
+                                <TableHead>Selling Price</TableHead>
                                 <TableHead>Quantity</TableHead>
                                 <TableHead>Remaining</TableHead>
                                 <TableHead>Purchase Date</TableHead>
@@ -285,6 +300,7 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
                                 <TableRow key={batch.id}>
                                     <TableCell>{batch.batch_number}</TableCell>
                                     <TableCell>{formatCurrency(batch.purchase_price)}</TableCell>
+                                    <TableCell>{batch.selling_price ? formatCurrency(batch.selling_price) : '-'}</TableCell>
                                     <TableCell>{batch.quantity}</TableCell>
                                     <TableCell>{batch.remaining_quantity}</TableCell>
                                     <TableCell>{formatDate(batch.purchase_date)}</TableCell>
@@ -328,6 +344,19 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
                                                                     purchase_price: parseFloat(e.target.value)
                                                                 })}
                                                                 required
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <Label htmlFor="edit_selling_price">Selling Price (Optional)</Label>
+                                                            <Input
+                                                                id="edit_selling_price"
+                                                                type="number"
+                                                                step="0.01"
+                                                                value={editingBatch?.selling_price || ''}
+                                                                onChange={(e) => setEditingBatch({
+                                                                    ...editingBatch!,
+                                                                    selling_price: e.target.value ? parseFloat(e.target.value) : null
+                                                                })}
                                                             />
                                                         </div>
                                                         <div>
