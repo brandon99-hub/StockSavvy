@@ -377,7 +377,7 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
                                                             <Input
                                                                 id="edit_purchase_date"
                                                                 type="date"
-                                                                value={editingBatch?.purchase_date.split('T')[0]}
+                                                                value={editingBatch?.purchase_date?.split('T')[0] || ''}
                                                                 onChange={(e) => setEditingBatch({
                                                                     ...editingBatch!,
                                                                     purchase_date: e.target.value
