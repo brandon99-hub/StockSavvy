@@ -26,6 +26,26 @@ const Header = ({toggleSidebar}: HeaderProps) => {
     // Fetch activities from the /api/activities endpoint
     const {data: activities = []} = useQuery<Activity[]>({
         queryKey: ['/api/activities/'],
+        queryFn: async () => {
+            try {
+                const response = await fetch('/api/activities/', {
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                return Array.isArray(data) ? data : [];
+            } catch (error) {
+                console.error('Error fetching activities:', error);
+                return [];
+            }
+        },
         select: (data) => data
             .filter(activity =>
                 ['stock_added', 'stock_removed', 'order', 'restock_order', 'sale'].includes(activity.type)

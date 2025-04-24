@@ -5,6 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { ProductBatch } from '@/types/batch';
 import { apiRequest } from '@/lib/queryClient';
@@ -33,6 +34,7 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
     const [error, setError] = useState<string | null>(null);
     const [stats, setStats] = useState<BatchStats | null>(null);
     const [editingBatch, setEditingBatch] = useState<ProductBatch | null>(null);
+    const [isAddingBatch, setIsAddingBatch] = useState(false);
     const [filters, setFilters] = useState({
         min_remaining: '',
         max_remaining: '',
@@ -73,6 +75,7 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
 
     const handleCreateBatch = async (e: React.FormEvent) => {
         e.preventDefault();
+        setIsAddingBatch(true);
         try {
             await apiRequest('/api/product-batches/', {
                 method: 'POST',
@@ -107,6 +110,8 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
                 description: 'Failed to create batch. Please try again.',
                 variant: 'destructive',
             });
+        } finally {
+            setIsAddingBatch(false);
         }
     };
 
@@ -119,9 +124,9 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
                 method: 'PUT',
                 data: {
                     ...editingBatch,
-                    purchase_price: parseFloat(editingBatch.purchase_price.toString()),
-                    selling_price: editingBatch.selling_price !== null ? parseFloat(editingBatch.selling_price.toString()) : null,
-                    quantity: parseInt(editingBatch.quantity.toString())
+                    purchase_price: typeof editingBatch.purchase_price === 'number' ? editingBatch.purchase_price : parseFloat(String(editingBatch.purchase_price || 0)),
+                    selling_price: editingBatch.selling_price !== null && editingBatch.selling_price !== undefined ? parseFloat(String(editingBatch.selling_price)) : null,
+                    quantity: typeof editingBatch.quantity === 'number' ? editingBatch.quantity : parseInt(String(editingBatch.quantity || 0))
                 }
             });
             queryClient.invalidateQueries({ queryKey: ['batches', productId] });
@@ -140,8 +145,26 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
             });
             queryClient.invalidateQueries({ queryKey: ['batches', productId] });
             queryClient.invalidateQueries({ queryKey: ['batch-stats', productId] });
-        } catch (err) {
-            setError('Failed to delete batch');
+
+            // Show success toast
+            toast({
+                title: 'Success',
+                description: 'Batch deleted successfully',
+            });
+        } catch (err: any) {
+            // Extract the error message
+            const errorMessage = err.message || 'Failed to delete batch';
+
+            // Set error state
+            setError(errorMessage);
+
+            // Show error toast with the specific message
+            toast({
+                title: 'Error',
+                description: errorMessage,
+                variant: 'destructive',
+            });
+
             console.error('Error deleting batch:', err);
         }
     };
@@ -279,7 +302,9 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
                                 />
                             </div>
                         </div>
-                        <Button type="submit">Add Batch</Button>
+                        <Button type="submit" disabled={isAddingBatch}>
+                            {isAddingBatch ? "Adding Batch..." : "Add Batch"}
+                        </Button>
                     </form>
 
                     {/* Batches Table */}
@@ -292,6 +317,7 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
                                 <TableHead>Quantity</TableHead>
                                 <TableHead>Remaining</TableHead>
                                 <TableHead>Purchase Date</TableHead>
+                                <TableHead>Status</TableHead>
                                 <TableHead>Actions</TableHead>
                             </TableRow>
                         </TableHeader>
@@ -304,6 +330,15 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
                                     <TableCell>{batch.quantity}</TableCell>
                                     <TableCell>{batch.remaining_quantity}</TableCell>
                                     <TableCell>{formatDate(batch.purchase_date)}</TableCell>
+                                    <TableCell>
+                                        {batch.remaining_quantity > 0 && batchesData.findIndex(b => b.remaining_quantity > 0) === batchesData.indexOf(batch) ? (
+                                            <Badge className="bg-green-100 text-green-800">Current Batch</Badge>
+                                        ) : batch.remaining_quantity === 0 ? (
+                                            <Badge className="bg-red-100 text-red-800">Depleted</Badge>
+                                        ) : (
+                                            <Badge className="bg-blue-100 text-blue-800">Upcoming</Badge>
+                                        )}
+                                    </TableCell>
                                     <TableCell>
                                         <div className="flex space-x-2">
                                             <Dialog>
@@ -338,7 +373,7 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
                                                                 id="edit_purchase_price"
                                                                 type="number"
                                                                 step="0.01"
-                                                                value={editingBatch?.purchase_price}
+                                                                value={editingBatch?.purchase_price || ''}
                                                                 onChange={(e) => setEditingBatch({
                                                                     ...editingBatch!,
                                                                     purchase_price: parseFloat(e.target.value)
@@ -364,7 +399,7 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
                                                             <Input
                                                                 id="edit_quantity"
                                                                 type="number"
-                                                                value={editingBatch?.quantity}
+                                                                value={editingBatch?.quantity || ''}
                                                                 onChange={(e) => setEditingBatch({
                                                                     ...editingBatch!,
                                                                     quantity: parseInt(e.target.value)
@@ -377,7 +412,7 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
                                                             <Input
                                                                 id="edit_purchase_date"
                                                                 type="date"
-                                                                value={editingBatch?.purchase_date?.split('T')[0] || ''}
+                                                                value={editingBatch?.purchase_date ? editingBatch.purchase_date.split('T')[0] : ''}
                                                                 onChange={(e) => setEditingBatch({
                                                                     ...editingBatch!,
                                                                     purchase_date: e.target.value

@@ -158,8 +158,30 @@ class ProductBatchViewSet(viewsets.ModelViewSet):
             old_quantity = instance.quantity
             new_quantity = int(request.data.get('quantity', old_quantity))
 
+            # Log the request data for debugging
+            logger.info(f"Update batch request data: {request.data}")
+
+            # Ensure selling_price is properly handled
+            if 'selling_price' in request.data:
+                if request.data['selling_price'] == '' or request.data['selling_price'] is None:
+                    request.data['selling_price'] = None
+                else:
+                    try:
+                        request.data['selling_price'] = float(request.data['selling_price'])
+                    except (ValueError, TypeError):
+                        return Response(
+                            {"detail": "Invalid selling price format"},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+
             serializer = self.get_serializer(instance, data=request.data, partial=True)
-            serializer.is_valid(raise_exception=True)
+            if not serializer.is_valid():
+                logger.error(f"Serializer validation errors: {serializer.errors}")
+                return Response(
+                    {"detail": "Invalid data", "errors": serializer.errors},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
             self.perform_update(serializer)
 
             # Update product quantity if quantity changed
@@ -171,12 +193,23 @@ class ProductBatchViewSet(viewsets.ModelViewSet):
                         [quantity_diff, instance.product_id]
                     )
 
-            return Response(serializer.data)
+            # Create activity log for the update
+            Activity.objects.create(
+                type='batch_updated',
+                description=f'Batch #{instance.id} updated for product {instance.product_id}',
+                product_id=instance.product_id,
+                user_id=request.user.id if hasattr(request, 'user') and request.user.id else None,
+                created_at=timezone.now(),
+                status='completed'
+            )
+
+            return Response({"detail": "Batch updated successfully", "data": serializer.data})
 
         except Exception as e:
-            logger.error(f"Error updating batch: {str(e)}")
+            error_msg = str(e)
+            logger.error(f"Error updating batch: {error_msg}")
             return Response(
-                {"detail": "Error updating batch"},
+                {"detail": "Error updating batch. Please try again."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -207,13 +240,13 @@ class ProductBatchViewSet(viewsets.ModelViewSet):
                 )
 
             self.perform_destroy(instance)
-            return Response(status=status.HTTP_204_NO_CONTENT)
+            return Response({"detail": "Batch deleted successfully"}, status=status.HTTP_200_OK)
 
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Error deleting batch: {error_msg}")
             return Response(
-                {"detail": f"Error deleting batch: {error_msg}"},
+                {"detail": "Error deleting batch. Please try again."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -397,17 +430,32 @@ class BatchSaleItemViewSet(viewsets.ModelViewSet):
                         """, [batch_selling_price, sale_item[1]])
 
                         # Log the price change
-                        cursor.execute("""
-                            INSERT INTO activities (type, description, product_id, user_id, created_at, status)
-                            VALUES (%s, %s, %s, %s, %s, %s)
-                        """, [
-                            'price_updated',
-                            f'Product selling price updated to {batch_selling_price} from batch {batch_id}',
-                            sale_item[1],
-                            user_id,
-                            timezone.now(),
-                            'completed'
-                        ])
+                        # Handle case where user_id might be None
+                        if user_id:
+                            cursor.execute("""
+                                INSERT INTO activities (type, description, product_id, user_id, created_at, status)
+                                VALUES (%s, %s, %s, %s, %s, %s)
+                            """, [
+                                'price_updated',
+                                f'Product selling price updated to {batch_selling_price} from batch {batch_id}',
+                                sale_item[1],
+                                user_id,
+                                timezone.now(),
+                                'completed'
+                            ])
+                        else:
+                            # Use a default user_id (1) when user_id is None
+                            cursor.execute("""
+                                INSERT INTO activities (type, description, product_id, user_id, created_at, status)
+                                VALUES (%s, %s, %s, %s, %s, %s)
+                            """, [
+                                'price_updated',
+                                f'Product selling price updated to {batch_selling_price} from batch {batch_id}',
+                                sale_item[1],
+                                1,  # Default to user_id 1 (admin)
+                                timezone.now(),
+                                'completed'
+                            ])
 
             # Create the batch sale item
             serializer = self.get_serializer(data={
@@ -424,7 +472,122 @@ class BatchSaleItemViewSet(viewsets.ModelViewSet):
                     UPDATE product_batches
                     SET remaining_quantity = remaining_quantity - %s
                     WHERE id = %s
+                    RETURNING remaining_quantity
                 """, [quantity, batch_id])
+
+                # Check if batch is now fully consumed
+                result = cursor.fetchone()
+                remaining = result[0] if result else 0
+
+                # If batch is fully consumed, find the next batch and update product price
+                if remaining == 0:
+                    # Find the next available batch
+                    cursor.execute("""
+                        SELECT id, selling_price
+                        FROM product_batches
+                        WHERE product_id = %s AND remaining_quantity > 0
+                        ORDER BY purchase_date ASC
+                        LIMIT 1
+                    """, [sale_item[1]])
+
+                    next_batch = cursor.fetchone()
+                    if next_batch:  # If there's a next batch
+                        next_batch_id = next_batch[0]
+                        next_batch_selling_price = next_batch[1]
+
+                        if next_batch_selling_price is not None:  # If the next batch has a custom selling price
+                            # Get the next batch's purchase price
+                            cursor.execute("""
+                                SELECT purchase_price
+                                FROM product_batches
+                                WHERE id = %s
+                            """, [next_batch_id])
+
+                            next_batch_purchase_price = cursor.fetchone()[0]
+
+                            # Update the product's selling price and buying price to match the next batch
+                            cursor.execute("""
+                                UPDATE products
+                                SET sell_price = %s, buy_price = %s
+                                WHERE id = %s
+                            """, [next_batch_selling_price, next_batch_purchase_price, sale_item[1]])
+
+                            # Log the price change
+                            # Handle case where user_id might be None
+                            if user_id:
+                                cursor.execute("""
+                                    INSERT INTO activities (type, description, product_id, user_id, created_at, status)
+                                    VALUES (%s, %s, %s, %s, %s, %s)
+                                """, [
+                                    'price_updated',
+                                    f'Product prices updated from next batch {next_batch_id} after previous batch was depleted. Selling price: {next_batch_selling_price}, Buying price: {next_batch_purchase_price}',
+                                    sale_item[1],
+                                    user_id,
+                                    timezone.now(),
+                                    'completed'
+                                ])
+                            else:
+                                # Use a default user_id (1) when user_id is None
+                                cursor.execute("""
+                                    INSERT INTO activities (type, description, product_id, user_id, created_at, status)
+                                    VALUES (%s, %s, %s, %s, %s, %s)
+                                """, [
+                                    'price_updated',
+                                    f'Product prices updated from next batch {next_batch_id} after previous batch was depleted. Selling price: {next_batch_selling_price}, Buying price: {next_batch_purchase_price}',
+                                    sale_item[1],
+                                    1,  # Default to user_id 1 (admin)
+                                    timezone.now(),
+                                    'completed'
+                                ])
+                        else:
+                            # Get the next batch's purchase price
+                            cursor.execute("""
+                                SELECT purchase_price
+                                FROM product_batches
+                                WHERE id = %s
+                            """, [next_batch_id])
+
+                            next_batch_purchase_price = cursor.fetchone()[0]
+
+                            # Calculate a new selling price based on the purchase price (e.g., add a margin)
+                            # For example, add a 30% margin
+                            margin_multiplier = 1.3  # 30% margin
+                            new_selling_price = float(next_batch_purchase_price) * margin_multiplier
+
+                            # Update the product's selling price and buying price
+                            cursor.execute("""
+                                UPDATE products
+                                SET sell_price = %s, buy_price = %s
+                                WHERE id = %s
+                            """, [new_selling_price, next_batch_purchase_price, sale_item[1]])
+
+                            # Log the price update
+                            # Handle case where user_id might be None
+                            if user_id:
+                                cursor.execute("""
+                                    INSERT INTO activities (type, description, product_id, user_id, created_at, status)
+                                    VALUES (%s, %s, %s, %s, %s, %s)
+                                """, [
+                                    'price_updated',
+                                    f'Product prices updated from next batch {next_batch_id} after previous batch was depleted. Selling price: {new_selling_price} (calculated with 30% margin), Buying price: {next_batch_purchase_price}',
+                                    sale_item[1],
+                                    user_id,
+                                    timezone.now(),
+                                    'completed'
+                                ])
+                            else:
+                                # Use a default user_id (1) when user_id is None
+                                cursor.execute("""
+                                    INSERT INTO activities (type, description, product_id, user_id, created_at, status)
+                                    VALUES (%s, %s, %s, %s, %s, %s)
+                                """, [
+                                    'price_updated',
+                                    f'Product prices updated from next batch {next_batch_id} after previous batch was depleted. Selling price: {new_selling_price} (calculated with 30% margin), Buying price: {next_batch_purchase_price}',
+                                    sale_item[1],
+                                    1,  # Default to user_id 1 (admin)
+                                    timezone.now(),
+                                    'completed'
+                                ])
 
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 

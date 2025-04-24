@@ -22,7 +22,7 @@ const handleUnauthorized = () => {
 export const apiRequest = async (url: string, options: RequestInit = {}) => {
   const baseURL = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
   const token = localStorage.getItem('token');
-  
+
   // Format token if it doesn't include user ID
   let formattedToken = token;
   if (token && !token.includes('_')) {
@@ -58,7 +58,20 @@ export const apiRequest = async (url: string, options: RequestInit = {}) => {
         localStorage.removeItem('token');
         handleUnauthorized();
       }
-      throw new Error(`HTTP error! status: ${response.status}`);
+
+      // Try to parse error response
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        if (errorData.detail) {
+          errorMessage = errorData.detail;
+        }
+      } catch (parseError) {
+        // If we can't parse the error response, just use the default error message
+        console.error('Error parsing error response:', parseError);
+      }
+
+      throw new Error(errorMessage);
     }
 
     const data = await response.json();

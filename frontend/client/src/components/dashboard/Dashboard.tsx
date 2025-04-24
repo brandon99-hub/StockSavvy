@@ -60,11 +60,22 @@ const Dashboard = () => {
 
     // Low stock products query
     const {data: lowStockData, isLoading: isLowStockLoading} =
-        useQuery<Product[]>({
+        useQuery<LowStockResponse>({
             queryKey: ["dashboard", "low-stock"],
             queryFn: async () => {
                 const response = await apiRequest('/api/products/low-stock/');
-                return Array.isArray(response) ? response : [];
+                if (response && response.items) {
+                    return response as LowStockResponse;
+                }
+                // Fallback for backward compatibility
+                return {
+                    items: Array.isArray(response) ? response : [],
+                    summary: {
+                        total: Array.isArray(response) ? response.length : 0,
+                        outOfStock: 0,
+                        lowStock: 0
+                    }
+                };
             }
         });
 
@@ -82,12 +93,12 @@ const Dashboard = () => {
             try {
                 const response = await apiRequest('/api/dashboard/sales-chart/');
                 const salesArray = response?.items || [];
-                
+
                 if (!Array.isArray(salesArray)) {
                     console.error('Sales data structure:', response);
                     return [];
                 }
-                
+
                 return salesArray.map(item => ({
                     date: new Date(item.date).toISOString(),
                     amount: parseFloat(item.amount) || 0
@@ -108,12 +119,12 @@ const Dashboard = () => {
             try {
                 const response = await apiRequest('/api/dashboard/category-chart/');
                 console.log('Raw Category API response:', JSON.stringify(response, null, 2));
-                
+
                 if (!Array.isArray(response)) {
                     console.error('Category data is not an array:', response);
                     return [];
                 }
-                
+
                 // Transform the data to match the CategoryChartData interface
                 const validCategories = response.map(item => ({
                     id: item.id,
@@ -297,7 +308,7 @@ const Dashboard = () => {
             {/* Tables Row */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <LowStockTable
-                    products={lowStockData || []}
+                    products={lowStockData?.items || []}
                     categories={categories || []}
                     onReorder={() => {
                         queryClient.invalidateQueries({ queryKey: ["/api/products"] });

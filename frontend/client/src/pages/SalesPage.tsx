@@ -29,7 +29,13 @@ const SalesPage = () => {
   // Fetch products for product lookup
   const { data: products = [], isLoading: isProductsLoading } = useQuery<Product[]>({
     queryKey: ['/api/products/'],
-    queryFn: () => apiRequest('/api/products/')
+    queryFn: () => apiRequest('/api/products/'),
+    // Refetch every 5 seconds to ensure we have the latest prices
+    refetchInterval: 5000,
+    // Also refetch when the window regains focus
+    refetchOnWindowFocus: true,
+    // Don't cache the data for too long
+    staleTime: 1000
   });
 
   // Fetch users for user lookup

@@ -23,6 +23,12 @@ const InventoryPage = () => {
   const { data: products = [], isLoading: isProductsLoading } = useQuery<Product[]>({
     queryKey: ['/api/products'],
     queryFn: () => apiRequest('/api/products/'),
+    // Refetch every 5 seconds to ensure we have the latest prices
+    refetchInterval: 5000,
+    // Also refetch when the window regains focus
+    refetchOnWindowFocus: true,
+    // Don't cache the data for too long
+    staleTime: 1000
   });
 
   // Fetch categories
@@ -30,7 +36,7 @@ const InventoryPage = () => {
     queryKey: ['/api/categories'],
     queryFn: () => apiRequest('/api/categories/'),
   });
-  
+
   // Fetch low stock products
   const { data: lowStockProducts = [], isLoading: isLowStockLoading } = useQuery<Product[]>({
     queryKey: ['/api/products/low-stock'],

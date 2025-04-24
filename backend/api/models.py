@@ -137,7 +137,7 @@ class Activity(models.Model):
     type = models.TextField()
     description = models.TextField()
     product = models.ForeignKey(Product, models.SET_NULL, blank=True, null=True)
-    user = models.ForeignKey(User, models.SET_NULL, null=True)
+    user = models.ForeignKey(User, models.SET_NULL, null=True, blank=True)
     created_at = models.DateTimeField()
     status = models.TextField()
 

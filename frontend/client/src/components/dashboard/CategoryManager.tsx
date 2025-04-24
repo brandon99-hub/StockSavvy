@@ -40,6 +40,7 @@ const CategoryManager = () => {
     const [editName, setEditName] = useState<string>('');
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [categoryToDelete, setCategoryToDelete] = useState<Category | null>(null);
+    const [deleteError, setDeleteError] = useState<string | null>(null);
 
     // Fetch categories
     const { data: categories, isLoading, error } = useQuery({
@@ -108,9 +109,22 @@ const CategoryManager = () => {
     // Delete category mutation
     const deleteMutation = useMutation({
         mutationFn: async (id: number) => {
-            return await apiRequest(`/api/categories/${id}/`, {
-                method: 'DELETE',
-            });
+            setDeleteError(null); // Clear any previous errors
+            try {
+                return await apiRequest(`/api/categories/${id}/`, {
+                    method: 'DELETE',
+                });
+            } catch (error: any) {
+                // Extract error message from response
+                const errorMessage = error.response?.data?.detail || 
+                    (error instanceof Error ? error.message : 'Unknown error');
+
+                // Set the error state for the dialog
+                setDeleteError(errorMessage);
+
+                // Rethrow to trigger onError
+                throw error;
+            }
         },
         onSuccess: () => {
             toast({
@@ -118,13 +132,19 @@ const CategoryManager = () => {
                 description: 'Category deleted successfully',
             });
             queryClient.invalidateQueries({ queryKey: ['categories'] });
+            setCategoryToDelete(null); // Close the dialog
         },
         onError: (error) => {
-            toast({
-                title: 'Error',
-                description: `Failed to delete category: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                variant: 'destructive',
-            });
+            // Only show toast for errors that aren't displayed in the dialog
+            if (!deleteError) {
+                toast({
+                    title: 'Error',
+                    description: `Failed to delete category: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                    variant: 'destructive',
+                });
+                setCategoryToDelete(null); // Close the dialog for unexpected errors
+            }
+            // For errors handled in the dialog, keep the dialog open
         },
     });
 
@@ -174,7 +194,8 @@ const CategoryManager = () => {
     const confirmDelete = () => {
         if (categoryToDelete) {
             deleteMutation.mutate(categoryToDelete.id);
-            setCategoryToDelete(null);
+            // Don't close the dialog here, it will be closed in onSuccess
+            // or kept open in onError to show the error message
         }
     };
 
@@ -285,24 +306,50 @@ const CategoryManager = () => {
                 </Table>
 
                 {/* Delete Confirmation Dialog */}
-                <AlertDialog open={!!categoryToDelete} onOpenChange={(open) => !open && setCategoryToDelete(null)}>
+                <AlertDialog 
+                    open={!!categoryToDelete} 
+                    onOpenChange={(open) => {
+                        if (!open) {
+                            setCategoryToDelete(null);
+                            setDeleteError(null);
+                        }
+                    }}
+                >
                     <AlertDialogContent>
                         <AlertDialogHeader>
-                            <AlertDialogTitle>Delete Category</AlertDialogTitle>
-                            <AlertDialogDescription>
-                                Are you sure you want to delete the category "{categoryToDelete?.name}"? 
-                                This action cannot be undone and may affect products assigned to this category.
-                            </AlertDialogDescription>
+                            <AlertDialogTitle>
+                                {deleteError ? 'Cannot Delete Category' : 'Delete Category'}
+                            </AlertDialogTitle>
+                            {deleteError ? (
+                                <div>
+                                    <AlertDialogDescription className="text-red-500 font-medium mb-2">
+                                        {deleteError}
+                                    </AlertDialogDescription>
+                                    <AlertDialogDescription>
+                                        Categories that have associated products cannot be deleted to maintain data integrity.
+                                        Consider reassigning products to a different category before deleting this one.
+                                    </AlertDialogDescription>
+                                </div>
+                            ) : (
+                                <AlertDialogDescription>
+                                    Are you sure you want to delete the category "{categoryToDelete?.name}"? 
+                                    This action cannot be undone and may affect products assigned to this category.
+                                </AlertDialogDescription>
+                            )}
                         </AlertDialogHeader>
                         <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction
-                                onClick={confirmDelete}
-                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                disabled={deleteMutation.isPending}
-                            >
-                                {deleteMutation.isPending ? "Deleting..." : "Delete"}
-                            </AlertDialogAction>
+                            <AlertDialogCancel>
+                                {deleteError ? 'Close' : 'Cancel'}
+                            </AlertDialogCancel>
+                            {!deleteError && (
+                                <AlertDialogAction
+                                    onClick={confirmDelete}
+                                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                    disabled={deleteMutation.isPending}
+                                >
+                                    {deleteMutation.isPending ? "Deleting..." : "Delete"}
+                                </AlertDialogAction>
+                            )}
                         </AlertDialogFooter>
                     </AlertDialogContent>
                 </AlertDialog>

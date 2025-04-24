@@ -30,6 +30,7 @@ urlpatterns = [
     path('dashboard/stats/', ReportViewSet.as_view({'get': 'stats'}), name='dashboard-stats'),
     path('dashboard/category-chart/', ReportViewSet.as_view({'get': 'category_chart'}), name='dashboard-category-chart'),
     path('dashboard/sales-chart/', ReportViewSet.as_view({'get': 'sales_chart'}), name='dashboard-sales-chart'),
+    path('dashboard/top-products/', ReportViewSet.as_view({'get': 'top_products'}), name='dashboard-top-products'),
     path('products/<int:pk>/reorder/', ProductViewSet.as_view({'post': 'restock'}), name='product-restock'),
     path('', include(router.urls)),
-] 
+]

@@ -62,6 +62,7 @@ const SalesList = ({sales, saleItems, products, users}: SalesListProps) => {
     const [clearDialogOpen, setClearDialogOpen] = useState(false);
     const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
     const [isClearing, setIsClearing] = useState(false);
+    const [clearError, setClearError] = useState<string | null>(null);
     const queryClient = useQueryClient();
     const { toast } = useToast();
     const itemsPerPage = 10;
@@ -72,35 +73,35 @@ const SalesList = ({sales, saleItems, products, users}: SalesListProps) => {
         if (!searchTerm) return true;
 
         const searchLower = searchTerm.toLowerCase();
-        
+
         // Search by sale ID
         if (sale.id.toString().includes(searchLower)) return true;
-        
+
         // Search by date
         const saleDate = format(new Date(sale.sale_date), 'MMMM d, yyyy HH:mm');
         if (saleDate.toLowerCase().includes(searchLower)) return true;
-        
+
         // Search by user
         const userName = users[sale.user_id]?.name || '';
         if (userName.toLowerCase().includes(searchLower)) return true;
-        
+
         // Search by amount
         const amount = sale.total_amount.toString();
         if (amount.includes(searchLower)) return true;
-        
+
         // Search by items
         const items = saleItems[sale.id] || [];
         for (const item of items) {
             const product = products[item.product_id];
             if (!product) continue;
-            
+
             // Search by product name
             if (product.name.toLowerCase().includes(searchLower)) return true;
-            
+
             // Search by quantity
             if (item.quantity.toString().includes(searchLower)) return true;
         }
-        
+
         return false;
     });
 
@@ -131,7 +132,7 @@ const SalesList = ({sales, saleItems, products, users}: SalesListProps) => {
             const response = await apiRequest(`/api/sales/${saleId}/receipt/`, {
                 method: 'GET'
             });
-            
+
             if (response && response.items) {
                 setReceiptData(prev => ({
                     ...prev,
@@ -150,7 +151,9 @@ const SalesList = ({sales, saleItems, products, users}: SalesListProps) => {
 
         const totalQuantity = sale.items.reduce((sum, item) => sum + item.quantity, 0);
         const itemsDisplay = sale.items.map(item => {
-            return `${item.product_name} (${item.quantity})`;
+            const product = products[item.product_id];
+            const description = product?.description ? ` - ${product.description}` : '';
+            return `${item.product_name}${description} (${item.quantity})`;
         }).join(', ');
 
         return `${totalQuantity} items: ${itemsDisplay}`;
@@ -160,23 +163,37 @@ const SalesList = ({sales, saleItems, products, users}: SalesListProps) => {
     const handleClearAll = async () => {
         try {
             setIsClearing(true);
+            setClearError(null); // Clear any previous errors
+
             await apiRequest('/api/sales/clear_all/', {
                 method: 'POST'
             });
+
             toast({
                 title: "Success",
                 description: "All sales have been cleared successfully",
                 variant: "default",
             });
+
             queryClient.invalidateQueries({ queryKey: ['/api/sales/'] });
             queryClient.invalidateQueries({ queryKey: ['/api/sales-items/'] });
             setClearDialogOpen(false);
-        } catch (error) {
-            toast({
-                title: "Error",
-                description: "Failed to clear sales",
-                variant: "destructive",
-            });
+        } catch (error: any) {
+            // Extract error message from response
+            const errorMessage = error.response?.data?.detail || 
+                (error instanceof Error ? error.message : 'Unknown error');
+
+            // Set the error state for the dialog
+            setClearError(errorMessage);
+
+            // Only show toast for errors that aren't displayed in the dialog
+            if (!errorMessage) {
+                toast({
+                    title: "Error",
+                    description: "Failed to clear sales",
+                    variant: "destructive",
+                });
+            }
         } finally {
             setIsClearing(false);
         }
@@ -373,7 +390,14 @@ const SalesList = ({sales, saleItems, products, users}: SalesListProps) => {
                                     <TableBody>
                                         {(saleItems[selectedSale.id] || []).map(item => (
                                             <TableRow key={item.id}>
-                                                <TableCell>{products[item.product_id]?.name || `Product #${item.product_id}`}</TableCell>
+                                                <TableCell>
+                                                    <div>
+                                                        <div className="font-medium">{products[item.product_id]?.name || `Product #${item.product_id}`}</div>
+                                                        {products[item.product_id]?.description && (
+                                                            <div className="text-xs text-gray-500">{products[item.product_id].description}</div>
+                                                        )}
+                                                    </div>
+                                                </TableCell>
                                                 <TableCell
                                                     className="text-right">KSh {Number(item.unit_price).toFixed(2)}</TableCell>
                                                 <TableCell className="text-right">{item.quantity}</TableCell>
@@ -398,13 +422,40 @@ const SalesList = ({sales, saleItems, products, users}: SalesListProps) => {
                 </DialogContent>
             </Dialog>
 
-            <Dialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>
+            <Dialog 
+                open={clearDialogOpen} 
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setClearDialogOpen(false);
+                        setClearError(null);
+                    }
+                }}
+            >
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>Clear All Sales</DialogTitle>
-                        <DialogDescription>
-                            Are you sure you want to clear all sales data? This action cannot be undone.
-                        </DialogDescription>
+                        <DialogTitle>
+                            {clearError ? 'Error Clearing Sales' : 'Clear All Sales'}
+                        </DialogTitle>
+                        {clearError ? (
+                            <div>
+                                <DialogDescription className="text-red-500 font-medium mb-2">
+                                    {clearError}
+                                </DialogDescription>
+                                <DialogDescription>
+                                    There was an error while trying to clear all sales. This could be due to:
+                                    <ul className="list-disc pl-5 mt-2">
+                                        <li>Sales data being referenced by other parts of the system</li>
+                                        <li>Insufficient permissions to perform this action</li>
+                                        <li>A temporary server issue</li>
+                                    </ul>
+                                    You may want to try again later or contact your system administrator.
+                                </DialogDescription>
+                            </div>
+                        ) : (
+                            <DialogDescription>
+                                Are you sure you want to clear all sales data? This action cannot be undone.
+                            </DialogDescription>
+                        )}
                     </DialogHeader>
                     <DialogFooter>
                         <Button
@@ -412,22 +463,24 @@ const SalesList = ({sales, saleItems, products, users}: SalesListProps) => {
                             onClick={() => setClearDialogOpen(false)}
                             disabled={isClearing}
                         >
-                            Cancel
+                            {clearError ? 'Close' : 'Cancel'}
                         </Button>
-                        <Button
-                            variant="destructive"
-                            onClick={handleClearAll}
-                            disabled={isClearing}
-                        >
-                            {isClearing ? (
-                                <>
-                                    <i className="fas fa-spinner fa-spin mr-2"></i>
-                                    Clearing...
-                                </>
-                            ) : (
-                                'Clear All Sales'
-                            )}
-                        </Button>
+                        {!clearError && (
+                            <Button
+                                variant="destructive"
+                                onClick={handleClearAll}
+                                disabled={isClearing}
+                            >
+                                {isClearing ? (
+                                    <>
+                                        <i className="fas fa-spinner fa-spin mr-2"></i>
+                                        Clearing...
+                                    </>
+                                ) : (
+                                    'Clear All Sales'
+                                )}
+                            </Button>
+                        )}
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

@@ -201,12 +201,12 @@ const AdvancedAnalytics = () => {
                 const response = await apiRequest('/api/dashboard/sales-chart/');
                 // The API returns { items: [], summary: {} }
                 const salesArray = response?.items || [];
-                
+
                 if (!Array.isArray(salesArray)) {
                     console.error('Sales data structure:', response);
                     return { items: [], summary: { total_sales: 0, total_items: 0 } };
                 }
-                
+
                 return {
                     items: salesArray,
                     summary: response?.summary || { total_sales: 0, total_items: 0 }
@@ -225,12 +225,12 @@ const AdvancedAnalytics = () => {
             try {
                 const response = await apiRequest('/api/dashboard/category-chart/');
                 console.log('Raw Category API response:', JSON.stringify(response, null, 2));
-                
+
                 if (!Array.isArray(response)) {
                     console.error('Category data is not an array:', response);
                     return [];
                 }
-                
+
                 // Transform the data to match the CategoryChartData interface
                 const validCategories = response.map(item => ({
                     id: item.id,
@@ -250,9 +250,16 @@ const AdvancedAnalytics = () => {
         staleTime: 55000 // Add staleTime to prevent unnecessary refetches
     });
 
-    const { data: lowStockData = { items: [], summary: { total: 0, outOfStock: 0, lowStock: 0 } }, isLoading: isLowStockLoading } = useQuery({
-        queryKey: ['/api/products/low-stock/'],
-        queryFn: () => apiRequest('/api/products/low-stock/')
+    const [lowStockPage, setLowStockPage] = useState(1);
+    const [lowStockLimit, setLowStockLimit] = useState(5);
+
+    const { data: lowStockData = { 
+        items: [], 
+        summary: { total: 0, outOfStock: 0, lowStock: 0 },
+        pagination: { currentPage: 1, totalPages: 1, totalItems: 0, itemsPerPage: 5 }
+    }, isLoading: isLowStockLoading } = useQuery({
+        queryKey: ['/api/products/low-stock/', lowStockPage, lowStockLimit],
+        queryFn: () => apiRequest(`/api/products/low-stock/?page=${lowStockPage}&limit=${lowStockLimit}`)
     });
 
     const { data: products = [], isLoading: isProductsLoading } = useQuery<Product[]>({
@@ -313,7 +320,7 @@ const AdvancedAnalytics = () => {
     // Calculate category revenue data with safety checks
     const categoryRevenueData = useMemo(() => {
         if (!Array.isArray(categoryChartData)) return [];
-        
+
         return categoryChartData.map(item => ({
             name: String(item.name || 'Unknown'),
             value: Number(item.value || 0),
@@ -385,19 +392,19 @@ const AdvancedAnalytics = () => {
             if (!salesQuery.data?.items) {
                 return [];
             }
-            
+
             const salesArray = salesQuery.data.items;
             if (!Array.isArray(salesArray)) {
                 console.error('Sales data structure:', salesQuery.data);
                 return [];
             }
-            
+
             const transformedData = salesArray.map(item => {
                 const date = format(new Date(item.date), 'yyyy-MM-dd');
                 const amount = parseFloat(item.amount);
                 return { date, amount } satisfies SalesChartData;
             });
-            
+
             return transformedData.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
         } catch (error) {
             console.error('Error transforming sales data:', error);
@@ -421,18 +428,18 @@ const AdvancedAnalytics = () => {
             console.log('No sales data available for profit calculation');
             return [];
         }
-        
+
         const salesArray = salesQuery.data.items;
         if (!Array.isArray(salesArray)) {
             console.error('Sales data structure:', salesQuery.data);
             return [];
         }
-        
+
         return salesArray.map(item => {
             const revenue = parseFloat(item.amount);
             const cost = revenue * 0.7; // Assuming 30% profit margin
             const profit = revenue * 0.3;
-            
+
             return {
                 date: format(new Date(item.date), 'yyyy-MM-dd'),
                 revenue,
@@ -454,7 +461,7 @@ const AdvancedAnalytics = () => {
 
         const totalRevenue = salesQuery.data.items.reduce((sum, item) => 
             sum + parseFloat(item.amount || '0'), 0);
-        
+
         const totalTransactions = salesQuery.data.items.reduce((sum, item) => 
             sum + (item.transaction_count || 0), 0);
 
@@ -468,7 +475,7 @@ const AdvancedAnalytics = () => {
     // Calculate stock movement data with safety checks
     const stockMovementData = useMemo(() => {
         if (!Array.isArray(activities) || !Array.isArray(products)) return [];
-        
+
         // Calculate initial stock levels (total of all products)
         const initialStock = products.reduce((total, product) => total + (Number(product.quantity) || 0), 0);
         let runningTotal = initialStock; // Start with current total stock
@@ -521,7 +528,7 @@ const AdvancedAnalytics = () => {
             };
 
             let quantity = 0;
-            
+
             // Get quantity from various possible sources
             if (activity.quantity) {
                 quantity = Number(activity.quantity);
@@ -663,7 +670,7 @@ const AdvancedAnalytics = () => {
     // Calculate year-over-year comparison data
     const yearOverYearData = useMemo(() => {
         if (!salesQuery.data?.items) return [];
-        
+
         // Get current period data
         const currentPeriodSales = salesQuery.data.items.filter(sale => {
             const saleDate = new Date(sale.date);
@@ -724,40 +731,51 @@ const AdvancedAnalytics = () => {
         ];
     }, [salesQuery.data, dateRange]);
 
+    // Fetch top products data
+    const { data: topProductsData = { items: [], summary: {}, pagination: {} }, isLoading: isTopProductsLoading } = useQuery({
+        queryKey: ['/api/dashboard/top-products/'],
+        queryFn: async () => {
+            try {
+                const response = await apiRequest('/api/dashboard/top-products/');
+                console.log('Top products API response:', response);
+                return response || { items: [], summary: {}, pagination: {} };
+            } catch (error) {
+                console.error('Error fetching top products data:', error);
+                return { items: [], summary: {}, pagination: {} };
+            }
+        },
+        refetchInterval: 60000
+    });
+
     // Calculate top products with safety checks
     const topProducts = useMemo((): TopProductData[] => {
-        if (!salesQuery.data?.items) {
-            console.log('No sales data available for top products calculation');
+        if (!topProductsData?.items || !Array.isArray(topProductsData.items)) {
+            console.log('No top products data available');
             return [];
         }
-        
-        const salesArray = salesQuery.data.items;
-        if (!Array.isArray(salesArray)) {
-            console.error('Sales data structure:', salesQuery.data);
-            return [];
-        }
-        
-        // Transform the sales data into a format suitable for the chart
-        return salesArray.map(item => {
-            const date = format(new Date(item.date), 'MMM dd, yyyy');
-            const revenue = parseFloat(item.amount);
+
+        // Transform the top products data into a format suitable for the chart
+        return topProductsData.items.map(item => {
             return {
-                id: item.date,
-                name: date,
-                sales: item.transaction_count,
-                revenue,
-                profit: revenue * 0.3 // Assuming 30% profit margin
+                id: String(item.id),
+                name: item.name,
+                category: item.category_name || 'Uncategorized',
+                sales: item.total_quantity,
+                revenue: parseFloat(item.total_revenue),
+                profit: parseFloat(item.total_profit),
+                margin: item.profit_margin
             } satisfies TopProductData;
-        }).sort((a, b) => b.revenue - a.revenue);
-    }, [salesQuery.data]);
+        });
+    }, [topProductsData]);
 
     // Update the profit analysis table to use the correct data
     const profitAnalysisData = useMemo(() => {
         return topProducts.map(product => ({
             ...product,
-            category: 'All Categories', // Since we don't have category info in the sales data
-            cost: product.revenue * 0.7,
-            margin: 30 // Using the same 30% margin assumption
+            cost: product.revenue - product.profit,
+            // Use the actual margin from the API if available
+            margin: product.margin !== undefined ? product.margin : 
+                (product.revenue > 0 ? (product.profit / product.revenue) * 100 : 0)
         }));
     }, [topProducts]);
 
@@ -1058,49 +1076,47 @@ const AdvancedAnalytics = () => {
                                                 <th className="px-6 py-3">Product</th>
                                                 <th className="px-6 py-3">SKU</th>
                                                 <th className="px-6 py-3">Category</th>
+                                                <th className="px-6 py-3">Description</th>
                                                 <th className="px-6 py-3">Current Stock</th>
                                                 <th className="px-6 py-3">Min Stock Level</th>
                                                 <th className="px-6 py-3">Status</th>
                                             </tr>
                                             </thead>
                                             <tbody>
-                                            {products
-                                                .filter(product => product.quantity <= product.min_stock_level)
-                                                .map(product => {
-                                                    const category = categories.find(c => {
-                                                        if (!product.category || typeof product.category !== 'number') return false;
-                                                        return c.id === product.category;
-                                                    });
-                                                    const stockDiff = product.quantity - product.min_stock_level;
-                                                    let statusClass = "bg-green-100 text-green-800";
+                                            {lowStockData.items.map(product => {
+                                                const stockDiff = product.quantity - product.min_stock_level;
+                                                let statusClass = "bg-green-100 text-green-800";
 
-                                                    if (stockDiff < 0) {
-                                                        statusClass = "bg-red-100 text-red-800";
-                                                    } else if (stockDiff === 0) {
-                                                        statusClass = "bg-yellow-100 text-yellow-800";
-                                                    }
+                                                if (stockDiff < 0) {
+                                                    statusClass = "bg-red-100 text-red-800";
+                                                } else if (stockDiff === 0) {
+                                                    statusClass = "bg-yellow-100 text-yellow-800";
+                                                }
 
-                                                    return (
-                                                        <tr key={product.id}
-                                                            className="bg-white border-b hover:bg-gray-50">
-                                                            <td className="px-6 py-4 font-medium text-gray-900">{product.name}</td>
-                                                            <td className="px-6 py-4">{product.sku}</td>
-                                                            <td className="px-6 py-4">{category?.name || 'Unknown'}</td>
-                                                            <td className="px-6 py-4">{product.quantity}</td>
-                                                            <td className="px-6 py-4">{product.min_stock_level}</td>
-                                                            <td className="px-6 py-4">
-                                  <span
-                                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusClass}`}>
-                                    {stockDiff < 0 ? 'Critically Low' : stockDiff === 0 ? 'At Threshold' : 'Low Stock'}
-                                  </span>
-                                                            </td>
-                                                        </tr>
-                                                    );
-                                                })
-                                            }
-                                            {products.filter(product => product.quantity <= product.min_stock_level).length === 0 && (
+                                                return (
+                                                    <tr key={product.id}
+                                                        className="bg-white border-b hover:bg-gray-50">
+                                                        <td className="px-6 py-4 font-medium text-gray-900">{product.name}</td>
+                                                        <td className="px-6 py-4">{product.sku}</td>
+                                                        <td className="px-6 py-4">{product.category_name || 'Unknown'}</td>
+                                                        <td className="px-6 py-4">
+                                                            <div className="max-w-xs truncate" title={product.description}>
+                                                                {product.description || 'No description'}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-4">{product.quantity}</td>
+                                                        <td className="px-6 py-4">{product.min_stock_level}</td>
+                                                        <td className="px-6 py-4">
+                                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusClass}`}>
+                                                                {product.status}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                            {lowStockData.items.length === 0 && (
                                                 <tr className="bg-white border-b">
-                                                    <td colSpan={6} className="px-6 py-4 text-center text-gray-500">
+                                                    <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
                                                         No low stock products found
                                                     </td>
                                                 </tr>
@@ -1108,6 +1124,46 @@ const AdvancedAnalytics = () => {
                                             </tbody>
                                         </table>
                                     </div>
+
+                                    {/* Pagination */}
+                                    {lowStockData.pagination && lowStockData.pagination.totalPages > 1 && (
+                                        <div className="flex justify-between items-center mt-4">
+                                            <div className="text-sm text-gray-500">
+                                                Showing {lowStockData.items.length} of {lowStockData.pagination.totalItems} items
+                                            </div>
+                                            <div className="flex space-x-2">
+                                                <Button 
+                                                    variant="outline" 
+                                                    size="sm"
+                                                    disabled={lowStockPage === 1}
+                                                    onClick={() => setLowStockPage(prev => Math.max(prev - 1, 1))}
+                                                >
+                                                    Previous
+                                                </Button>
+                                                <div className="flex items-center space-x-1">
+                                                    {Array.from({ length: lowStockData.pagination.totalPages }, (_, i) => i + 1).map(page => (
+                                                        <Button
+                                                            key={page}
+                                                            variant={page === lowStockPage ? "default" : "outline"}
+                                                            size="sm"
+                                                            onClick={() => setLowStockPage(page)}
+                                                            className="w-8 h-8 p-0"
+                                                        >
+                                                            {page}
+                                                        </Button>
+                                                    ))}
+                                                </div>
+                                                <Button 
+                                                    variant="outline" 
+                                                    size="sm"
+                                                    disabled={lowStockPage === lowStockData.pagination.totalPages}
+                                                    onClick={() => setLowStockPage(prev => Math.min(prev + 1, lowStockData.pagination.totalPages))}
+                                                >
+                                                    Next
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    )}
                                 </CardContent>
                             </Card>
                         </TabsContent>
