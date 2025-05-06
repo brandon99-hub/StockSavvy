@@ -4,6 +4,7 @@ from django.utils.translation import gettext_lazy as _
 import bcrypt
 from django.db import connection
 from django.contrib.auth.hashers import check_password, make_password  # Add this
+from django.core.exceptions import ValidationError
 
 
 class UserManager(BaseUserManager):
@@ -83,7 +84,7 @@ class Product(models.Model):
     sku = models.TextField(unique=True)
     description = models.TextField(blank=True, null=True)
     category = models.ForeignKey(Category, models.DO_NOTHING, blank=True, null=True, db_constraint=False)
-    quantity = models.IntegerField()
+    quantity = models.IntegerField(default=0)  # Total available quantity
     min_stock_level = models.IntegerField()
     buy_price = models.DecimalField(max_digits=10, decimal_places=2)
     sell_price = models.DecimalField(max_digits=10, decimal_places=2)
@@ -93,6 +94,22 @@ class Product(models.Model):
     class Meta:
         managed = False
         db_table = 'products'
+
+    def clean(self):
+        if self.quantity < 0:
+            raise ValidationError('Quantity cannot be negative')
+        if self.min_stock_level < 0:
+            raise ValidationError('Minimum stock level cannot be negative')
+        if self.buy_price <= 0:
+            raise ValidationError('Buy price must be positive')
+        if self.sell_price <= 0:
+            raise ValidationError('Sell price must be positive')
+        if self.sell_price < self.buy_price:
+            raise ValidationError('Sell price cannot be less than buy price')
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
 class RestockRule(models.Model):
     product = models.ForeignKey(Product, models.DO_NOTHING)

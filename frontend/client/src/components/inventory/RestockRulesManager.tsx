@@ -72,6 +72,7 @@ const RestockRulesManager: React.FC<RestockRulesManagerProps> = ({ products, low
   const [error, setError] = useState<string | null>(null);
   const [restockRules, setRestockRules] = useState<RestockRule[]>([]);
   const queryClient = useQueryClient();
+  const [errorModal, setErrorModal] = useState<string | null>(null);
 
   // Helper to get CSRF token
   function getCsrfToken(): string | null {
@@ -248,7 +249,13 @@ const RestockRulesManager: React.FC<RestockRulesManagerProps> = ({ products, low
       form.resetFields();
     },
     onError: (error: Error) => {
-      message.error(error.message);
+      const detail = error?.response?.data?.detail || error?.message || 'An unknown error occurred';
+      setErrorModal(detail);
+      toast({
+        title: 'Error',
+        description: detail,
+        variant: 'destructive',
+      });
     },
   });
 
@@ -261,7 +268,13 @@ const RestockRulesManager: React.FC<RestockRulesManagerProps> = ({ products, low
       form.resetFields();
     },
     onError: (error: Error) => {
-      message.error(error.message);
+      const detail = error?.response?.data?.detail || error?.message || 'An unknown error occurred';
+      setErrorModal(detail);
+      toast({
+        title: 'Error',
+        description: detail,
+        variant: 'destructive',
+      });
     },
   });
 
@@ -272,7 +285,13 @@ const RestockRulesManager: React.FC<RestockRulesManagerProps> = ({ products, low
       message.success('Restock rule deleted successfully');
     },
     onError: (error: Error) => {
-      message.error(error.message);
+      const detail = error?.response?.data?.detail || error?.message || 'An unknown error occurred';
+      setErrorModal(detail);
+      toast({
+        title: 'Error',
+        description: detail,
+        variant: 'destructive',
+      });
     },
   });
 

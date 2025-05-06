@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -25,11 +25,12 @@ import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '../ui/dialog';
 
 // Extend the product schema with validation
 const productFormSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters"),
-  sku: z.string().min(3, "SKU must be at least 3 characters"),
+  sku: z.string().min(3, "SKU must be at least 3 characters").optional(),
   description: z.string().optional(),
   categoryId: z.number().nullable(),
   quantity: z.number().min(0, "Quantity must be 0 or greater"),
@@ -56,13 +57,26 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const isEditing = !!editProduct;
+  const [nextSku, setNextSku] = useState<string>('140');
+  const [errorModal, setErrorModal] = useState<string | null>(null);
   
+  useEffect(() => {
+    if (!isEditing) {
+      // Fetch the highest SKU from the backend to determine the next SKU
+      apiRequest('/api/products/').then((response) => {
+        const skus = response.map((product: any) => parseInt(product.sku)).filter((sku: number) => !isNaN(sku) && sku >= 139);
+        const maxSku = skus.length > 0 ? Math.max(...skus) : 139;
+        setNextSku(String(maxSku + 1));
+      });
+    }
+  }, [isEditing]);
+
   // Initialize form with default values or edit values
   const form = useForm({
     resolver: zodResolver(productFormSchema),
     defaultValues: {
       name: editProduct?.name || '',
-      sku: editProduct?.sku || '',
+      sku: editProduct?.sku || nextSku,
       description: editProduct?.description || '',
       categoryId: editProduct?.category_id || null,
       quantity: editProduct?.quantity || 0,
@@ -88,7 +102,7 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
     } else {
       form.reset({
         name: '',
-        sku: '',
+        sku: nextSku,
         description: '',
         categoryId: null,
         quantity: 0,
@@ -97,7 +111,7 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
         sellPrice: 0.01,
       });
     }
-  }, [editProduct, form]);
+  }, [editProduct, form, nextSku]);
 
   // Create or update product mutation
   const mutation = useMutation({
@@ -147,9 +161,11 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
       onCancel();
     },
     onError: (error) => {
+      const detail = error.response?.data?.detail || error.message || 'An unknown error occurred';
+      setErrorModal(detail); // Show modal
       toast({
         title: 'Error',
-        description: `Failed to ${isEditing ? 'update' : 'create'} product: ${error.message}`,
+        description: detail,
         variant: 'destructive',
       });
     },
@@ -201,7 +217,7 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
                   <FormItem>
                     <FormLabel>SKU</FormLabel>
                     <FormControl>
-                      <Input placeholder="Stock keeping unit" {...field} />
+                      <Input placeholder="Stock keeping unit" {...field} readOnly={!isEditing} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -371,6 +387,14 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
           </form>
         </Form>
       </CardContent>
+      {/* Error Modal */}
+      <Dialog open={!!errorModal} onOpenChange={() => setErrorModal(null)}>
+        <DialogContent>
+          <DialogTitle>Error</DialogTitle>
+          <DialogDescription>{errorModal}</DialogDescription>
+          <button onClick={() => setErrorModal(null)}>Close</button>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 };

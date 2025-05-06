@@ -528,6 +528,23 @@ class ProductViewSet(viewsets.ModelViewSet):
             if response.status_code == 201:  # If product was created successfully
                 # Get the created product data
                 product_data = response.data
+                product_id = product_data['id']
+                initial_quantity = product_data['quantity']
+                buy_price = product_data['buy_price']
+                sell_price = product_data['sell_price']
+
+                # Create a virtual batch for the initial stock
+                from .batch_models import ProductBatch
+                from django.utils import timezone
+                ProductBatch.objects.create(
+                    product_id=product_id,
+                    batch_number=f"INIT-{product_id}",
+                    purchase_price=buy_price,
+                    selling_price=sell_price,
+                    quantity=initial_quantity,
+                    remaining_quantity=initial_quantity,
+                    purchase_date=timezone.now()
+                )
 
                 # Create activity log
                 Activity.objects.create(
@@ -824,10 +841,12 @@ class SaleViewSet(viewsets.ModelViewSet):
 
                 sale = sale_serializer.save()
 
-                # Create sale items and update stock
+                # Create sale items and update stock using FIFO logic
                 for item_data in sale_items:
                     product_id = item_data.get('product_id')
-                    quantity = item_data.get('quantity')
+                    quantity = int(item_data.get('quantity', 0))
+                    original_quantity = quantity
+                    sale_portions = []
 
                     if not product_id or not quantity:
                         logger.warning(f'Missing product_id or quantity in sale item: {item_data}')
@@ -839,237 +858,146 @@ class SaleViewSet(viewsets.ModelViewSet):
                         logger.warning(f'Product not found: {product_id}')
                         raise APIError(f'Product {product_id} not found')
 
-                    if product.quantity < quantity:
-                        logger.warning(f'Insufficient stock for product {product_id}')
-                        raise APIError(f'Insufficient stock for {product.name}')
+                    with connection.cursor() as cursor:
+                        # Get product details including quantity and batch info
+                        cursor.execute("""
+                            SELECT quantity, buy_price, sell_price
+                            FROM products
+                            WHERE id = %s
+                        """, [product_id])
+                        prod_row = cursor.fetchone()
+                        product_quantity = prod_row[0]
+                        current_buy_price = prod_row[1]
+                        current_sell_price = prod_row[2]
+                        logger.info(f"[BEFORE SALE] Product {product_id}: quantity={product_quantity}")
 
-                    # Create sale item
-                    sale_item = SaleItem.objects.create(
-                        sale=sale,
-                        product=product,
-                        quantity=quantity,
-                        unit_price=product.sell_price,
-                        total_price=quantity * product.sell_price
-                    )
+                        # Check if product has any batches
+                        cursor.execute("""
+                            SELECT COUNT(*) FROM product_batches WHERE product_id = %s
+                        """, [product_id])
+                        has_batches = cursor.fetchone()[0] > 0
 
-                    # Update product stock
-                    product.quantity -= quantity
-                    product.save()
-
-                    # Handle batch consumption
-                    try:
-                        # Find the oldest batch with remaining quantity
-                        with connection.cursor() as cursor:
+                        if has_batches:
+                            # If product has batches, check total available quantity (all batches)
                             cursor.execute("""
-                                SELECT id, remaining_quantity, selling_price
+                                SELECT COALESCE(SUM(remaining_quantity), 0) as total_batch_quantity
                                 FROM product_batches
                                 WHERE product_id = %s AND remaining_quantity > 0
-                                ORDER BY purchase_date ASC
-                                LIMIT 1
-                            """, [product.id])
-                            batch = cursor.fetchone()
+                            """, [product_id])
+                            total_batch_quantity = cursor.fetchone()[0]
+                            total_available = total_batch_quantity
+                        else:
+                            # If no batches, just check product quantity
+                            total_available = product_quantity
 
-                            if not batch:
-                                logger.warning(f"No available batches for product {product.id}")
-                                continue
+                        if total_available < quantity:
+                            logger.warning(f'Insufficient stock for product {product_id}')
+                            raise APIError(f'Insufficient stock for {product.name}')
 
-                            batch_id, remaining_quantity, batch_selling_price = batch
+                        # Use batches if needed and if product has batches
+                        if quantity > 0 and has_batches:
+                            cursor.execute("""
+                                SELECT id, remaining_quantity, selling_price, purchase_price, purchase_date
+                                FROM product_batches
+                                WHERE product_id = %s AND remaining_quantity > 0
+                                ORDER BY purchase_date ASC, id ASC
+                            """, [product_id])
+                            batches = cursor.fetchall()
+                            total_available = sum([b[1] for b in batches])
 
-                            # If the batch has a custom selling price, update the product's selling price
-                            if batch_selling_price is not None:
-                                cursor.execute("""
-                                    UPDATE products
-                                    SET sell_price = %s
-                                    WHERE id = %s
-                                """, [batch_selling_price, product.id])
+                            if total_available < quantity:
+                                logger.warning(f'Insufficient stock for product {product_id}')
+                                raise APIError(f'Insufficient stock for {product.name}')
 
-                                # Log the price change
-                                if user_id:
+                            batch_idx = 0
+                            while quantity > 0 and batch_idx < len(batches):
+                                batch = batches[batch_idx]
+                                batch_id = batch[0]
+                                batch_remaining = batch[1]
+                                batch_selling_price = batch[2]
+                                batch_purchase_price = batch[3]
+                                use_qty = min(quantity, batch_remaining)
+                                logger.info(f"[SALE] Using batch {batch_id}: use_qty={use_qty}, batch_remaining={batch_remaining} for product {product_id}")
+                                if use_qty > 0:
                                     cursor.execute("""
-                                        INSERT INTO activities (type, description, product_id, user_id, created_at, status)
-                                        VALUES (%s, %s, %s, %s, %s, %s)
-                                    """, [
-                                        'price_updated',
-                                        f'Product selling price updated to {batch_selling_price} from batch {batch_id}',
-                                        product.id,
-                                        user_id,
-                                        timezone.now(),
-                                        'completed'
-                                    ])
-                                else:
+                                        UPDATE product_batches
+                                        SET remaining_quantity = remaining_quantity - %s
+                                        WHERE id = %s
+                                    """, [use_qty, batch_id])
                                     cursor.execute("""
-                                        INSERT INTO activities (type, description, product_id, created_at, status)
-                                        VALUES (%s, %s, %s, %s, %s)
-                                    """, [
-                                        'price_updated',
-                                        f'Product selling price updated to {batch_selling_price} from batch {batch_id}',
-                                        product.id,
-                                        timezone.now(),
-                                        'completed'
-                                    ])
+                                        UPDATE products
+                                        SET quantity = quantity - %s
+                                        WHERE id = %s
+                                    """, [use_qty, product_id])
+                                    sale_portions.append({
+                                        'type': 'batch',
+                                        'batch_id': batch_id,
+                                        'quantity': use_qty,
+                                        'buy_price': batch_purchase_price,
+                                        'sell_price': batch_selling_price
+                                    })
+                                    cursor.execute("SELECT remaining_quantity FROM product_batches WHERE id = %s", [batch_id])
+                                    debug_batch = cursor.fetchone()
+                                    logger.info(f"[AFTER BATCH SALE] Batch {batch_id}: remaining_quantity={debug_batch[0]}")
+                                batch_remaining -= use_qty
+                                quantity -= use_qty
+                                if batch_remaining == 0:
+                                    batch_idx += 1
 
-                            # Create the batch sale item
-                            from .batch_models import BatchSaleItem
+                        # If there's still quantity remaining and no batches, use regular product quantity
+                        if quantity > 0 and not has_batches:
+                            use_qty = quantity
+                            cursor.execute("""
+                                UPDATE products
+                                SET quantity = quantity - %s
+                                WHERE id = %s
+                            """, [use_qty, product_id])
+                            sale_portions.append({
+                                'type': 'regular',
+                                'quantity': use_qty,
+                                'buy_price': current_buy_price,
+                                'sell_price': current_sell_price
+                            })
+
+                    # Now, create sale items for each portion
+                    for portion in sale_portions:
+                        from .batch_models import BatchSaleItem
+                        if portion['type'] == 'initial':
+                            sale_item = SaleItem.objects.create(
+                                sale=sale,
+                                product=product,
+                                quantity=portion['quantity'],
+                                unit_price=portion['sell_price'],
+                                total_price=portion['quantity'] * portion['sell_price']
+                            )
+                        elif portion['type'] == 'batch':
+                            sale_item = SaleItem.objects.create(
+                                sale=sale,
+                                product=product,
+                                quantity=portion['quantity'],
+                                unit_price=portion['sell_price'],  # Use batch's selling price
+                                total_price=portion['quantity'] * portion['sell_price']
+                            )
+                            # Only create BatchSaleItem if quantity <= batch's remaining_quantity (guaranteed by logic above)
                             BatchSaleItem.objects.create(
                                 sale_item=sale_item,
-                                batch_id=batch_id,
-                                quantity=quantity
+                                batch_id=portion['batch_id'],
+                                quantity=portion['quantity']
+                            )
+                        elif portion['type'] == 'regular':
+                            sale_item = SaleItem.objects.create(
+                                sale=sale,
+                                product=product,
+                                quantity=portion['quantity'],
+                                unit_price=portion['sell_price'],
+                                total_price=portion['quantity'] * portion['sell_price']
                             )
 
-                            # Update batch remaining quantity
-                            cursor.execute("""
-                                UPDATE product_batches
-                                SET remaining_quantity = remaining_quantity - %s
-                                WHERE id = %s
-                                RETURNING remaining_quantity
-                            """, [quantity, batch_id])
+                return Response(self.get_serializer(sale).data, status=status.HTTP_201_CREATED)
 
-                            # Check if batch is now fully consumed
-                            result = cursor.fetchone()
-                            remaining = result[0] if result else 0
-
-                            # If batch is fully consumed, find the next batch and update product price
-                            if remaining == 0:
-                                # Find the next available batch
-                                cursor.execute("""
-                                    SELECT id, selling_price
-                                    FROM product_batches
-                                    WHERE product_id = %s AND remaining_quantity > 0
-                                    ORDER BY purchase_date ASC
-                                    LIMIT 1
-                                """, [product.id])
-
-                                next_batch = cursor.fetchone()
-                                if next_batch:  # If there's a next batch
-                                    next_batch_id = next_batch[0]
-                                    next_batch_selling_price = next_batch[1]
-
-                                    if next_batch_selling_price is not None:  # If the next batch has a custom selling price
-                                        # Get the next batch's purchase price
-                                        cursor.execute("""
-                                            SELECT purchase_price
-                                            FROM product_batches
-                                            WHERE id = %s
-                                        """, [next_batch_id])
-
-                                        next_batch_purchase_price = cursor.fetchone()[0]
-
-                                        # Update the product's selling price and buying price to match the next batch
-                                        cursor.execute("""
-                                            UPDATE products
-                                            SET sell_price = %s, buy_price = %s
-                                            WHERE id = %s
-                                        """, [next_batch_selling_price, next_batch_purchase_price, product.id])
-
-                                        # Log the price change
-                                        if user_id:
-                                            cursor.execute("""
-                                                INSERT INTO activities (type, description, product_id, user_id, created_at, status)
-                                                VALUES (%s, %s, %s, %s, %s, %s)
-                                            """, [
-                                                'price_updated',
-                                                f'Product prices updated from next batch {next_batch_id} after previous batch was depleted. Selling price: {next_batch_selling_price}, Buying price: {next_batch_purchase_price}',
-                                                product.id,
-                                                user_id,
-                                                timezone.now(),
-                                                'completed'
-                                            ])
-                                        else:
-                                            cursor.execute("""
-                                                INSERT INTO activities (type, description, product_id, created_at, status)
-                                                VALUES (%s, %s, %s, %s, %s)
-                                            """, [
-                                                'price_updated',
-                                                f'Product prices updated from next batch {next_batch_id} after previous batch was depleted. Selling price: {next_batch_selling_price}, Buying price: {next_batch_purchase_price}',
-                                                product.id,
-                                                timezone.now(),
-                                                'completed'
-                                            ])
-                                    else:
-                                        # Get the next batch's purchase price
-                                        cursor.execute("""
-                                            SELECT purchase_price
-                                            FROM product_batches
-                                            WHERE id = %s
-                                        """, [next_batch_id])
-
-                                        next_batch_purchase_price = cursor.fetchone()[0]
-
-                                        # Calculate a new selling price based on the purchase price (e.g., add a margin)
-                                        # For example, add a 30% margin
-                                        margin_multiplier = 1.3  # 30% margin
-                                        new_selling_price = float(next_batch_purchase_price) * margin_multiplier
-
-                                        # Update the product's selling price and buying price
-                                        cursor.execute("""
-                                            UPDATE products
-                                            SET sell_price = %s, buy_price = %s
-                                            WHERE id = %s
-                                        """, [new_selling_price, next_batch_purchase_price, product.id])
-
-                                        # Log the price update
-                                        if user_id:
-                                            cursor.execute("""
-                                                INSERT INTO activities (type, description, product_id, user_id, created_at, status)
-                                                VALUES (%s, %s, %s, %s, %s, %s)
-                                            """, [
-                                                'price_updated',
-                                                f'Product prices updated from next batch {next_batch_id} after previous batch was depleted. Selling price: {new_selling_price} (calculated with 30% margin), Buying price: {next_batch_purchase_price}',
-                                                product.id,
-                                                user_id,
-                                                timezone.now(),
-                                                'completed'
-                                            ])
-                                        else:
-                                            cursor.execute("""
-                                                INSERT INTO activities (type, description, product_id, created_at, status)
-                                                VALUES (%s, %s, %s, %s, %s)
-                                            """, [
-                                                'price_updated',
-                                                f'Product prices updated from next batch {next_batch_id} after previous batch was depleted. Selling price: {new_selling_price} (calculated with 30% margin), Buying price: {next_batch_purchase_price}',
-                                                product.id,
-                                                timezone.now(),
-                                                'completed'
-                                            ])
-                    except Exception as e:
-                        logger.error(f"Error consuming batch for product {product.id}: {str(e)}")
-                        # Don't raise the exception, just log it
-                        # We don't want to fail the sale creation if batch consumption fails
-
-                # Log activity
-                try:
-                    Activity.objects.create(
-                        type='sale_created',
-                        description=f'Sale #{sale.id} created',
-                        user_id=user_id,
-                        created_at=timezone.now(),
-                        status='completed'
-                    )
-                except Exception as e:
-                    # If there's an error creating the activity, log it but don't fail the sale creation
-                    logger.error(f"Error creating activity log: {str(e)}")
-                    # Try creating without user_id if that's the issue
-                    if "user_id" in str(e):
-                        try:
-                            Activity.objects.create(
-                                type='sale_created',
-                                description=f'Sale #{sale.id} created',
-                                created_at=timezone.now(),
-                                status='completed'
-                            )
-                        except Exception as inner_e:
-                            logger.error(f"Error creating activity log without user_id: {str(inner_e)}")
-                    # Continue with the sale creation regardless of activity log errors
-
-                logger.info(f'Sale #{sale.id} created successfully')
-                return Response(sale_serializer.data, status=status.HTTP_201_CREATED)
-
-        except APIError as e:
-            logger.error(f'Sale creation error: {str(e)}')
-            return Response({"detail": str(e)}, status=e.status_code)
-        except ValidationError as e:
-            logger.error(f'Validation error in sale creation: {str(e)}')
-            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"Error creating sale: {str(e)}")
+            return Response({"detail": f"Error creating sale: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def retrieve(self, request, *args, **kwargs):
         is_authenticated, user_id, is_authorized = self.check_token_auth(request)
@@ -1171,10 +1099,10 @@ class SaleViewSet(viewsets.ModelViewSet):
                 with connection.cursor() as cursor:
                     # Delete all sale items first
                     cursor.execute("DELETE FROM sale_items")
-
                     # Delete all sales
                     cursor.execute("DELETE FROM sales")
-
+                    # Reset sales ID sequence (PostgreSQL)
+                    cursor.execute("ALTER SEQUENCE sales_id_seq RESTART WITH 1;")
                     # Delete related activities
                     cursor.execute("DELETE FROM activities WHERE type IN ('sale_created', 'sale_deleted')")
 

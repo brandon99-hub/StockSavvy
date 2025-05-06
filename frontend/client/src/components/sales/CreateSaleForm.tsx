@@ -56,6 +56,7 @@ import {
     CommandList,
 } from '../ui/command';
 import {Popover, PopoverContent, PopoverTrigger} from '../ui/popover';
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '../ui/dialog';
 
 const STORE_NAME = "Mahatma Clothing";
 
@@ -99,6 +100,7 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
     const [currentSale, setCurrentSale] = useState<any>(null);
     const [saleResponse, setSaleResponse] = useState<any>(null);
     const [open, setOpen] = useState(false);
+    const [errorModal, setErrorModal] = useState<string | null>(null);
 
     const calculateSubtotal = () => {
         return selectedItems.reduce((total, item) => 
@@ -309,10 +311,11 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                 throw new Error('Invalid response from server');
             }
         } catch (error: any) {
-            console.error('Error creating sale:', error);
+            const detail = error?.response?.data?.detail || error?.message || 'Failed to create sale. Please try again.';
+            setErrorModal(detail);
             toast({
                 title: 'Error',
-                description: error.response?.data?.detail || 'Failed to create sale. Please try again.',
+                description: detail,
                 variant: 'destructive'
             });
         } finally {
@@ -496,6 +499,13 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                     storeName={STORE_NAME}
                 />
             )}
+            <Dialog open={!!errorModal} onOpenChange={() => setErrorModal(null)}>
+                <DialogContent>
+                    <DialogTitle>Error</DialogTitle>
+                    <DialogDescription>{errorModal}</DialogDescription>
+                    <button onClick={() => setErrorModal(null)}>Close</button>
+                </DialogContent>
+            </Dialog>
         </>
     );
 }

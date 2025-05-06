@@ -2,6 +2,7 @@ from django.db import models
 from django.core.validators import MinValueValidator
 from django.core.exceptions import ValidationError
 from .models import Product, SaleItem
+from django.db import connection
 
 class ProductBatch(models.Model):
     product = models.ForeignKey(Product, models.DO_NOTHING)
@@ -15,8 +16,7 @@ class ProductBatch(models.Model):
         max_digits=10, 
         decimal_places=2,
         validators=[MinValueValidator(0)],
-        null=True,
-        blank=True
+        null=False  # Make selling_price required
     )
     quantity = models.IntegerField(validators=[MinValueValidator(1)])
     remaining_quantity = models.IntegerField(validators=[MinValueValidator(0)])
@@ -31,9 +31,12 @@ class ProductBatch(models.Model):
     def clean(self):
         if self.remaining_quantity > self.quantity:
             raise ValidationError('Remaining quantity cannot be greater than initial quantity')
-
         if self.purchase_price <= 0:
             raise ValidationError('Purchase price must be positive')
+        if self.selling_price <= 0:
+            raise ValidationError('Selling price must be positive')
+        if self.selling_price < self.purchase_price:
+            raise ValidationError('Selling price cannot be less than purchase price')
 
     def save(self, *args, **kwargs):
         self.full_clean()
