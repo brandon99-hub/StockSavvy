@@ -24,6 +24,8 @@ from django.db import transaction
 import logging
 from rest_framework.exceptions import APIException
 from django.core.exceptions import ValidationError
+import pytz
+import traceback
 
 User = get_user_model()
 
@@ -490,6 +492,24 @@ class ProductViewSet(viewsets.ModelViewSet):
                 """)
                 columns = [col[0] for col in cursor.description]
                 products = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+                # Add current batch prices (FIFO) to each product
+                for product in products:
+                    cursor.execute("""
+                        SELECT purchase_price, selling_price
+                        FROM product_batches
+                        WHERE product_id = %s AND remaining_quantity > 0
+                        ORDER BY purchase_date ASC, id ASC
+                        LIMIT 1
+                    """, [product['id']])
+                    batch_row = cursor.fetchone()
+                    if batch_row:
+                        product['current_batch_buy_price'] = float(batch_row[0])
+                        product['current_batch_sell_price'] = float(batch_row[1])
+                    else:
+                        product['current_batch_buy_price'] = None
+                        product['current_batch_sell_price'] = None
+
                 return Response(products)
         except Exception as e:
             return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -526,16 +546,28 @@ class ProductViewSet(viewsets.ModelViewSet):
             response = super().create(request, *args, **kwargs)
 
             if response.status_code == 201:  # If product was created successfully
-                # Get the created product data
-                product_data = response.data
-                product_id = product_data['id']
-                initial_quantity = product_data['quantity']
-                buy_price = product_data['buy_price']
-                sell_price = product_data['sell_price']
+                product_id = response.data['id']
 
-                # Create a virtual batch for the initial stock
-                from .batch_models import ProductBatch
+                # Fetch the Product instance from the database
+                from .models import Product
+                product_instance = Product.objects.get(id=product_id)
+                initial_quantity = product_instance.quantity
+                buy_price = product_instance.buy_price
+                sell_price = product_instance.sell_price
+                product_created_at = product_instance.created_at
+
+                # Convert to Nairobi timezone
+                import pytz
                 from django.utils import timezone
+                import datetime
+                nairobi_tz = pytz.timezone('Africa/Nairobi')
+                # Ensure product_created_at is timezone-aware
+                if timezone.is_naive(product_created_at):
+                    product_created_at = timezone.make_aware(product_created_at, datetime.timezone.utc)
+                product_created_at_nairobi = timezone.localtime(product_created_at, nairobi_tz)
+
+                # Create the INIT batch
+                from .batch_models import ProductBatch
                 ProductBatch.objects.create(
                     product_id=product_id,
                     batch_number=f"INIT-{product_id}",
@@ -543,14 +575,14 @@ class ProductViewSet(viewsets.ModelViewSet):
                     selling_price=sell_price,
                     quantity=initial_quantity,
                     remaining_quantity=initial_quantity,
-                    purchase_date=timezone.now()
+                    purchase_date=product_created_at_nairobi
                 )
 
                 # Create activity log
                 Activity.objects.create(
                     type='product_added',
-                    description=f'New product added: {product_data["name"]}',
-                    product_id=product_data['id'],
+                    description=f'New product added: {product_instance.name}',
+                    product_id=product_id,
                     user_id=user_id,
                     created_at=timezone.now(),
                     status='completed'
@@ -841,11 +873,10 @@ class SaleViewSet(viewsets.ModelViewSet):
 
                 sale = sale_serializer.save()
 
-                # Create sale items and update stock using FIFO logic
+                # Create sale items and update stock using FIFO logic (batches only)
                 for item_data in sale_items:
                     product_id = item_data.get('product_id')
                     quantity = int(item_data.get('quantity', 0))
-                    original_quantity = quantity
                     sale_portions = []
 
                     if not product_id or not quantity:
@@ -859,139 +890,73 @@ class SaleViewSet(viewsets.ModelViewSet):
                         raise APIError(f'Product {product_id} not found')
 
                     with connection.cursor() as cursor:
-                        # Get product details including quantity and batch info
+                        # Get all batches (including INIT) ordered by purchase_date
                         cursor.execute("""
-                            SELECT quantity, buy_price, sell_price
-                            FROM products
-                            WHERE id = %s
+                            SELECT id, remaining_quantity, selling_price, purchase_price, purchase_date
+                            FROM product_batches
+                            WHERE product_id = %s AND remaining_quantity > 0
+                            ORDER BY purchase_date ASC, id ASC
                         """, [product_id])
-                        prod_row = cursor.fetchone()
-                        product_quantity = prod_row[0]
-                        current_buy_price = prod_row[1]
-                        current_sell_price = prod_row[2]
-                        logger.info(f"[BEFORE SALE] Product {product_id}: quantity={product_quantity}")
+                        batches = cursor.fetchall()
 
-                        # Check if product has any batches
-                        cursor.execute("""
-                            SELECT COUNT(*) FROM product_batches WHERE product_id = %s
-                        """, [product_id])
-                        has_batches = cursor.fetchone()[0] > 0
-
-                        if has_batches:
-                            # If product has batches, check total available quantity (all batches)
-                            cursor.execute("""
-                                SELECT COALESCE(SUM(remaining_quantity), 0) as total_batch_quantity
-                                FROM product_batches
-                                WHERE product_id = %s AND remaining_quantity > 0
-                            """, [product_id])
-                            total_batch_quantity = cursor.fetchone()[0]
-                            total_available = total_batch_quantity
-                        else:
-                            # If no batches, just check product quantity
-                            total_available = product_quantity
-
+                        total_available = sum([b[1] for b in batches])
                         if total_available < quantity:
                             logger.warning(f'Insufficient stock for product {product_id}')
                             raise APIError(f'Insufficient stock for {product.name}')
 
-                        # Use batches if needed and if product has batches
-                        if quantity > 0 and has_batches:
-                            cursor.execute("""
-                                SELECT id, remaining_quantity, selling_price, purchase_price, purchase_date
-                                FROM product_batches
-                                WHERE product_id = %s AND remaining_quantity > 0
-                                ORDER BY purchase_date ASC, id ASC
-                            """, [product_id])
-                            batches = cursor.fetchall()
-                            total_available = sum([b[1] for b in batches])
+                        remaining_quantity = quantity
+                        batch_idx = 0
+                        while remaining_quantity > 0 and batch_idx < len(batches):
+                            batch = batches[batch_idx]
+                            batch_id = batch[0]
+                            batch_remaining = batch[1]
+                            batch_selling_price = batch[2]
+                            batch_purchase_price = batch[3]
 
-                            if total_available < quantity:
-                                logger.warning(f'Insufficient stock for product {product_id}')
-                                raise APIError(f'Insufficient stock for {product.name}')
-
-                            batch_idx = 0
-                            while quantity > 0 and batch_idx < len(batches):
-                                batch = batches[batch_idx]
-                                batch_id = batch[0]
-                                batch_remaining = batch[1]
-                                batch_selling_price = batch[2]
-                                batch_purchase_price = batch[3]
-                                use_qty = min(quantity, batch_remaining)
-                                logger.info(f"[SALE] Using batch {batch_id}: use_qty={use_qty}, batch_remaining={batch_remaining} for product {product_id}")
-                                if use_qty > 0:
-                                    cursor.execute("""
-                                        UPDATE product_batches
-                                        SET remaining_quantity = remaining_quantity - %s
-                                        WHERE id = %s
-                                    """, [use_qty, batch_id])
-                                    cursor.execute("""
-                                        UPDATE products
-                                        SET quantity = quantity - %s
-                                        WHERE id = %s
-                                    """, [use_qty, product_id])
-                                    sale_portions.append({
-                                        'type': 'batch',
-                                        'batch_id': batch_id,
-                                        'quantity': use_qty,
-                                        'buy_price': batch_purchase_price,
-                                        'sell_price': batch_selling_price
-                                    })
-                                    cursor.execute("SELECT remaining_quantity FROM product_batches WHERE id = %s", [batch_id])
-                                    debug_batch = cursor.fetchone()
-                                    logger.info(f"[AFTER BATCH SALE] Batch {batch_id}: remaining_quantity={debug_batch[0]}")
+                            use_qty = min(remaining_quantity, batch_remaining)
+                            if use_qty > 0:
+                                # Update batch remaining_quantity
+                                cursor.execute("""
+                                    UPDATE product_batches
+                                    SET remaining_quantity = remaining_quantity - %s
+                                    WHERE id = %s
+                                """, [use_qty, batch_id])
+                                # Update product quantity
+                                cursor.execute("""
+                                    UPDATE products
+                                    SET quantity = quantity - %s
+                                    WHERE id = %s
+                                """, [use_qty, product_id])
+                                sale_portions.append({
+                                    'batch_id': batch_id,
+                                    'quantity': use_qty,
+                                    'buy_price': batch_purchase_price,
+                                    'sell_price': batch_selling_price
+                                })
+                                remaining_quantity -= use_qty
                                 batch_remaining -= use_qty
-                                quantity -= use_qty
                                 if batch_remaining == 0:
                                     batch_idx += 1
 
-                        # If there's still quantity remaining and no batches, use regular product quantity
-                        if quantity > 0 and not has_batches:
-                            use_qty = quantity
-                            cursor.execute("""
-                                UPDATE products
-                                SET quantity = quantity - %s
-                                WHERE id = %s
-                            """, [use_qty, product_id])
-                            sale_portions.append({
-                                'type': 'regular',
-                                'quantity': use_qty,
-                                'buy_price': current_buy_price,
-                                'sell_price': current_sell_price
-                            })
+                        if remaining_quantity > 0:
+                            logger.warning(f'Unexpected remaining quantity after FIFO processing: {remaining_quantity}')
+                            raise APIError('Error processing sale quantities')
 
                     # Now, create sale items for each portion
                     for portion in sale_portions:
                         from .batch_models import BatchSaleItem
-                        if portion['type'] == 'initial':
-                            sale_item = SaleItem.objects.create(
-                                sale=sale,
-                                product=product,
-                                quantity=portion['quantity'],
-                                unit_price=portion['sell_price'],
-                                total_price=portion['quantity'] * portion['sell_price']
-                            )
-                        elif portion['type'] == 'batch':
-                            sale_item = SaleItem.objects.create(
-                                sale=sale,
-                                product=product,
-                                quantity=portion['quantity'],
-                                unit_price=portion['sell_price'],  # Use batch's selling price
-                                total_price=portion['quantity'] * portion['sell_price']
-                            )
-                            # Only create BatchSaleItem if quantity <= batch's remaining_quantity (guaranteed by logic above)
-                            BatchSaleItem.objects.create(
-                                sale_item=sale_item,
-                                batch_id=portion['batch_id'],
-                                quantity=portion['quantity']
-                            )
-                        elif portion['type'] == 'regular':
-                            sale_item = SaleItem.objects.create(
-                                sale=sale,
-                                product=product,
-                                quantity=portion['quantity'],
-                                unit_price=portion['sell_price'],
-                                total_price=portion['quantity'] * portion['sell_price']
-                            )
+                        sale_item = SaleItem.objects.create(
+                            sale=sale,
+                            product=product,
+                            quantity=portion['quantity'],
+                            unit_price=portion['sell_price'],
+                            total_price=portion['quantity'] * portion['sell_price']
+                        )
+                        BatchSaleItem.objects.create(
+                            sale_item=sale_item,
+                            batch_id=portion['batch_id'],
+                            quantity=portion['quantity']
+                        )
 
                 return Response(self.get_serializer(sale).data, status=status.HTTP_201_CREATED)
 
@@ -1131,6 +1096,7 @@ class ActivityViewSet(viewsets.ModelViewSet):
     permission_classes = []
 
     def create(self, request, *args, **kwargs):
+        import traceback
         try:
             is_authenticated, user_id, is_authorized = self.check_token_auth(request)
 
@@ -1152,6 +1118,7 @@ class ActivityViewSet(viewsets.ModelViewSet):
             return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
         except Exception as e:
             print(f"Error creating activity: {str(e)}")
+            traceback.print_exc()
             return Response(
                 {"detail": f"Error creating activity: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR

@@ -132,7 +132,6 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
 
     const handleAddItem = (product: Product) => {
         if (!product) return;
-        
         // Check if product is out of stock
         if (product.quantity <= 0) {
             toast({
@@ -142,8 +141,8 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
             });
             return;
         }
-        
         const existingItem = selectedItems.find(item => item.productId === product.id);
+        const priceToUse = product.current_batch_sell_price ?? product.sell_price;
         if (existingItem) {
             // Check if adding one more would exceed available stock
             if (existingItem.quantity + 1 > product.quantity) {
@@ -154,19 +153,18 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                 });
                 return;
             }
-            
             setSelectedItems(selectedItems.map(item =>
                 item.productId === product.id
                     ? { ...item, quantity: item.quantity + 1 }
                     : item
             ));
         } else {
-            setSelectedItems([...selectedItems, { 
-                productId: product.id, 
-                quantity: 1, 
-                unitPrice: product.sell_price, 
-                totalPrice: product.sell_price, 
-                productName: product.name 
+            setSelectedItems([...selectedItems, {
+                productId: product.id,
+                quantity: 1,
+                unitPrice: priceToUse,
+                totalPrice: priceToUse,
+                productName: product.name
             }]);
         }
     };
@@ -386,7 +384,7 @@ export default function CreateSaleForm({ products, onClose }: CreateSaleFormProp
                                                         <div className="flex justify-between">
                                                             <span className="font-medium">{product.name}</span>
                                                             <span className="text-muted-foreground">
-                                                                KSh {product.sell_price.toFixed(2)}
+                                                                KSh {(product.current_batch_sell_price ?? product.sell_price).toFixed(2)}
                                                             </span>
                                                         </div>
                                                         {product.description && (

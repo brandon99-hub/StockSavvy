@@ -30,7 +30,7 @@ if not exist "%CURRENT_DIR%backend" (
     echo Error: Backend directory not found at: %CURRENT_DIR%backend
     echo Please make sure this batch file is in the root directory of your project
     echo Expected directory structure:
-    echo StockSavvy\
+    echo StockSavvy2\
     echo ├── backend\
     echo ├── frontend\
     echo └── start_stocksavvy_advanced.bat

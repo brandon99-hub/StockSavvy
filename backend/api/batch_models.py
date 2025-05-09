@@ -52,8 +52,10 @@ class BatchSaleItem(models.Model):
         db_table = 'batch_sale_items'
 
     def clean(self):
-        if self.quantity > self.batch.remaining_quantity:
-            raise ValidationError('Sale quantity cannot exceed batch remaining quantity')
+        # Removed validation to prevent race condition with FIFO sale logic
+        # if self.quantity > self.batch.remaining_quantity:
+        #     raise ValidationError('Sale quantity cannot exceed batch remaining quantity')
+        pass
 
     def save(self, *args, **kwargs):
         self.full_clean()

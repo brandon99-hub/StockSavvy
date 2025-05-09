@@ -10,4 +10,6 @@ export interface Product {
     sell_price: number;
     created_at: string;
     updated_at: string;
+    current_batch_buy_price?: number;
+    current_batch_sell_price?: number;
 } 

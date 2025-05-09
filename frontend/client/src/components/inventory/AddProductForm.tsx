@@ -179,11 +179,32 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
       categoryId: data.categoryId === 0 ? null : data.categoryId,
       quantity: Number(data.quantity),
       minStockLevel: Number(data.minStockLevel),
-      buyPrice: Number(data.buyPrice), // Keep as number for Zod validation
-      sellPrice: Number(data.sellPrice) // Keep as number for Zod validation
+      buyPrice: Number(data.buyPrice),
+      sellPrice: Number(data.sellPrice)
     };
     
+    // Log the data being sent
     console.log('Submitting product data:', formData);
+    
+    // Validate prices before submission
+    if (formData.buyPrice <= 0) {
+      toast({
+        title: 'Error',
+        description: 'Buy price must be greater than 0',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    if (formData.sellPrice <= 0) {
+      toast({
+        title: 'Error',
+        description: 'Sell price must be greater than 0',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
     mutation.mutate(formData);
   };
 

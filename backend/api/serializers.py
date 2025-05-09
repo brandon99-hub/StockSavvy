@@ -10,6 +10,8 @@ from django.db.models import Max
 from django.db import connection
 from decimal import Decimal
 import logging
+from .utils import to_nairobi
+import pytz
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +98,7 @@ class ProductSerializer(serializers.ModelSerializer):
                     validated_data['sku'] = new_sku
 
             # Validate category
-            category_id = validated_data.get('categoryId')
+            category_id = validated_data.get('category_id')
             if category_id:
                 with connection.cursor() as cursor:
                     cursor.execute("SELECT id FROM categories WHERE id = %s", [category_id])
@@ -104,7 +106,7 @@ class ProductSerializer(serializers.ModelSerializer):
                         raise serializers.ValidationError("Invalid category ID")
 
             # Format decimal fields
-            for field in ['buyPrice', 'sellPrice']:
+            for field in ['buy_price', 'sell_price']:
                 if field in validated_data:
                     validated_data[field] = Decimal(str(validated_data[field])).quantize(Decimal('0.01'))
 
@@ -124,25 +126,18 @@ class ProductSerializer(serializers.ModelSerializer):
                     validated_data.get('sku'),
                     validated_data.get('name'),
                     validated_data.get('description'),
-                    validated_data.get('categoryId'),
+                    validated_data.get('category_id'),
                     validated_data.get('quantity', 0),
-                    validated_data.get('minStockLevel', 0),
-                    validated_data.get('buyPrice', 0),
-                    validated_data.get('sellPrice', 0),
+                    validated_data.get('min_stock_level', 0),
+                    validated_data.get('buy_price', 0),
+                    validated_data.get('sell_price', 0),
                     validated_data.get('created_at'),
                     validated_data.get('updated_at')
                 ])
                 product_id = cursor.fetchone()[0]
 
-            # Return the created product
-            with connection.cursor() as cursor:
-                cursor.execute("""
-                    SELECT * FROM products WHERE id = %s
-                """, [product_id])
-                columns = [col[0] for col in cursor.description]
-                product = dict(zip(columns, cursor.fetchone()))
-
-            return product
+            # Return the created Product instance, not a dict!
+            return Product.objects.get(id=product_id)
 
         except Exception as e:
             logger.error(f"Error creating product: {str(e)}")
@@ -166,6 +161,14 @@ class ProductSerializer(serializers.ModelSerializer):
         validated_data['updated_at'] = timezone.now()
         
         return super().update(instance, validated_data)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Convert date fields to Nairobi timezone
+        for field in ['created_at', 'updated_at']:
+            if data.get(field):
+                data[field] = to_nairobi(getattr(instance, field)).isoformat() if getattr(instance, field) else None
+        return data
 
 
 class RestockRuleSerializer(serializers.ModelSerializer):
@@ -212,6 +215,10 @@ class SaleSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
+        # Convert date fields to Nairobi timezone
+        for field in ['sale_date', 'created_at']:
+            if data.get(field):
+                data[field] = to_nairobi(getattr(instance, field)).isoformat() if getattr(instance, field) else None
         # Convert decimal fields to strings to avoid serialization issues
         for field in ['total_amount', 'discount', 'discount_percentage', 'original_amount']:
             if field in data and data[field] is not None:
@@ -222,8 +229,36 @@ class SaleSerializer(serializers.ModelSerializer):
 class ActivitySerializer(serializers.ModelSerializer):
     product = ProductSerializer(read_only=True)
     user = UserSerializer(read_only=True)
-    created_at = serializers.DateTimeField(format='iso-8601')
+    user_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    created_at = serializers.DateTimeField(format='iso-8601', required=False)
     
     class Meta:
         model = Activity
-        fields = ['id', 'type', 'description', 'product', 'user', 'created_at', 'status'] 
+        fields = ['id', 'type', 'description', 'product', 'user', 'user_id', 'created_at', 'status']
+
+    def create(self, validated_data):
+        user_id = validated_data.pop('user_id', None)
+        if user_id:
+            try:
+                validated_data['user'] = User.objects.get(id=user_id)
+            except User.DoesNotExist:
+                raise serializers.ValidationError({'user_id': 'User does not exist'})
+        # Ensure created_at is set and timezone-aware in Africa/Nairobi
+        if not validated_data.get('created_at'):
+            nairobi_tz = pytz.timezone('Africa/Nairobi')
+            validated_data['created_at'] = timezone.now().astimezone(nairobi_tz)
+        else:
+            dt = validated_data['created_at']
+            if timezone.is_naive(dt):
+                dt = timezone.make_aware(dt, datetime.timezone.utc)
+            validated_data['created_at'] = dt.astimezone(pytz.timezone('Africa/Nairobi'))
+        return super().create(validated_data)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        try:
+            if data.get('created_at'):
+                data['created_at'] = to_nairobi(getattr(instance, 'created_at')).isoformat() if getattr(instance, 'created_at') else None
+        except Exception as e:
+            data['created_at'] = str(getattr(instance, 'created_at'))
+        return data 

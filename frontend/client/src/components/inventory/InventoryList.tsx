@@ -301,8 +301,8 @@ const InventoryList: React.FC<InventoryListProps> = ({
                     <TableCell>{product.description || '-'}</TableCell>
                     <TableCell>{category?.name || 'Uncategorized'}</TableCell>
                     <TableCell className="text-right">{product.quantity}</TableCell>
-                    <TableCell className="text-right">KSH {formatCurrency(product.buy_price)}</TableCell>
-                    <TableCell className="text-right">KSH {formatCurrency(product.sell_price)}</TableCell>
+                    <TableCell className="text-right">KSH {formatCurrency(product.current_batch_buy_price ?? product.buy_price)}</TableCell>
+                    <TableCell className="text-right">KSH {formatCurrency(product.current_batch_sell_price ?? product.sell_price)}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
                         {getStockIcon(product.quantity, product.min_stock_level)}
