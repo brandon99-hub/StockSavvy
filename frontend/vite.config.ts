@@ -11,7 +11,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 export default defineConfig({
-    base:"/static/",
+    base: "/static/",
     root: path.resolve(__dirname, "client"),
     publicDir: path.resolve(__dirname, "client/public"),
 
