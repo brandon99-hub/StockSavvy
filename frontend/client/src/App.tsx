@@ -15,6 +15,7 @@ import AdvancedAnalyticsPage from "./pages/AdvancedAnalyticsPage";
 import AuthLayout from "./components/layout/AuthLayout";
 import NotFound from "./pages/not-found";
 import CategoryManager from './components/dashboard/CategoryManager';
+import ForecastsPage from "./pages/ForecastsPage";
 
 // Create a simple protected route handler
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -102,6 +103,12 @@ function AppRoutes() {
       <Route path="/manage-categories">
         <AuthLayout>
           <CategoryManager />
+        </AuthLayout>
+      </Route>
+      
+      <Route path="/forecasts">
+        <AuthLayout>
+          <ForecastsPage />
         </AuthLayout>
       </Route>
       

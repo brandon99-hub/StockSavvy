@@ -1,5 +1,5 @@
 // @ts-ignore
-import React, {useState} from "react";
+import React, {useState, useEffect} from "react";
 import {useQuery, useQueryClient} from "@tanstack/react-query";
 import {Product, Activity, Category} from "../../types";
 import StatCard from "./StatCard";
@@ -9,8 +9,10 @@ import LowStockTable from "./LowStockTable";
 import RecentActivityTable from "./RecentActivityTable";
 import {Skeleton} from "../ui/skeleton";
 import { apiRequest } from "../../lib/queryClient";
-import { Loader2 } from "lucide-react";
+import { Loader2, LineChart } from "lucide-react";
 import { Button } from "../ui/button";
+import apiClient from '../../lib/api';
+import { Forecast } from '../../types/forecast';
 
 // Response type interfaces
 interface LowStockResponse {
@@ -50,6 +52,7 @@ interface DashboardStats {
 const Dashboard = () => {
     const queryClient = useQueryClient();
     const [view, setView] = useState<'day' | 'week' | 'month'>('day');
+    const [topForecasts, setTopForecasts] = useState<{ product: string; sku: string; forecast: number }[]>([]);
 
     // Dashboard stats query
     const {data: stats, isLoading: isStatsLoading} = useQuery<DashboardStats>({
@@ -163,6 +166,27 @@ const Dashboard = () => {
         refetchInterval: 30000,
         staleTime: 25000
     });
+
+    useEffect(() => {
+        const fetchTopForecasts = async () => {
+            try {
+                const tomorrow = new Date();
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+                // Fetch only the first page, sorted by forecast_quantity desc, filtered for tomorrow
+                const res: any = await apiClient.get(`/api/products/forecasts/?page=1&limit=3&forecast_date=${tomorrowStr}`);
+                const top = res.results.map((f: any) => ({
+                    product: f.product_name,
+                    sku: f.sku,
+                    forecast: f.forecast_quantity
+                }));
+                setTopForecasts(top);
+            } catch (err) {
+                setTopForecasts([]);
+            }
+        };
+        fetchTopForecasts();
+    }, []);
 
     // Loading state
     const isLoading =
@@ -310,7 +334,7 @@ const Dashboard = () => {
                 <LowStockTable
                     products={lowStockData?.items || []}
                     categories={categories || []}
-                    onReorder={() => {
+                    onReorder={async (productId: number) => {
                         queryClient.invalidateQueries({ queryKey: ["/api/products"] });
                         queryClient.invalidateQueries({ queryKey: ["dashboard", "low-stock"] });
                         queryClient.invalidateQueries({ queryKey: ["dashboard", "stats"] });
@@ -320,6 +344,39 @@ const Dashboard = () => {
                     activities={activities || []}
                     queryClient={queryClient}
                 />
+            </div>
+
+            {/* Forecast summary widget at the bottom */}
+            <div className="mt-8">
+                <div className="bg-white p-6 rounded-2xl shadow-lg border border-gray-200 flex flex-col md:flex-row items-center gap-4 transition-all duration-200" style={{background: 'linear-gradient(135deg, #f0f4ff 0%, #e6eaff 100%)'}}>
+                    <div className="flex items-center justify-center bg-blue-100 rounded-full w-16 h-16 mr-4 shadow-md">
+                        <LineChart className="w-9 h-9 text-blue-500" aria-hidden="true" />
+                    </div>
+                    <div className="flex-1 w-full">
+                        <h2 className="text-lg font-bold mb-2 text-blue-800 flex items-center gap-2">
+                            Tomorrow's Top 3 Forecasted Products
+                        </h2>
+                        {topForecasts.length === 0 ? (
+                            <div className="text-blue-600">No forecast data available for tomorrow.</div>
+                        ) : (
+                            <ul className="divide-y divide-blue-100">
+                                {topForecasts.map((item, idx) => (
+                                    <li
+                                        key={item.sku}
+                                        className="flex justify-between items-center py-2 px-2 rounded-lg transition-all duration-150 hover:bg-blue-50/70 active:bg-blue-100/80"
+                                    >
+                                        <span className="font-semibold text-gray-900">
+                                            {idx + 1}. {item.product} <span className="text-xs text-gray-500">(SKU: {item.sku})</span>
+                                        </span>
+                                        <span className="font-extrabold text-blue-700 text-xl drop-shadow-sm">
+                                            {item.forecast}
+                                        </span>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                    </div>
+                </div>
             </div>
         </div>
     );

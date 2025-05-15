@@ -1,15 +1,15 @@
 from rest_framework import viewsets, status
-from rest_framework.decorators import action, api_view
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser, BasePermission
 from django.contrib.auth import login, logout, get_user_model, authenticate
 from django.db.models import Sum, F, Count
 from django.db.models.functions import TruncDate
-from .models import Category, Product, Sale, SaleItem, Activity, RestockRule
+from .models import Category, Product, Sale, SaleItem, Activity, RestockRule, ProductForecast
 from .serializers import (
     UserSerializer, CategorySerializer, ProductSerializer,
     SaleSerializer, SaleItemSerializer, ActivitySerializer,
-    RestockRuleSerializer
+    RestockRuleSerializer, ProductForecastSerializer
 )
 import jwt
 import datetime
@@ -26,6 +26,7 @@ from rest_framework.exceptions import APIException
 from django.core.exceptions import ValidationError
 import pytz
 import traceback
+from django.core.management import call_command
 
 User = get_user_model()
 
@@ -743,6 +744,46 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response({'next_sku': next_sku})
         except Exception as e:
             return Response({'detail': f'Error generating next SKU: {str(e)}'}, status=500)
+
+    @action(detail=False, methods=['get'], url_path='forecasts')
+    def all_forecasts(self, request):
+        is_authenticated, _, is_admin = self.check_token_auth(request)
+        if not is_authenticated:
+            return Response({'detail': 'Authentication required'}, status=401)
+        if not is_admin:
+            return Response({'detail': 'Permission denied'}, status=403)
+
+        page = int(request.query_params.get('page', 1))
+        limit = int(request.query_params.get('limit', 20))
+        offset = (page - 1) * limit
+
+        with connection.cursor() as cursor:
+            cursor.execute('''
+                SELECT f.id, f.product_id, f.forecast_date, f.forecast_quantity, f.created_at, f.model_info,
+                       p.name as product_name, p.sku, p.description, p.category_id, c.name as category_name
+                FROM api_productforecast f
+                JOIN products p ON f.product_id = p.id
+                LEFT JOIN categories c ON p.category_id = c.id
+                WHERE f.forecast_date >= CURRENT_DATE
+                ORDER BY f.forecast_quantity DESC, f.forecast_date ASC
+                LIMIT %s OFFSET %s
+            ''', [limit, offset])
+            columns = [col[0] for col in cursor.description]
+            results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT COUNT(*) FROM api_productforecast WHERE forecast_date >= CURRENT_DATE')
+            total = cursor.fetchone()[0]
+
+        return Response({
+            'results': results,
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': total,
+                'total_pages': (total + limit - 1) // limit
+            }
+        })
 
 
 class SaleViewSet(viewsets.ModelViewSet):
@@ -2220,3 +2261,65 @@ class ReportViewSet(viewsets.ViewSet):
         except Exception as e:
             print(f"Error in category_chart: {str(e)}")
             return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_product_forecasts(request, product_id):
+    """Get demand forecasts for a specific product"""
+    forecasts = ProductForecast.objects.filter(
+        product_id=product_id,
+        forecast_date__gte=datetime.date.today()
+    ).order_by('forecast_date')
+    
+    serializer = ProductForecastSerializer(forecasts, many=True)
+    return Response(serializer.data)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def all_product_forecasts(request):
+    """Get all product forecasts with product info, category, and description"""
+    page = int(request.query_params.get('page', 1))
+    limit = int(request.query_params.get('limit', 20))
+    offset = (page - 1) * limit
+
+    with connection.cursor() as cursor:
+        cursor.execute('''
+            SELECT f.id, f.product_id, f.forecast_date, f.forecast_quantity, f.created_at, f.model_info,
+                   p.name as product_name, p.sku, p.description, p.category_id, c.name as category_name
+            FROM api_productforecast f
+            JOIN products p ON f.product_id = p.id
+            LEFT JOIN categories c ON p.category_id = c.id
+            WHERE f.forecast_date >= %s
+            ORDER BY f.forecast_quantity DESC, f.forecast_date ASC
+            LIMIT %s OFFSET %s
+        ''', [datetime.date.today(), limit, offset])
+        columns = [col[0] for col in cursor.description]
+        results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT COUNT(*) FROM api_productforecast WHERE forecast_date >= %s', [datetime.date.today()])
+        total = cursor.fetchone()[0]
+
+    return Response({
+        'results': results,
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': total,
+            'total_pages': (total + limit - 1) // limit
+        }
+    })
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def run_forecasts(request):
+    """Admin-only endpoint to trigger forecast generation manually"""
+    user = request.user
+    # Check if user is admin or manager
+    if not hasattr(user, 'role') or user.role not in ['admin', 'manager']:
+        return Response({'detail': 'Permission denied'}, status=403)
+    try:
+        call_command('generate_forecasts')
+        return Response({'status': 'success', 'message': 'Forecasts generated successfully'})
+    except Exception as e:
+        return Response({'status': 'error', 'message': str(e)}, status=500)

@@ -87,6 +87,16 @@ const Sidebar = ({isMobile, setMobileOpen}: { isMobile?: boolean; setMobileOpen?
                             <span>Reports</span>
                         </Link>
                     </li>
+                    <li>
+                        <Link
+                            href="/forecasts"
+                            onClick={closeMobileMenu}
+                            className={`flex items-center p-3 text-gray-300 hover:bg-gray-700 rounded-lg ${isActive("/forecasts")}`}
+                        >
+                            <i className="fas fa-chart-pie w-6"></i>
+                            <span>Forecasts</span>
+                        </Link>
+                    </li>
                     {isAdmin && (
                         <>
                             <li>

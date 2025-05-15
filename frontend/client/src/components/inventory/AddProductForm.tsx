@@ -28,6 +28,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '../ui/dialog';
 import axios from 'axios';
 import { Switch } from '../ui/switch';
+import { AlertTriangle } from 'lucide-react';
 
 // Extend the product schema with validation
 const productFormSchema = z.object({
@@ -47,7 +48,7 @@ const productFormSchema = z.object({
   ),
 });
 
-type ProductFormValues = z.infer<typeof productFormSchema>;
+type ProductFormValues = z.infer<typeof productFormSchema> & { force?: boolean };
 
 interface AddProductFormProps {
   categories: Category[];
@@ -62,6 +63,7 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
   const [nextSku, setNextSku] = useState<string>('');
   const [errorModal, setErrorModal] = useState<string | null>(null);
   const [autoSku, setAutoSku] = useState(true);
+  const [warningModal, setWarningModal] = useState<{ message: string, data: ProductFormValues } | null>(null);
 
   // Initialize form with default values or edit values
   const form = useForm({
@@ -130,6 +132,8 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
         buy_price: typeof data.buyPrice === 'number' ? data.buyPrice.toString() : data.buyPrice,
         sell_price: typeof data.sellPrice === 'number' ? data.sellPrice.toString() : data.sellPrice,
       };
+      // Add force flag if present
+      if (data.force) payload.force = true;
       if (isEditing && editProduct) {
         return await apiRequest(`/api/products/${editProduct.id}/`, {
           method: 'PATCH',
@@ -164,21 +168,37 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
       form.reset();
       onCancel();
     },
-    onError: (error: any) => {
+    onError: (error: any, variables: any) => {
+      // Debug log the error object
+      console.error('Product form error:', error);
       let detail = 'An unknown error occurred';
+      let warning = null;
+      // Try to extract outlier warning from various possible error formats
       if (error && typeof error === 'object') {
-        if ('response' in error && error.response?.data?.detail) {
-          detail = error.response.data.detail;
+        // DRF ValidationError: { sell_price: [ ... ] }
+        if (error.response && error.response.data) {
+          const data = error.response.data;
+          if (data.sell_price && Array.isArray(data.sell_price)) {
+            // If it's an array of ErrorDetail or strings
+            const msg = data.sell_price.find((m: any) => typeof m === 'string' || (m && m.string));
+            if (msg) warning = typeof msg === 'string' ? msg : msg.string;
+          } else if (typeof data.detail === 'string') {
+            detail = data.detail;
+          }
         } else if ('message' in error) {
           detail = error.message;
         }
       }
-      setErrorModal(detail);
-      toast({
-        title: 'Error',
-        description: detail,
-        variant: 'destructive',
-      });
+      if (warning) {
+        setWarningModal({ message: warning, data: variables });
+      } else {
+        setErrorModal(detail);
+        toast({
+          title: 'Error',
+          description: detail,
+          variant: 'destructive',
+        });
+      }
     },
   });
 
@@ -429,6 +449,46 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
           <DialogTitle>Error</DialogTitle>
           <DialogDescription>{errorModal}</DialogDescription>
           <button onClick={() => setErrorModal(null)}>Close</button>
+        </DialogContent>
+      </Dialog>
+      {/* Warning Modal for outlier price */}
+      <Dialog open={!!warningModal} onOpenChange={() => setWarningModal(null)}>
+        <DialogContent className="max-w-md">
+          <div className="flex flex-col items-center text-center">
+            <AlertTriangle className="w-10 h-10 text-orange-500 mb-2" aria-hidden="true" />
+            <DialogTitle className="text-red-700 font-bold text-lg mb-1">Product Not Added: Unusual Selling Price</DialogTitle>
+            <DialogDescription className="mb-2 text-gray-700">
+              The selling price you entered (<b>KSh {warningModal?.data.sellPrice}</b>) is much higher or lower than what is typical for similar products in this category.<br />
+              <span className="block mt-2 font-semibold">Typical price range: {(() => {
+                // Try to extract the range from the warning message
+                const match = warningModal?.message.match(/Typical range: ([\d.]+) - ([\d.]+)/);
+                if (match) {
+                  return `KSh ${parseFloat(match[1]).toLocaleString()} – KSh ${parseFloat(match[2]).toLocaleString()}`;
+                }
+                return 'Unavailable';
+              })()}</span>
+              <br />
+              Please double-check the price. If you are sure, you can add the product anyway.
+            </DialogDescription>
+            <div className="flex gap-2 w-full justify-center">
+              <Button
+                variant="destructive"
+                className="w-32"
+                onClick={() => {
+                  // Resubmit with force flag
+                  if (warningModal) {
+                    mutation.mutate({ ...warningModal.data, force: true } as any);
+                    setWarningModal(null);
+                  }
+                }}
+              >
+                Add Anyway
+              </Button>
+              <Button variant="outline" className="w-32" onClick={() => setWarningModal(null)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </Card>

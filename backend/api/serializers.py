@@ -2,7 +2,7 @@ from django.contrib.auth.hashers import make_password
 from rest_framework import serializers
 from .models import (
     User, Category, Product, RestockRule,
-    SaleItem, Sale, Activity
+    SaleItem, Sale, Activity, ProductForecast
 )
 import datetime
 from django.utils import timezone
@@ -12,6 +12,7 @@ from decimal import Decimal
 import logging
 from .utils import to_nairobi
 import pytz
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,19 @@ class ProductSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'updated_at']
 
     def create(self, validated_data):
+        # Outlier price detection
+        name = validated_data.get('name')
+        category_id = validated_data.get('category_id')
+        sell_price = float(validated_data.get('sell_price', 0))
+        force = self.context.get('force', False)
+        if name and category_id and sell_price > 0 and not force:
+            is_outlier, stats = is_price_outlier(name, category_id, sell_price)
+            if is_outlier:
+                raise serializers.ValidationError({
+                    'sell_price': [
+                        f"Warning: The selling price ({sell_price}) is an outlier for similar products in this category. Typical range: {stats['lower_bound']:.2f} - {stats['upper_bound']:.2f}. If you are sure, you can override this warning."
+                    ]
+                })
         try:
             # Check if SKU is provided
             sku = validated_data.get('sku')
@@ -180,6 +194,19 @@ class ProductSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(f"Error creating product: {str(e)}")
 
     def update(self, instance, validated_data):
+        # Outlier price detection
+        name = validated_data.get('name', instance.name)
+        category_id = validated_data.get('category_id', instance.category_id)
+        sell_price = float(validated_data.get('sell_price', instance.sell_price))
+        force = self.context.get('force', False)
+        if name and category_id and sell_price > 0 and not force:
+            is_outlier, stats = is_price_outlier(name, category_id, sell_price)
+            if is_outlier:
+                raise serializers.ValidationError({
+                    'sell_price': [
+                        f"Warning: The selling price ({sell_price}) is an outlier for similar products in this category. Typical range: {stats['lower_bound']:.2f} - {stats['upper_bound']:.2f}. If you are sure, you can override this warning."
+                    ]
+                })
         category_id = validated_data.pop('category_id', None)
         if category_id is not None:
             try:
@@ -298,3 +325,45 @@ class ActivitySerializer(serializers.ModelSerializer):
         except Exception as e:
             data['created_at'] = str(getattr(instance, 'created_at'))
         return data 
+
+
+class ProductForecastSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductForecast
+        fields = ['id', 'forecast_date', 'forecast_quantity', 'created_at', 'model_info'] 
+
+def is_price_outlier(name, category_id, sell_price):
+    """
+    Check if the given sell_price is an outlier for products with the same category and similar name.
+    Uses IQR (interquartile range) for robust outlier detection.
+    Returns (is_outlier: bool, stats: dict)
+    """
+    # Find similar products by category and name (case-insensitive, partial match)
+    name_pattern = f"%{name.split()[0]}%" if name else "%"
+    with connection.cursor() as cursor:
+        cursor.execute('''
+            SELECT sell_price FROM products
+            WHERE category_id = %s AND LOWER(name) LIKE LOWER(%s) AND sell_price > 0
+        ''', [category_id, name_pattern])
+        prices = [float(row[0]) for row in cursor.fetchall()]
+
+    if len(prices) < 5:
+        # Not enough data to judge outliers
+        return False, {"reason": "not enough data", "n": len(prices)}
+
+    prices.sort()
+    q1 = prices[len(prices)//4]
+    q3 = prices[3*len(prices)//4]
+    iqr = q3 - q1
+    lower_bound = q1 - 1.5 * iqr
+    upper_bound = q3 + 1.5 * iqr
+    is_outlier = sell_price < lower_bound or sell_price > upper_bound
+    return is_outlier, {
+        "q1": q1,
+        "q3": q3,
+        "iqr": iqr,
+        "lower_bound": lower_bound,
+        "upper_bound": upper_bound,
+        "n": len(prices),
+        "prices": prices[:10]  # sample
+    } 

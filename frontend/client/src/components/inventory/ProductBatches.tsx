@@ -9,10 +9,11 @@ import { Badge } from '@/components/ui/badge';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { ProductBatch } from '@/types/batch';
 import { apiRequest } from '@/lib/queryClient';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription as AlertDialogContentDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/lib/auth';
+import { AlertTriangle } from 'lucide-react';
 
 interface ProductBatchesProps {
     productId: number;
@@ -51,6 +52,8 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
         purchase_date: new Date().toISOString().split('T')[0]
     });
 
+    const [warningModal, setWarningModal] = useState<{ message: string, data: any, mode: 'create' | 'update' } | null>(null);
+
     // Fetch batches with React Query
     const { data: batchesData = [], isLoading: isLoadingBatches } = useQuery<ProductBatch[]>({
         queryKey: ['batches', productId, filters],
@@ -85,7 +88,8 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
                     purchase_price: parseFloat(newBatch.purchase_price),
                     selling_price: newBatch.selling_price ? parseFloat(newBatch.selling_price) : null,
                     quantity: parseInt(newBatch.quantity)
-                })
+                }),
+                headers: { 'Content-Type': 'application/json' }
             });
 
             // Invalidate and refetch queries
@@ -103,8 +107,52 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
                 title: 'Success',
                 description: 'Batch created successfully',
             });
+        } catch (err: any) {
+            const warning = err?.response?.data?.selling_price?.[0];
+            if (warning) {
+                setWarningModal({ message: warning, data: { ...newBatch }, mode: 'create' });
+            } else {
+                console.error('Error creating batch:', err);
+                toast({
+                    title: 'Error',
+                    description: 'Failed to create batch. Please try again.',
+                    variant: 'destructive',
+                });
+            }
+        } finally {
+            setIsAddingBatch(false);
+        }
+    };
+
+    const handleCreateBatchWithForce = async () => {
+        setIsAddingBatch(true);
+        try {
+            await apiRequest('/api/product-batches/', {
+                method: 'POST',
+                body: JSON.stringify({
+                    product: productId,
+                    ...warningModal?.data,
+                    purchase_price: parseFloat(warningModal?.data.purchase_price),
+                    selling_price: warningModal?.data.selling_price ? parseFloat(warningModal?.data.selling_price) : null,
+                    quantity: parseInt(warningModal?.data.quantity),
+                    force: true
+                }),
+                headers: { 'Content-Type': 'application/json' }
+            });
+            queryClient.invalidateQueries({ queryKey: ['batches', productId] });
+            queryClient.invalidateQueries({ queryKey: ['batch-stats', productId] });
+            setNewBatch({
+                batch_number: '',
+                purchase_price: '',
+                selling_price: '',
+                quantity: '',
+                purchase_date: new Date().toISOString().split('T')[0]
+            });
+            toast({
+                title: 'Success',
+                description: 'Batch created successfully',
+            });
         } catch (err) {
-            console.error('Error creating batch:', err);
             toast({
                 title: 'Error',
                 description: 'Failed to create batch. Please try again.',
@@ -112,6 +160,7 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
             });
         } finally {
             setIsAddingBatch(false);
+            setWarningModal(null);
         }
     };
 
@@ -132,9 +181,38 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
             queryClient.invalidateQueries({ queryKey: ['batches', productId] });
             queryClient.invalidateQueries({ queryKey: ['batch-stats', productId] });
             setEditingBatch(null);
+        } catch (err: any) {
+            const warning = err?.response?.data?.selling_price?.[0];
+            if (warning) {
+                setWarningModal({ message: warning, data: { ...editingBatch }, mode: 'update' });
+            } else {
+                setError('Failed to update batch');
+                console.error('Error updating batch:', err);
+            }
+        }
+    };
+
+    const handleUpdateBatchWithForce = async () => {
+        if (!editingBatch) return;
+        try {
+            await apiRequest(`/api/product-batches/${editingBatch.id}/`, {
+                method: 'PUT',
+                data: {
+                    ...warningModal?.data,
+                    purchase_price: typeof warningModal?.data.purchase_price === 'number' ? warningModal?.data.purchase_price : parseFloat(String(warningModal?.data.purchase_price || 0)),
+                    selling_price: warningModal?.data.selling_price !== null && warningModal?.data.selling_price !== undefined ? parseFloat(String(warningModal?.data.selling_price)) : null,
+                    quantity: typeof warningModal?.data.quantity === 'number' ? warningModal?.data.quantity : parseInt(String(warningModal?.data.quantity || 0)),
+                    force: true
+                }
+            });
+            queryClient.invalidateQueries({ queryKey: ['batches', productId] });
+            queryClient.invalidateQueries({ queryKey: ['batch-stats', productId] });
+            setEditingBatch(null);
         } catch (err) {
             setError('Failed to update batch');
             console.error('Error updating batch:', err);
+        } finally {
+            setWarningModal(null);
         }
     };
 
@@ -452,6 +530,37 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
                     </Table>
                 </div>
             </CardContent>
+            {/* Warning Modal for outlier price */}
+            <Dialog open={!!warningModal} onOpenChange={() => setWarningModal(null)}>
+                <DialogContent className="max-w-md">
+                    <div className="flex flex-col items-center text-center">
+                        <AlertTriangle className="w-10 h-10 text-orange-500 mb-2" aria-hidden="true" />
+                        <DialogTitle className="text-red-700 font-bold text-lg mb-1">Unusual Price Warning</DialogTitle>
+                        <DialogDescription className="mb-2 text-gray-700">
+                            {warningModal?.message}
+                        </DialogDescription>
+                        <div className="text-sm text-gray-500 mb-4">
+                            This selling price is much higher or lower than usual for similar products in this category.<br />
+                            Please double-check before proceeding.
+                        </div>
+                        <div className="flex gap-2 w-full justify-center">
+                            <Button
+                                variant="destructive"
+                                className="w-32"
+                                onClick={() => {
+                                    if (warningModal?.mode === 'create') handleCreateBatchWithForce();
+                                    if (warningModal?.mode === 'update') handleUpdateBatchWithForce();
+                                }}
+                            >
+                                Proceed Anyway
+                            </Button>
+                            <Button variant="outline" className="w-32" onClick={() => setWarningModal(null)}>
+                                Cancel
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
         </Card>
     );
 }; 

@@ -160,4 +160,18 @@ class Activity(models.Model):
 
     class Meta:
         managed = True
-        db_table = 'activities' 
+        db_table = 'activities'
+
+class ProductForecast(models.Model):
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='forecasts')
+    forecast_date = models.DateField()
+    forecast_quantity = models.IntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    model_info = models.CharField(max_length=50)  # e.g., 'Prophet', 'MovingAverage'
+
+    class Meta:
+        unique_together = ('product', 'forecast_date')
+        ordering = ['forecast_date']
+
+    def __str__(self):
+        return f"{self.product.name} forecast for {self.forecast_date}" 
