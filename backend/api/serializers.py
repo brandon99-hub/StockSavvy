@@ -84,18 +84,54 @@ class ProductSerializer(serializers.ModelSerializer):
             # Check if SKU is provided
             sku = validated_data.get('sku')
             if not sku:
-                # Get the highest numeric SKU
+                # Use the sku_sequence table for atomic SKU generation with pattern support
                 with connection.cursor() as cursor:
-                    cursor.execute("""
-                        SELECT sku FROM products 
-                        WHERE sku ~ '^[0-9]+$' 
-                        ORDER BY CAST(sku AS INTEGER) DESC 
-                        LIMIT 1
-                    """)
-                    result = cursor.fetchone()
-                    highest_sku = int(result[0]) if result else 139
-                    new_sku = str(highest_sku + 1)
-                    validated_data['sku'] = new_sku
+                    cursor.execute("SELECT next_sku, pattern FROM sku_sequence LIMIT 1;")
+                    row = cursor.fetchone()
+                    if not row:
+                        raise serializers.ValidationError("SKU sequence not initialized.")
+                    current_sku, pattern = row
+
+                    # If pattern is set, increment the numeric part and format the next SKU
+                    if pattern:
+                        import re
+                        # Find the numeric part in current_sku
+                        match = re.search(r'(\d+)(?!.*\d)', str(current_sku))
+                        if match:
+                            num = int(match.group(1))
+                            next_num = num + 1
+                            # Replace the numeric part with the incremented value, preserving leading zeros
+                            next_sku = re.sub(r'(\d+)(?!.*\d)', lambda m: str(next_num).zfill(len(m.group(1))), str(current_sku))
+                        else:
+                            # If no numeric part, just append 1
+                            next_sku = str(current_sku) + '1'
+                        # Format the SKU using the pattern if it contains {num}
+                        if '{num' in pattern:
+                            # Support {num:03d} style formatting
+                            import string
+                            formatter = string.Formatter()
+                            # Extract format spec
+                            format_spec = 'd'
+                            m = re.search(r'\{num:(.*?)\}', pattern)
+                            if m:
+                                format_spec = m.group(1)
+                                formatted_num = format(f"{next_num:{format_spec}}")
+                                next_sku = pattern.replace(f'{{num:{format_spec}}}', formatted_num)
+                            else:
+                                next_sku = pattern.replace('{num}', str(next_num))
+                        # Update the sequence table
+                        cursor.execute("UPDATE sku_sequence SET next_sku = %s WHERE TRUE", [next_sku])
+                        validated_data['sku'] = next_sku
+                    else:
+                        # No pattern: treat as numeric if possible, else just increment string
+                        try:
+                            next_num = int(current_sku) + 1
+                            next_sku = str(next_num)
+                        except Exception:
+                            # Fallback: append '1' to the string
+                            next_sku = str(current_sku) + '1'
+                        cursor.execute("UPDATE sku_sequence SET next_sku = %s WHERE TRUE", [next_sku])
+                        validated_data['sku'] = current_sku
 
             # Validate category
             category_id = validated_data.get('category_id')

@@ -27,6 +27,7 @@ import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '../ui/dialog';
 import axios from 'axios';
+import { Switch } from '../ui/switch';
 
 // Extend the product schema with validation
 const productFormSchema = z.object({
@@ -60,6 +61,7 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
   const isEditing = !!editProduct;
   const [nextSku, setNextSku] = useState<string>('');
   const [errorModal, setErrorModal] = useState<string | null>(null);
+  const [autoSku, setAutoSku] = useState(true);
 
   // Initialize form with default values or edit values
   const form = useForm({
@@ -77,16 +79,16 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
   });
 
   useEffect(() => {
-    if (!editProduct) {
-      // Fetch the next SKU from the backend
+    if (!editProduct && autoSku) {
       axios.get('/api/products/next_sku/').then(res => {
         setNextSku(res.data.next_sku);
         form.setValue('sku', res.data.next_sku);
       });
-    } else {
+    }
+    if (editProduct) {
       form.setValue('sku', editProduct.sku);
     }
-  }, [editProduct, form]);
+  }, [editProduct, form, autoSku]);
 
   // Reset form when editProduct changes
   useEffect(() => {
@@ -225,6 +227,10 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
       <CardContent>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit as SubmitHandler<ProductFormValues>)} className="space-y-4">
+            <div className="flex items-center mb-2">
+              <Switch checked={autoSku} onCheckedChange={setAutoSku} id="auto-sku-switch" />
+              <label htmlFor="auto-sku-switch" className="ml-2 text-sm text-gray-700">Auto-generate SKU</label>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FormField
                 control={form.control}
@@ -247,7 +253,7 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
                   <FormItem>
                     <FormLabel>SKU</FormLabel>
                     <FormControl>
-                      <Input placeholder="Stock keeping unit" {...field} readOnly={!isEditing} />
+                      <Input placeholder="Stock keeping unit" {...field} readOnly={autoSku} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
