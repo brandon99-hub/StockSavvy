@@ -2312,17 +2312,19 @@ def all_product_forecasts(request):
 
 @api_view(['POST'])
 def run_forecasts(request):
-    # Use your custom token auth
+    print("Headers received:", request.headers)
     def check_token_auth(request):
         auth_header = request.headers.get('Authorization')
+        print("Authorization header:", auth_header)
         if not auth_header or not auth_header.startswith('Bearer '):
             return False, None, False
         token = auth_header.split(' ')[1]
+        print("Token:", token)
         if not token:
             return False, None, False
         parts = token.split('_')
         user_id = int(parts[1]) if len(parts) > 1 else None
-        # Check user role in DB
+        print("Parsed user_id:", user_id)
         from django.db import connection
         with connection.cursor() as cursor:
             cursor.execute(
@@ -2330,11 +2332,13 @@ def run_forecasts(request):
                 [user_id]
             )
             row = cursor.fetchone()
+            print("DB row:", row)
             if row and row[0] in ['admin', 'manager']:
                 return True, user_id, True
         return False, None, False
 
     is_authenticated, user_id, is_admin = check_token_auth(request)
+    print("is_authenticated:", is_authenticated, "user_id:", user_id, "is_admin:", is_admin)
     if not is_authenticated:
         return Response({'detail': 'Authentication required'}, status=401)
     if not is_admin:
