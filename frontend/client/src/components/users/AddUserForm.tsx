@@ -66,11 +66,10 @@ const AddUserForm = ({ initialData, onSuccess }: AddUserFormProps) => {
   const onSubmit = async (data: UserFormData) => {
     try {
       setIsLoading(true);
-      const endpoint = initialData ? `/api/users/${initialData.id}/` : "/api/users/";
-      const method = initialData ? "PATCH" : "POST";
-      
       const userData = {
         ...data,
+        is_staff: data.role === 'admin',
+        is_superuser: data.role === 'admin',
         // Only include password if it's provided (for updates)
         ...((!data.password || data.password.trim() === '') && initialData 
           ? { password: undefined } 
@@ -83,6 +82,9 @@ const AddUserForm = ({ initialData, onSuccess }: AddUserFormProps) => {
           delete userData[key];
         }
       });
+      
+      const endpoint = initialData ? `/api/users/${initialData.id}/` : "/api/users/";
+      const method = initialData ? "PUT" : "POST";
       
       const response = await apiRequest(endpoint, {
         method,

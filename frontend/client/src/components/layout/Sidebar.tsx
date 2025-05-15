@@ -1,5 +1,6 @@
 import {Link, useLocation} from "wouter";
 import {useAuth} from "../../lib/auth";
+import logo from '../../../assets/appstore_logo.png';
 
 const Sidebar = ({isMobile, setMobileOpen}: { isMobile?: boolean; setMobileOpen?: (open: boolean) => void }) => {
     const [location] = useLocation();
@@ -22,10 +23,8 @@ const Sidebar = ({isMobile, setMobileOpen}: { isMobile?: boolean; setMobileOpen?
             {/* Logo */}
             <div className="p-4 border-b border-gray-700">
                 <div className="flex items-center space-x-2">
-                    <div className="bg-blue-500 rounded p-1">
-                        <i className="fas fa-tshirt text-white"></i>
-                    </div>
-                    <h1 className="text-xl font-bold">Mahatma Clothing</h1>
+                    <img src={logo} alt="Working Wave Logo" className="w-8 h-8" />
+                    <h1 className="text-xl font-bold">Working Wave</h1>
                 </div>
                 <p className="text-xs text-gray-400 mt-1">Stock Management System</p>
             </div>

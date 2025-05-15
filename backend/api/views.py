@@ -255,13 +255,15 @@ class CategoryViewSet(viewsets.ModelViewSet):
                         # Get user from database to check admin status
                         with connection.cursor() as cursor:
                             cursor.execute(
-                                "SELECT is_staff, is_superuser FROM users WHERE id = %s",
+                                "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
                                 [user_id]
                             )
                             row = cursor.fetchone()
                             if row:
-                                is_staff, is_superuser = row
-                                return True, user_id, is_staff or is_superuser
+                                is_staff, is_superuser, role = row
+                                # Allow access if user is staff, superuser, or has admin role
+                                is_authorized = is_staff or is_superuser or (role and role.lower() == 'admin')
+                                return True, user_id, is_authorized
                 except (IndexError, ValueError) as e:
                     print(f"Token validation error: {str(e)}")
                     pass
@@ -720,6 +722,27 @@ class ProductViewSet(viewsets.ModelViewSet):
                 {"detail": f"Error restocking product: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+    @action(detail=False, methods=['get'])
+    def next_sku(self, request):
+        from django.db import transaction
+        from django.db import connection
+        try:
+            with transaction.atomic():
+                with connection.cursor() as cursor:
+                    cursor.execute("""
+                        SELECT sku FROM products 
+                        WHERE sku ~ '^[0-9]+$' 
+                        ORDER BY CAST(sku AS INTEGER) DESC 
+                        LIMIT 1
+                        FOR UPDATE
+                    """)
+                    result = cursor.fetchone()
+                    highest_sku = int(result[0]) if result else 139
+                    next_sku = str(highest_sku + 1)
+            return Response({'next_sku': next_sku})
+        except Exception as e:
+            return Response({'detail': f'Error generating next SKU: {str(e)}'}, status=500)
 
 
 class SaleViewSet(viewsets.ModelViewSet):

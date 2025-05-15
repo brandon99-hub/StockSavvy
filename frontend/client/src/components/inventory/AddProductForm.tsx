@@ -26,6 +26,7 @@ import { Textarea } from '../ui/textarea';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '../ui/dialog';
+import axios from 'axios';
 
 // Extend the product schema with validation
 const productFormSchema = z.object({
@@ -57,19 +58,8 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const isEditing = !!editProduct;
-  const [nextSku, setNextSku] = useState<string>('140');
+  const [nextSku, setNextSku] = useState<string>('');
   const [errorModal, setErrorModal] = useState<string | null>(null);
-  
-  useEffect(() => {
-    if (!isEditing) {
-      // Fetch the highest SKU from the backend to determine the next SKU
-      apiRequest('/api/products/').then((response) => {
-        const skus = response.map((product: any) => parseInt(product.sku)).filter((sku: number) => !isNaN(sku) && sku >= 139);
-        const maxSku = skus.length > 0 ? Math.max(...skus) : 139;
-        setNextSku(String(maxSku + 1));
-      });
-    }
-  }, [isEditing]);
 
   // Initialize form with default values or edit values
   const form = useForm({
@@ -85,6 +75,18 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
       sellPrice: editProduct ? Number(editProduct.sell_price) : 0.01,
     },
   });
+
+  useEffect(() => {
+    if (!editProduct) {
+      // Fetch the next SKU from the backend
+      axios.get('/api/products/next_sku/').then(res => {
+        setNextSku(res.data.next_sku);
+        form.setValue('sku', res.data.next_sku);
+      });
+    } else {
+      form.setValue('sku', editProduct.sku);
+    }
+  }, [editProduct, form]);
 
   // Reset form when editProduct changes
   useEffect(() => {
@@ -160,9 +162,16 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
       form.reset();
       onCancel();
     },
-    onError: (error) => {
-      const detail = error.response?.data?.detail || error.message || 'An unknown error occurred';
-      setErrorModal(detail); // Show modal
+    onError: (error: any) => {
+      let detail = 'An unknown error occurred';
+      if (error && typeof error === 'object') {
+        if ('response' in error && error.response?.data?.detail) {
+          detail = error.response.data.detail;
+        } else if ('message' in error) {
+          detail = error.message;
+        }
+      }
+      setErrorModal(detail);
       toast({
         title: 'Error',
         description: detail,
