@@ -2311,14 +2311,36 @@ def all_product_forecasts(request):
     })
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
 def run_forecasts(request):
-    """Admin-only endpoint to trigger forecast generation manually"""
-    user = request.user
-    # Check if user is admin or manager
-    if not hasattr(user, 'role') or user.role not in ['admin', 'manager']:
+    # Use your custom token auth
+    def check_token_auth(request):
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return False, None, False
+        token = auth_header.split(' ')[1]
+        if not token:
+            return False, None, False
+        parts = token.split('_')
+        user_id = int(parts[1]) if len(parts) > 1 else None
+        # Check user role in DB
+        from django.db import connection
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT role FROM users WHERE id = %s",
+                [user_id]
+            )
+            row = cursor.fetchone()
+            if row and row[0] in ['admin', 'manager']:
+                return True, user_id, True
+        return False, None, False
+
+    is_authenticated, user_id, is_admin = check_token_auth(request)
+    if not is_authenticated:
+        return Response({'detail': 'Authentication required'}, status=401)
+    if not is_admin:
         return Response({'detail': 'Permission denied'}, status=403)
     try:
+        from django.core.management import call_command
         call_command('generate_forecasts')
         return Response({'status': 'success', 'message': 'Forecasts generated successfully'})
     except Exception as e:
