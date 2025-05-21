@@ -206,6 +206,13 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
 
   // Form submission handler
   const onSubmit = (data: ProductFormValues) => {
+    if (!autoSku && data.sku) {
+      const skuError = validateHybridSku(data.sku);
+      if (skuError) {
+        setErrorModal(skuError);
+        return;
+      }
+    }
     // Ensure form data types are correct
     const formData = {
       ...data,
@@ -241,118 +248,82 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
     mutation.mutate(formData);
   };
 
+  function validateHybridSku(sku: string): string | null {
+    if (/^[A-Za-z]{1,3}[0-9]+$/.test(sku)) {
+      return null;
+    }
+    if (/^[A-Za-z]{1,}$/.test(sku)) {
+      return "SKU must end with a number for auto-generation. You can disable auto-generation or change the SKU.";
+    }
+    if (/[0-9].*[A-Za-z]/.test(sku) || /^[A-Za-z]{4,}/.test(sku)) {
+      return "SKU must have up to 3 letters at the start, followed by numbers only. No numbers allowed between letters.";
+    }
+    return "Invalid SKU format. Use up to 3 letters followed by numbers (e.g., ABC001).";
+  }
+
   return (
-    <Card className="shadow-sm">
-      <CardHeader>
-        <CardTitle>{isEditing ? 'Edit Product' : 'Add New Product'}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit as SubmitHandler<ProductFormValues>)} className="space-y-4">
-            <div className="flex items-center mb-2">
-              <Switch checked={autoSku} onCheckedChange={setAutoSku} id="auto-sku-switch" />
-              <label htmlFor="auto-sku-switch" className="ml-2 text-sm text-gray-700">Auto-generate SKU</label>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Product Name</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Product name" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+    <>
+      {errorModal && (
+        <Dialog open={!!errorModal} onOpenChange={() => setErrorModal(null)}>
+          <DialogContent>
+            <DialogTitle>SKU Format Error</DialogTitle>
+            <DialogDescription>{errorModal}</DialogDescription>
+            <Button onClick={() => setErrorModal(null)}>OK</Button>
+          </DialogContent>
+        </Dialog>
+      )}
+      <Card className="shadow-sm">
+        <CardHeader>
+          <CardTitle>{isEditing ? 'Edit Product' : 'Add New Product'}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit as SubmitHandler<ProductFormValues>)} className="space-y-4">
+              <div className="flex items-center mb-2">
+                <Switch checked={autoSku} onCheckedChange={setAutoSku} id="auto-sku-switch" />
+                <label htmlFor="auto-sku-switch" className="ml-2 text-sm text-gray-700">Auto-generate SKU</label>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Product Name</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Product name" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                
+                <FormField
+                  control={form.control}
+                  name="sku"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>SKU</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Stock keeping unit" {...field} readOnly={autoSku} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
               
               <FormField
                 control={form.control}
-                name="sku"
+                name="description"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>SKU</FormLabel>
+                    <FormLabel>Description</FormLabel>
                     <FormControl>
-                      <Input placeholder="Stock keeping unit" {...field} readOnly={autoSku} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-            
-            <FormField
-              control={form.control}
-              name="description"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Description</FormLabel>
-                  <FormControl>
-                    <Textarea 
-                      placeholder="Product description" 
-                      className="resize-none h-20" 
-                      {...field} 
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            
-            <FormField
-              control={form.control}
-              name="categoryId"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Category</FormLabel>
-                  <Select
-                    onValueChange={(value) => {
-                      if (value === '0') {
-                        field.onChange(null);
-                      } else {
-                        field.onChange(parseInt(value));
-                      }
-                    }}
-                    value={field.value === null ? '0' : field.value?.toString() || '0'}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a category" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent position="popper" className="max-h-[300px]">
-                      <SelectItem value="0">Uncategorized</SelectItem>
-                      {categories.map((category) => (
-                        <SelectItem key={category.id} value={category.id.toString()}>
-                          {category.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="quantity"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Quantity</FormLabel>
-                    <FormControl>
-                      <Input 
-                        type="number" 
-                        min="0" 
-                        step="1" 
-                        {...field}
-                        onChange={(e) => {
-                          const value = e.target.value ? parseInt(e.target.value) : 0;
-                          field.onChange(value);
-                        }}
+                      <Textarea 
+                        placeholder="Product description" 
+                        className="resize-none h-20" 
+                        {...field} 
                       />
                     </FormControl>
                     <FormMessage />
@@ -362,97 +333,149 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
               
               <FormField
                 control={form.control}
-                name="minStockLevel"
+                name="categoryId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Min Stock Level</FormLabel>
-                    <FormControl>
-                      <Input 
-                        type="number" 
-                        min="0" 
-                        step="1" 
-                        {...field}
-                        onChange={(e) => {
-                          const value = e.target.value ? parseInt(e.target.value) : 0;
-                          field.onChange(value);
-                        }}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="buyPrice"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Buy Price (KSh)</FormLabel>
-                    <FormControl>
-                      <Input 
-                        type="number" 
-                        min="0.01" 
-                        step="0.01" 
-                        {...field}
-                        value={field.value as string | number}
-                        onChange={(e) => {
-                          const value = e.target.value ? parseFloat(e.target.value) : 0.01;
-                          field.onChange(value);
-                        }}
-                      />
-                    </FormControl>
+                    <FormLabel>Category</FormLabel>
+                    <Select
+                      onValueChange={(value) => {
+                        if (value === '0') {
+                          field.onChange(null);
+                        } else {
+                          field.onChange(parseInt(value));
+                        }
+                      }}
+                      value={field.value === null ? '0' : field.value?.toString() || '0'}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a category" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent position="popper" className="max-h-[300px]">
+                        <SelectItem value="0">Uncategorized</SelectItem>
+                        {categories.map((category) => (
+                          <SelectItem key={category.id} value={category.id.toString()}>
+                            {category.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )}
               />
               
-              <FormField
-                control={form.control}
-                name="sellPrice"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Sell Price (KSh)</FormLabel>
-                    <FormControl>
-                      <Input 
-                        type="number" 
-                        min="0.01" 
-                        step="0.01" 
-                        {...field}
-                        value={field.value as string | number}
-                        onChange={(e) => {
-                          const value = e.target.value ? parseFloat(e.target.value) : 0.01;
-                          field.onChange(value);
-                        }}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-            
-            <div className="flex justify-end space-x-2 pt-4">
-              <Button type="button" variant="outline" onClick={onCancel}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={mutation.isPending}>
-                {mutation.isPending ? 'Saving...' : isEditing ? 'Update Product' : 'Add Product'}
-              </Button>
-            </div>
-          </form>
-        </Form>
-      </CardContent>
-      {/* Error Modal */}
-      <Dialog open={!!errorModal} onOpenChange={() => setErrorModal(null)}>
-        <DialogContent>
-          <DialogTitle>Error</DialogTitle>
-          <DialogDescription>{errorModal}</DialogDescription>
-          <button onClick={() => setErrorModal(null)}>Close</button>
-        </DialogContent>
-      </Dialog>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="quantity"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Quantity</FormLabel>
+                      <FormControl>
+                        <Input 
+                          type="number" 
+                          min="0" 
+                          step="1" 
+                          {...field}
+                          onChange={(e) => {
+                            const value = e.target.value ? parseInt(e.target.value) : 0;
+                            field.onChange(value);
+                          }}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                
+                <FormField
+                  control={form.control}
+                  name="minStockLevel"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Min Stock Level</FormLabel>
+                      <FormControl>
+                        <Input 
+                          type="number" 
+                          min="0" 
+                          step="1" 
+                          {...field}
+                          onChange={(e) => {
+                            const value = e.target.value ? parseInt(e.target.value) : 0;
+                            field.onChange(value);
+                          }}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="buyPrice"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Buy Price (KSh)</FormLabel>
+                      <FormControl>
+                        <Input 
+                          type="number" 
+                          min="0.01" 
+                          step="0.01" 
+                          {...field}
+                          value={field.value as string | number}
+                          onChange={(e) => {
+                            const value = e.target.value ? parseFloat(e.target.value) : 0.01;
+                            field.onChange(value);
+                          }}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                
+                <FormField
+                  control={form.control}
+                  name="sellPrice"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Sell Price (KSh)</FormLabel>
+                      <FormControl>
+                        <Input 
+                          type="number" 
+                          min="0.01" 
+                          step="0.01" 
+                          {...field}
+                          value={field.value as string | number}
+                          onChange={(e) => {
+                            const value = e.target.value ? parseFloat(e.target.value) : 0.01;
+                            field.onChange(value);
+                          }}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              
+              <div className="flex justify-end space-x-2 pt-4">
+                <Button type="button" variant="outline" onClick={onCancel}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={mutation.isPending}>
+                  {mutation.isPending ? 'Saving...' : isEditing ? 'Update Product' : 'Add Product'}
+                </Button>
+              </div>
+            </form>
+          </Form>
+        </CardContent>
+      </Card>
       {/* Warning Modal for outlier price */}
       <Dialog open={!!warningModal} onOpenChange={() => setWarningModal(null)}>
         <DialogContent className="max-w-md">
@@ -493,7 +516,7 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
           </div>
         </DialogContent>
       </Dialog>
-    </Card>
+    </>
   );
 };
 

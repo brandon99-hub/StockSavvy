@@ -80,6 +80,15 @@ class ProductSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['created_at', 'updated_at']
 
+    def validate_hybrid_sku(self, sku):
+        if re.fullmatch(r'^[A-Za-z]{1,3}[0-9]+$', sku):
+            return True, None
+        if re.fullmatch(r'^[A-Za-z]{1,}$', sku):
+            return False, "SKU must end with a number for auto-generation. You can disable auto-generation or change the SKU."
+        if re.search(r'[0-9].*[A-Za-z]', sku) or re.match(r'^[A-Za-z]{4,}', sku):
+            return False, "SKU must have up to 3 letters at the start, followed by numbers only. No numbers allowed between letters."
+        return False, "Invalid SKU format. Use up to 3 letters followed by numbers (e.g., ABC001)."
+
     def create(self, validated_data):
         # Outlier price detection
         name = validated_data.get('name')
@@ -97,55 +106,10 @@ class ProductSerializer(serializers.ModelSerializer):
         try:
             # Check if SKU is provided
             sku = validated_data.get('sku')
-            if not sku:
-                # Use the sku_sequence table for atomic SKU generation with pattern support
-                with connection.cursor() as cursor:
-                    cursor.execute("SELECT next_sku, pattern FROM sku_sequence LIMIT 1;")
-                    row = cursor.fetchone()
-                    if not row:
-                        raise serializers.ValidationError("SKU sequence not initialized.")
-                    current_sku, pattern = row
-
-                    # If pattern is set, increment the numeric part and format the next SKU
-                    if pattern:
-                        import re
-                        # Find the numeric part in current_sku
-                        match = re.search(r'(\d+)(?!.*\d)', str(current_sku))
-                        if match:
-                            num = int(match.group(1))
-                            next_num = num + 1
-                            # Replace the numeric part with the incremented value, preserving leading zeros
-                            next_sku = re.sub(r'(\d+)(?!.*\d)', lambda m: str(next_num).zfill(len(m.group(1))), str(current_sku))
-                        else:
-                            # If no numeric part, just append 1
-                            next_sku = str(current_sku) + '1'
-                        # Format the SKU using the pattern if it contains {num}
-                        if '{num' in pattern:
-                            # Support {num:03d} style formatting
-                            import string
-                            formatter = string.Formatter()
-                            # Extract format spec
-                            format_spec = 'd'
-                            m = re.search(r'\{num:(.*?)\}', pattern)
-                            if m:
-                                format_spec = m.group(1)
-                                formatted_num = format(f"{next_num:{format_spec}}")
-                                next_sku = pattern.replace(f'{{num:{format_spec}}}', formatted_num)
-                            else:
-                                next_sku = pattern.replace('{num}', str(next_num))
-                        # Update the sequence table
-                        cursor.execute("UPDATE sku_sequence SET next_sku = %s WHERE TRUE", [next_sku])
-                        validated_data['sku'] = next_sku
-                    else:
-                        # No pattern: treat as numeric if possible, else just increment string
-                        try:
-                            next_num = int(current_sku) + 1
-                            next_sku = str(next_num)
-                        except Exception:
-                            # Fallback: append '1' to the string
-                            next_sku = str(current_sku) + '1'
-                        cursor.execute("UPDATE sku_sequence SET next_sku = %s WHERE TRUE", [next_sku])
-                        validated_data['sku'] = current_sku
+            if sku:
+                valid, error = self.validate_hybrid_sku(sku)
+                if not valid:
+                    raise serializers.ValidationError({'sku': error})
 
             # Validate category
             category_id = validated_data.get('category_id')

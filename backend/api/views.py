@@ -779,17 +779,53 @@ class ProductViewSet(viewsets.ModelViewSet):
         try:
             with transaction.atomic():
                 with connection.cursor() as cursor:
-                    cursor.execute("""
-                        SELECT sku FROM products 
-                        WHERE sku ~ '^[0-9]+$' 
-                        ORDER BY CAST(sku AS INTEGER) DESC 
-                        LIMIT 1
-                        FOR UPDATE
-                    """)
-                    result = cursor.fetchone()
-                    highest_sku = int(result[0]) if result else 139
-                    next_sku = str(highest_sku + 1)
-            return Response({'next_sku': next_sku})
+                    # Get the pattern and next_sku from sku_sequence
+                    cursor.execute("SELECT next_sku, pattern FROM sku_sequence LIMIT 1;")
+                    row = cursor.fetchone()
+                    if row:
+                        current_sku, pattern = row
+                        # If pattern is set, use it to format the next SKU
+                        if pattern:
+                            import re
+                            import string
+                            # Find the numeric part in current_sku
+                            match = re.search(r'(\d+)(?!.*\d)', str(current_sku))
+                            if match:
+                                num = int(match.group(1))
+                                next_num = num
+                                # Support {num:03d} style formatting
+                                formatter = string.Formatter()
+                                m = re.search(r'\{num:(.*?)\}', pattern)
+                                if m:
+                                    format_spec = m.group(1)
+                                    formatted_num = f"{next_num:{format_spec}}"
+                                    next_sku = pattern.replace(f'{{num:{format_spec}}}', formatted_num)
+                                else:
+                                    next_sku = pattern.replace('{num}', str(next_num))
+                            else:
+                                # If no numeric part, just use current_sku
+                                next_sku = str(current_sku)
+                            return Response({'next_sku': next_sku})
+                        else:
+                            # No pattern: treat as numeric if possible
+                            try:
+                                next_num = int(current_sku)
+                                next_sku = str(next_num)
+                            except Exception:
+                                next_sku = str(current_sku)
+                            return Response({'next_sku': next_sku})
+                    else:
+                        # Fallback to old logic if sku_sequence is not set
+                        cursor.execute("""
+                            SELECT sku FROM products 
+                            WHERE sku ~ '^[0-9]+$' 
+                            ORDER BY CAST(sku AS INTEGER) DESC 
+                            LIMIT 1
+                        """)
+                        result = cursor.fetchone()
+                        highest_sku = int(result[0]) if result else 139
+                        next_sku = str(highest_sku + 1)
+                        return Response({'next_sku': next_sku})
         except Exception as e:
             return Response({'detail': f'Error generating next SKU: {str(e)}'}, status=500)
 
