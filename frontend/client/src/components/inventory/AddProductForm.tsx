@@ -155,6 +155,8 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
     onSuccess: () => {
       // Invalidate and refetch product queries
       queryClient.invalidateQueries({ queryKey: ['/api/products'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/products/'] });
+      queryClient.invalidateQueries({ queryKey: ['products'] });
       queryClient.invalidateQueries({ queryKey: ['/api/products/low-stock'] });
       queryClient.invalidateQueries({ queryKey: ['/api/dashboard/stats'] });
       queryClient.invalidateQueries({ queryKey: ['/api/dashboard/category-chart'] });

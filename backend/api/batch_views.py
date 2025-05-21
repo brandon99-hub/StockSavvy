@@ -156,8 +156,10 @@ class ProductBatchViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def update(self, request, *args, **kwargs):
         try:
+            is_authenticated, user_id, is_authorized = self.check_token_auth(request)
             instance = self.get_object()
             old_quantity = instance.quantity
+            old_remaining = instance.remaining_quantity
             new_quantity = int(request.data.get('quantity', old_quantity))
 
             # Log the request data for debugging
@@ -175,6 +177,12 @@ class ProductBatchViewSet(viewsets.ModelViewSet):
                             {"detail": "Invalid selling price format"},
                             status=status.HTTP_400_BAD_REQUEST
                         )
+
+            # If quantity is being updated, update remaining_quantity accordingly
+            if 'quantity' in request.data:
+                sold = old_quantity - old_remaining
+                new_remaining = max(new_quantity - sold, 0)
+                request.data['remaining_quantity'] = new_remaining
 
             serializer = self.get_serializer(instance, data=request.data, partial=True)
             if not serializer.is_valid():
@@ -200,7 +208,7 @@ class ProductBatchViewSet(viewsets.ModelViewSet):
                 type='batch_updated',
                 description=f'Batch #{instance.id} updated for product {instance.product_id}',
                 product_id=instance.product_id,
-                user_id=request.user.id if hasattr(request, 'user') and request.user.id else None,
+                user_id=user_id,
                 created_at=timezone.now(),
                 status='completed'
             )

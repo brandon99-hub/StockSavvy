@@ -609,6 +609,8 @@ class ProductViewSet(viewsets.ModelViewSet):
         try:
             # Get the product before update
             instance = self.get_object()
+            old_buy_price = instance.buy_price
+            old_sell_price = instance.sell_price
             old_quantity = instance.quantity
 
             # Update the product
@@ -617,6 +619,21 @@ class ProductViewSet(viewsets.ModelViewSet):
             if response.status_code == 200:  # If product was updated successfully
                 # Get the updated product data
                 product_data = response.data
+
+                # If buy_price or sell_price changed, update the INIT batch as well
+                new_buy_price = float(product_data.get('buy_price', old_buy_price))
+                new_sell_price = float(product_data.get('sell_price', old_sell_price))
+                if new_buy_price != old_buy_price or new_sell_price != old_sell_price:
+                    from django.db import connection
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            """
+                            UPDATE product_batches
+                            SET purchase_price = %s, selling_price = %s
+                            WHERE product_id = %s AND batch_number = %s
+                            """,
+                            [new_buy_price, new_sell_price, instance.id, f'INIT-{instance.id}']
+                        )
 
                 # Create activity log for product update
                 Activity.objects.create(
@@ -637,29 +654,56 @@ class ProductViewSet(viewsets.ModelViewSet):
             )
 
     def destroy(self, request, *args, **kwargs):
+        import traceback
         is_authenticated, user_id, is_admin = self.check_token_auth(request)
+        logger.debug(f"Destroy called: is_authenticated={is_authenticated}, user_id={user_id}, is_admin={is_admin}")
         if not is_authenticated:
+            logger.debug("Authentication failed")
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
         if not is_admin:
+            logger.debug("Permission denied")
             return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
 
         try:
             instance = self.get_object()
+            logger.debug(f"Fetched product instance: id={instance.id}, name={instance.name}")
 
-            # Check if product has any sales
+            # Check if product has any sales or batch sales
             with connection.cursor() as cursor:
+                # Check regular sale items
                 cursor.execute(
                     "SELECT COUNT(*) FROM sale_items WHERE product_id = %s",
                     [instance.id]
                 )
                 sale_count = cursor.fetchone()[0]
+                logger.debug(f"Sale items count for product {instance.id}: {sale_count}")
 
-                if sale_count > 0:
+                # Check batch sale items
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) FROM batch_sale_items bsi
+                    JOIN sale_items si ON bsi.sale_item_id = si.id
+                    WHERE si.product_id = %s
+                    """,
+                    [instance.id]
+                )
+                batch_sale_count = cursor.fetchone()[0]
+                logger.debug(f"Batch sale items count for product {instance.id}: {batch_sale_count}")
+
+                if sale_count > 0 or batch_sale_count > 0:
+                    logger.debug("Product has sales or batch sales, cannot delete.")
                     return Response(
                         {"detail": "Cannot delete product with existing sales"},
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
+            logger.debug("No sales found, proceeding to delete product batches.")
+            # Delete all product_batches for this product
+            with connection.cursor() as cursor:
+                cursor.execute("DELETE FROM product_batches WHERE product_id = %s", [instance.id])
+                logger.debug(f"Deleted all product_batches for product {instance.id}")
+
+            logger.debug("Proceeding to delete product.")
             # Create activity log for product deletion
             Activity.objects.create(
                 type='product_deleted',
@@ -669,11 +713,15 @@ class ProductViewSet(viewsets.ModelViewSet):
                 created_at=timezone.now(),
                 status='completed'
             )
+            logger.debug("Activity log created for product deletion.")
 
             self.perform_destroy(instance)
+            logger.debug("Product instance deleted.")
             return Response(status=status.HTTP_204_NO_CONTENT)
 
         except Exception as e:
+            logger.error(f"Error deleting product: {str(e)}")
+            logger.error(traceback.format_exc())
             return Response(
                 {"detail": f"Error deleting product: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -1126,7 +1174,9 @@ class SaleViewSet(viewsets.ModelViewSet):
             # Start a transaction
             with transaction.atomic():
                 with connection.cursor() as cursor:
-                    # Delete all sale items first
+                    # Delete records from batch_sale_items first to avoid foreign key constraint violation
+                    cursor.execute("DELETE FROM batch_sale_items")
+                    # Delete all sale items
                     cursor.execute("DELETE FROM sale_items")
                     # Delete all sales
                     cursor.execute("DELETE FROM sales")
@@ -1896,18 +1946,52 @@ class ReportViewSet(viewsets.ViewSet):
                 total_count = cursor.fetchone()[0]
                 total_pages = (total_count + items_per_page - 1) // items_per_page
 
-                # Get paginated sales data
+                # Get paginated sales data with items sold per day
                 cursor.execute("""
+                    WITH daily_sales AS (
+                        SELECT 
+                            DATE_TRUNC('day', s.created_at)::date as date,
+                            COALESCE(SUM(s.total_amount), 0) as amount,
+                            COUNT(DISTINCT s.id) as transaction_count,
+                            COUNT(DISTINCT si.product_id) as unique_products,
+                            COALESCE(SUM(si.quantity), 0) as items_sold
+                        FROM sales s
+                        LEFT JOIN sale_items si ON s.id = si.sale_id
+                        LEFT JOIN products p ON si.product_id = p.id
+                        WHERE s.created_at >= NOW() - INTERVAL '30 days'
+                        GROUP BY DATE_TRUNC('day', s.created_at)
+                    ),
+                    product_quantities AS (
+                        SELECT 
+                            DATE_TRUNC('day', s.created_at)::date as date,
+                            p.name,
+                            SUM(si.quantity) as total_quantity
+                        FROM sales s
+                        LEFT JOIN sale_items si ON s.id = si.sale_id
+                        LEFT JOIN products p ON si.product_id = p.id
+                        WHERE s.created_at >= NOW() - INTERVAL '30 days'
+                        GROUP BY DATE_TRUNC('day', s.created_at), p.name
+                    ),
+                    product_details AS (
+                        SELECT 
+                            date,
+                            STRING_AGG(
+                                CONCAT(name, ' (', total_quantity, ')'),
+                                ', '
+                            ) as items_details
+                        FROM product_quantities
+                        GROUP BY date
+                    )
                     SELECT 
-                        DATE_TRUNC('day', s.created_at)::date as date,
-                        COALESCE(SUM(s.total_amount), 0) as amount,
-                        COUNT(DISTINCT s.id) as transaction_count,
-                        COUNT(DISTINCT si.product_id) as unique_products
-                    FROM sales s
-                    LEFT JOIN sale_items si ON s.id = si.sale_id
-                    WHERE s.created_at >= NOW() - INTERVAL '30 days'
-                    GROUP BY DATE_TRUNC('day', s.created_at)
-                    ORDER BY date DESC
+                        ds.date,
+                        ds.amount,
+                        ds.transaction_count,
+                        ds.unique_products,
+                        ds.items_sold,
+                        pd.items_details
+                    FROM daily_sales ds
+                    LEFT JOIN product_details pd ON ds.date = pd.date
+                    ORDER BY ds.date DESC
                     LIMIT %s OFFSET %s
                 """, [items_per_page, offset])
                 columns = [col[0] for col in cursor.description]

@@ -1,6 +1,6 @@
 // @ts-ignore
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Button } from '../components/ui/button';
 import SalesList from '../components/sales/SalesList';
@@ -13,6 +13,8 @@ const SalesPage = () => {
   const [activeTab, setActiveTab] = useState<string>('list');
   const { user } = useAuth();
   const canCreateSale = user?.role === 'admin' || user?.role === 'manager' || user?.role === 'staff';
+
+  const queryClient = useQueryClient();
 
   // Fetch sales
   const { data: sales = [], isLoading: isSalesLoading } = useQuery<Sale[]>({
@@ -27,7 +29,7 @@ const SalesPage = () => {
   });
 
   // Fetch products for product lookup
-  const { data: products = [], isLoading: isProductsLoading } = useQuery<Product[]>({
+  const { data: products = [], isLoading: isProductsLoading, refetch: refetchProducts } = useQuery<Product[]>({
     queryKey: ['/api/products/'],
     queryFn: () => apiRequest('/api/products/'),
     // Refetch every 5 seconds to ensure we have the latest prices
@@ -57,6 +59,13 @@ const SalesPage = () => {
     return acc;
   }, {} as Record<number, User>);
 
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+    if (tab === 'create') {
+      refetchProducts();
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -68,7 +77,7 @@ const SalesPage = () => {
         )}
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
+      <Tabs value={activeTab} onValueChange={handleTabChange}>
         <TabsList>
           <TabsTrigger value="list">Sales History</TabsTrigger>
           {canCreateSale && (

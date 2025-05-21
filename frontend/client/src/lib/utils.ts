@@ -6,10 +6,7 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export const formatCurrency = (amount: number): string => {
-    return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: 'USD'
-    }).format(amount);
+    return `KSh ${amount.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
 export const formatDate = (dateString: string): string => {

@@ -1,18 +1,18 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { formatCurrency, formatDate } from '@/lib/utils';
-import { ProductBatch } from '@/types/batch';
-import { apiRequest } from '@/lib/queryClient';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription as AlertDialogContentDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { useToast } from '@/hooks/use-toast';
-import { useAuth } from '@/lib/auth';
+import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
+import { Label } from '../ui/label';
+import { Badge } from '../ui/badge';
+import { formatCurrency, formatDate } from '../../lib/utils';
+import { ProductBatch } from '../../types/batch';
+import { apiRequest } from '../../lib/queryClient';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '../ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '../ui/alert-dialog';
+import { useToast } from '../../hooks/use-toast';
+import { useAuth } from '../../lib/auth';
 import { AlertTriangle } from 'lucide-react';
 
 interface ProductBatchesProps {
@@ -152,7 +152,7 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
                 title: 'Success',
                 description: 'Batch created successfully',
             });
-        } catch (err) {
+        } catch (err: any) {
             toast({
                 title: 'Error',
                 description: 'Failed to create batch. Please try again.',
@@ -171,12 +171,13 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
         try {
             await apiRequest(`/api/product-batches/${editingBatch.id}/`, {
                 method: 'PUT',
-                data: {
+                body: JSON.stringify({
                     ...editingBatch,
                     purchase_price: typeof editingBatch.purchase_price === 'number' ? editingBatch.purchase_price : parseFloat(String(editingBatch.purchase_price || 0)),
                     selling_price: editingBatch.selling_price !== null && editingBatch.selling_price !== undefined ? parseFloat(String(editingBatch.selling_price)) : null,
                     quantity: typeof editingBatch.quantity === 'number' ? editingBatch.quantity : parseInt(String(editingBatch.quantity || 0))
-                }
+                }),
+                headers: { 'Content-Type': 'application/json' }
             });
             queryClient.invalidateQueries({ queryKey: ['batches', productId] });
             queryClient.invalidateQueries({ queryKey: ['batch-stats', productId] });
@@ -403,8 +404,8 @@ export const ProductBatches: React.FC<ProductBatchesProps> = ({ productId }) => 
                             {batchesData.map((batch) => (
                                 <TableRow key={batch.id}>
                                     <TableCell>{batch.batch_number}</TableCell>
-                                    <TableCell>{formatCurrency(batch.purchase_price)}</TableCell>
-                                    <TableCell>{batch.selling_price ? formatCurrency(batch.selling_price) : '-'}</TableCell>
+                                    <TableCell className="text-right">{formatCurrency(batch.purchase_price)}</TableCell>
+                                    <TableCell className="text-right">{batch.selling_price !== undefined && batch.selling_price !== null ? formatCurrency(batch.selling_price) : '-'}</TableCell>
                                     <TableCell>{batch.quantity}</TableCell>
                                     <TableCell>{batch.remaining_quantity}</TableCell>
                                     <TableCell>{formatDate(batch.purchase_date)}</TableCell>

@@ -266,7 +266,7 @@ const Dashboard = () => {
                     changePeriod="from last month"
                 />
                 <StatCard
-                    title="Pending Orders"
+                    title="Completed Sales"
                     value={stats?.pendingOrders || 0}
                     icon="clock"
                     iconBg="bg-purple-100"

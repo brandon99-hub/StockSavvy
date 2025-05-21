@@ -31,6 +31,8 @@ import {
 } from 'recharts';
 import { exportInventoryToPDF, exportSalesToPDF, exportProfitToPDF, exportToCSV } from '../../lib/exportUtils';
 import { apiRequest } from '../../lib/queryClient';
+import { Eye } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose } from '../ui/dialog';
 
 // Define types for our data
 interface Product {
@@ -86,6 +88,10 @@ const ReportGenerator = () => {
     });
     const [calendarOpen, setCalendarOpen] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
+    const [modalPage, setModalPage] = useState(1);
+    const [viewModal, setViewModal] = useState<{ open: boolean, details: string, date: string, itemsSold: number } | null>(null);
+    const itemsPerPage = 6;
+    const modalItemsPerPage = 6;
 
     // Fetch data based on report type and pagination
     const { data: inventoryData, isLoading: isInventoryLoading } = useQuery({
@@ -195,11 +201,12 @@ const ReportGenerator = () => {
 
     const salesReportData = React.useMemo(() => {
         if (!Array.isArray(salesChartData)) return [];
-        
         return salesChartData.map(item => ({
             date: format(new Date(item.date), 'MMM dd, yyyy'),
             amount: parseFloat(item.amount),
-            count: item.transaction_count || 0
+            count: item.items_sold || 0,
+            details: item.items_details || '',
+            rawDate: item.date,
         }));
     }, [salesChartData]);
 
@@ -325,32 +332,20 @@ const ReportGenerator = () => {
         setCurrentPage(newPage);
     };
 
-    // Render pagination controls
-    const renderPagination = () => {
-        if (!inventoryData?.pagination) return null;
-        const { currentPage, totalPages } = inventoryData.pagination;
+    // Function to paginate items in the modal
+    const getPaginatedModalItems = (details: string) => {
+        if (!details) return [];
+        const items = details.split(', ');
+        const startIndex = (modalPage - 1) * modalItemsPerPage;
+        const endIndex = startIndex + modalItemsPerPage;
+        return items.slice(startIndex, endIndex);
+    };
 
-        return (
-            <div className="flex justify-center items-center gap-2 mt-4">
-                <Button
-                    variant="outline"
-                    onClick={() => handlePageChange(currentPage - 1)}
-                    disabled={currentPage <= 1}
-                >
-                    Previous
-                </Button>
-                <span className="text-sm">
-                    Page {currentPage} of {totalPages}
-                </span>
-                <Button
-                    variant="outline"
-                    onClick={() => handlePageChange(currentPage + 1)}
-                    disabled={currentPage >= totalPages}
-                >
-                    Next
-                </Button>
-            </div>
-        );
+    // Function to get total pages for modal
+    const getModalTotalPages = (details: string) => {
+        if (!details) return 1;
+        const items = details.split(', ');
+        return Math.ceil(items.length / modalItemsPerPage);
     };
 
     return (
@@ -427,7 +422,28 @@ const ReportGenerator = () => {
                       </tbody>
                     </table>
                   </div>
-                  {renderPagination()}
+                  {/* Pagination for inventory table */}
+                  {inventoryData?.pagination && (
+                    <div className="flex justify-center items-center gap-2 mt-4">
+                      <Button
+                        variant="outline"
+                        onClick={() => handlePageChange(inventoryData.pagination.currentPage - 1)}
+                        disabled={inventoryData.pagination.currentPage <= 1}
+                      >
+                        Previous
+                      </Button>
+                      <span className="text-sm">
+                        Page {inventoryData.pagination.currentPage} of {inventoryData.pagination.totalPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        onClick={() => handlePageChange(inventoryData.pagination.currentPage + 1)}
+                        disabled={inventoryData.pagination.currentPage >= inventoryData.pagination.totalPages}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  )}
                 </>
               )}
             </CardContent>
@@ -443,7 +459,7 @@ const ReportGenerator = () => {
               {isLoading ? (
                 <div className="flex justify-center items-center h-64">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-                                </div>
+                </div>
               ) : (
                 <div className="space-y-8">
                   <div className="h-[400px]">
@@ -455,9 +471,9 @@ const ReportGenerator = () => {
                         <Tooltip formatter={(value) => formatCurrency(Number(value))} />
                         <Legend />
                         <Line type="monotone" dataKey="amount" name="Sales Amount" stroke="#8884d8" />
-                                </LineChart>
-                            </ResponsiveContainer>
-                        </div>
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
                   <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
@@ -465,20 +481,97 @@ const ReportGenerator = () => {
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Items Sold</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">View</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {salesReportData.map((item, index) => (
+                        {salesReportData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((item, index) => (
                           <tr key={index}>
                             <td className="px-6 py-4 whitespace-nowrap">{item.date}</td>
                             <td className="px-6 py-4 whitespace-nowrap">{formatCurrency(item.amount)}</td>
                             <td className="px-6 py-4 whitespace-nowrap">{item.count}</td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                onClick={() => {
+                                    setModalPage(1);
+                                    setViewModal({ 
+                                        open: true, 
+                                        details: item.details, 
+                                        date: item.date, 
+                                        itemsSold: item.count 
+                                    });
+                                }}
+                              >
+                                <Eye className="w-5 h-5 text-blue-500" />
+                              </Button>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
-                                </div>
-                            </div>
+                    {/* Pagination for sales table */}
+                    <div className="flex justify-center items-center gap-2 mt-4">
+                      <Button
+                        variant="outline"
+                        onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                        disabled={currentPage <= 1}
+                      >
+                        Previous
+                      </Button>
+                      <span className="text-sm">
+                        Page {currentPage} of {Math.ceil(salesReportData.length / itemsPerPage)}
+                      </span>
+                      <Button
+                        variant="outline"
+                        onClick={() => setCurrentPage(prev => Math.min(Math.ceil(salesReportData.length / itemsPerPage), prev + 1))}
+                        disabled={currentPage >= Math.ceil(salesReportData.length / itemsPerPage)}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+                  {/* Modal for viewing items sold */}
+                  <Dialog open={!!viewModal} onOpenChange={() => setViewModal(null)}>
+                    <DialogContent className="max-w-lg">
+                      <DialogHeader>
+                        <DialogTitle>Items Sold on {viewModal?.date}</DialogTitle>
+                        <DialogDescription>
+                          <div className="mb-2 text-gray-700">Total Items Sold: <b>{viewModal?.itemsSold}</b></div>
+                          <div className="text-sm text-gray-600">
+                            {viewModal?.details && getPaginatedModalItems(viewModal.details).map((item, index) => (
+                              <div key={index} className="py-1">{item}</div>
+                            ))}
+                          </div>
+                          {/* Pagination for modal */}
+                          <div className="flex justify-center items-center gap-2 mt-4">
+                            <Button
+                              variant="outline"
+                              onClick={() => setModalPage(prev => Math.max(1, prev - 1))}
+                              disabled={modalPage <= 1}
+                            >
+                              Previous
+                            </Button>
+                            <span className="text-sm">
+                              Page {modalPage} of {getModalTotalPages(viewModal?.details || '')}
+                            </span>
+                            <Button
+                              variant="outline"
+                              onClick={() => setModalPage(prev => Math.min(getModalTotalPages(viewModal?.details || ''), prev + 1))}
+                              disabled={modalPage >= getModalTotalPages(viewModal?.details || '')}
+                            >
+                              Next
+                            </Button>
+                          </div>
+                        </DialogDescription>
+                      </DialogHeader>
+                      <DialogClose asChild>
+                        <Button variant="outline" className="mt-4 w-full">Close</Button>
+                      </DialogClose>
+                    </DialogContent>
+                  </Dialog>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -493,7 +586,7 @@ const ReportGenerator = () => {
               {isLoading ? (
                 <div className="flex justify-center items-center h-64">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-                        </div>
+                </div>
               ) : (
                 <div className="space-y-8">
                   <div className="h-[400px]">
@@ -505,9 +598,9 @@ const ReportGenerator = () => {
                         <Tooltip formatter={(value) => formatCurrency(Number(value))} />
                         <Legend />
                         <Bar dataKey="revenue" name="Revenue" fill="#8884d8" />
-                                </BarChart>
-                            </ResponsiveContainer>
-                        </div>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
                   <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
@@ -531,7 +624,7 @@ const ReportGenerator = () => {
                 </div>
               )}
             </CardContent>
-        </Card>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>
