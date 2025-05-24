@@ -1,0 +1,14 @@
+name: Trigger Forecast Generation
+
+on:
+  schedule:
+    - cron: '0 1 * * *'  # Runs every day at 1 AM UTC
+  workflow_dispatch:      # Allows manual triggering from GitHub UI
+
+jobs:
+  trigger-forecast:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call forecast endpoint
+        run: |
+          curl -X POST https://stocksavvy-ahtd.onrender.com/forecasts 

@@ -23,6 +23,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
+    'django_q',
 ]
 
 MIDDLEWARE = [
@@ -78,7 +79,19 @@ db_config.update({
 })
 
 DATABASES = {
-    'default': db_config
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'postgres',
+        'USER': 'postgres.tmfdwxfdtwjbulrwqmus',
+        'PASSWORD': 'Exlifes_6969',
+        'HOST': 'aws-0-eu-west-2.pooler.supabase.com',
+        'PORT': '6543',
+        'CONN_MAX_AGE': 60,  # Force reconnection every 60 seconds
+        'OPTIONS': {
+            'client_encoding': 'UTF8',
+            'sslmode': 'require'
+        },
+    }
 }
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -177,3 +190,31 @@ AUTHENTICATION_BACKENDS = [
 ]
 # Custom User Model
 AUTH_USER_MODEL = 'api.User'
+
+# Email Configuration
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'  # Or your SMTP server
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = ''  # Your email address
+EMAIL_HOST_PASSWORD = ''  # Your email password or app-specific password
+DEFAULT_FROM_EMAIL = ''  # Your email address
+
+# Django Q Configuration
+Q_CLUSTER = {
+    'name': 'StockSavvy',
+    'workers': 4,
+    'recycle': 500,
+    'timeout': 90,
+    'retry': 120,  # Added retry setting that's larger than timeout
+    'compress': True,
+    'save_limit': 250,
+    'queue_limit': 500,
+    'cpu_affinity': 1,
+    'label': 'Django Q',
+    'redis': {
+        'host': '127.0.0.1',
+        'port': 6379,
+        'db': 0,
+    }
+}

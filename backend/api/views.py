@@ -869,6 +869,104 @@ class ProductViewSet(viewsets.ModelViewSet):
             }
         })
 
+    @action(detail=True, methods=['post'])
+    def send_notification(self, request, pk=None):
+        """Send manual notification to supplier for low stock"""
+        is_authenticated, user_id, is_admin = self.check_token_auth(request)
+        if not is_authenticated:
+            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+        if not is_admin:
+            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            product = self.get_object()
+            
+            # Get the restock rule for this product
+            try:
+                restock_rule = RestockRule.objects.get(product=product)
+            except RestockRule.DoesNotExist:
+                return Response(
+                    {"detail": "No restock rule found for this product"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            # Check if supplier contact info exists
+            if not restock_rule.supplier_email and not restock_rule.supplier_phone:
+                return Response(
+                    {"detail": "No supplier contact information available"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Prepare notification data
+            notification_data = {
+                'product_name': product.name,
+                'current_stock': product.quantity,
+                'min_stock_level': product.min_stock_level,
+                'reorder_quantity': restock_rule.reorder_quantity,
+                'supplier_name': restock_rule.supplier_name,
+                'supplier_email': restock_rule.supplier_email,
+                'supplier_phone': restock_rule.supplier_phone
+            }
+
+            # Send email if supplier email exists
+            if restock_rule.supplier_email:
+                try:
+                    from django.core.mail import send_mail
+                    from django.conf import settings
+                    
+                    subject = f'Low Stock Alert: {product.name}'
+                    message = f'''
+                    Dear {restock_rule.supplier_name},
+
+                    This is a notification that the following product is running low on stock:
+
+                    Product: {product.name}
+                    Current Stock: {product.quantity}
+                    Minimum Stock Level: {product.min_stock_level}
+                    Recommended Reorder Quantity: {restock_rule.reorder_quantity}
+
+                    Please arrange for restocking at your earliest convenience.
+
+                    Best regards,
+                    StockSavvy System
+                    '''
+                    
+                    send_mail(
+                        subject,
+                        message,
+                        settings.DEFAULT_FROM_EMAIL,
+                        [restock_rule.supplier_email],
+                        fail_silently=False,
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to send email notification: {str(e)}")
+                    return Response(
+                        {"detail": f"Failed to send email notification: {str(e)}"},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                    )
+
+            # Create activity log for notification
+            Activity.objects.create(
+                type='restock_notification',
+                description=f'Restock notification sent for {product.name}',
+                product_id=product.id,
+                user_id=user_id,
+                created_at=timezone.now(),
+                status='completed'
+            )
+
+            return Response({
+                "message": "Notification sent successfully",
+                "notification_data": notification_data
+            })
+
+        except Exception as e:
+            logger.error(f"Error sending notification: {str(e)}")
+            return Response(
+                {"detail": f"Error sending notification: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 
 class SaleViewSet(viewsets.ModelViewSet):
     queryset = Sale.objects.all()

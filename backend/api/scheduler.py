@@ -1,7 +1,7 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from django.conf import settings
-from .tasks import generate_daily_forecasts
+from .tasks import generate_forecasts
 import logging
 
 logger = logging.getLogger(__name__)
@@ -12,7 +12,7 @@ def start_scheduler():
     
     # Add the forecast generation job to run at midnight every day
     scheduler.add_job(
-        generate_daily_forecasts,
+        generate_forecasts,
         trigger=CronTrigger(hour=0, minute=0),  # Run at midnight
         id='generate_forecasts',
         name='Generate daily product forecasts',
