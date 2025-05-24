@@ -18,7 +18,7 @@ python-dotenv==1.1.0
 pytz==2025.2
 redis==3.5.3
 sqlparse==0.5.3
--e git+https://github.com/brandon99-hub/StockSavvy.git@8529bbde26a6325fbf66bd985b5ab09db7e88da4#egg=stocksavvy
+-e git+https://github.com/brandon99-hub/StockSavvy.git@eb3652a22cb13fc304bcd05c7df7e097f334de1e#egg=stocksavvy
 typing_extensions==4.13.1
 tzdata==2025.2
 whitenoise==6.9.0

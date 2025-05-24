@@ -273,40 +273,6 @@ asgiref = ">=3.6"
 django = ">=4.2"
 
 [[package]]
-name = "django-picklefield"
-version = "3.3"
-description = "Pickled object field for Django"
-optional = false
-python-versions = ">=3.9"
-groups = ["main"]
-files = [
-    {file = "django-picklefield-3.3.tar.gz", hash = "sha256:4e76dd20f2e95ffdaf18d641226ccecc169ff0473b0d6bec746f3ab97c26b8cb"},
-    {file = "django_picklefield-3.3-py3-none-any.whl", hash = "sha256:d6f6fd94a17177fe0d16b0b452a9860b8a1da97b6e70633ab53ade4975f1ce9a"},
-]
-
-[package.dependencies]
-Django = ">=4.2"
-
-[package.extras]
-tests = ["tox"]
-
-[[package]]
-name = "django_q"
-version = "0.0.0"
-description = ""
-optional = false
-python-versions = "*"
-groups = ["main"]
-files = []
-develop = false
-
-[package.source]
-type = "git"
-url = "https://github.com/Koed00/django-q.git"
-reference = "master"
-resolved_reference = "85baaccd2c3adfe0a414d4237465163e9ff6e5a0"
-
-[[package]]
 name = "django-redis"
 version = "5.4.0"
 description = "Full featured redis cache backend for Django."
@@ -579,4 +545,4 @@ brotli = ["brotli"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "6072770746d4f9d076207796acd559f703d1e348ac3ddc26440b583eea207d8a"
+content-hash = "d59897105e509cf61104c58fd22fbe3451abc24129c7a2c65bda0efc7a04bac9"

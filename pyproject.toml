@@ -18,9 +18,7 @@ django-cors-headers = "^4.7.0"
 bcrypt = "^4.3.0"
 jwt = "^1.3.1"
 pytz = "^2025.2"
-django-q = { git = "https://github.com/Koed00/django-q.git", rev = "85baacc" }
 django-redis = "^5.4.0"
-django-picklefield = "^3.3"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
