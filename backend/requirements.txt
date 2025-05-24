@@ -5,6 +5,7 @@ cryptography==44.0.2
 dj-database-url==2.3.0
 Django==5.2
 django-cors-headers==4.7.0
+django-picklefield==3.3
 django-redis==5.4.0
 django_q @ git+https://github.com/Koed00/django-q.git@85baaccd2c3adfe0a414d4237465163e9ff6e5a0
 djangorestframework==3.16.0
@@ -17,7 +18,7 @@ python-dotenv==1.1.0
 pytz==2025.2
 redis==3.5.3
 sqlparse==0.5.3
--e git+https://github.com/brandon99-hub/StockSavvy.git@1e49978ecc80405f55728fea9ad710065994a57e#egg=stocksavvy
+-e git+https://github.com/brandon99-hub/StockSavvy.git@12871684655f39bc9cf34dfcab8adcc83764a722#egg=stocksavvy
 typing_extensions==4.13.1
 tzdata==2025.2
 whitenoise==6.9.0
