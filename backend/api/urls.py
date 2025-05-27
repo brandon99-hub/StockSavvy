@@ -4,8 +4,7 @@ from .views import (
     UserViewSet, CategoryViewSet, ProductViewSet, SaleViewSet,
     ActivityViewSet, RestockRuleViewSet, AnalyticsViewSet,
     ReportViewSet, SaleItemViewSet,
-    profit_report, test_connection, get_product_forecasts, all_product_forecasts,
-    run_forecasts
+    profit_report, test_connection, get_product_forecasts, all_product_forecasts
 )
 from .batch_views import ProductBatchViewSet, BatchSaleItemViewSet
 
@@ -35,6 +34,5 @@ urlpatterns = [
     path('products/<int:pk>/reorder/', ProductViewSet.as_view({'post': 'restock'}), name='product-restock'),
     path('products/<int:product_id>/forecasts/', get_product_forecasts, name='product-forecasts'),
     path('forecasts/', all_product_forecasts, name='all-product-forecasts'),
-    path('admin/run-forecasts/', run_forecasts, name='run-forecasts'),
     path('', include(router.urls)),
 ]

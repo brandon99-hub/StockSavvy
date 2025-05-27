@@ -10,5 +10,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Call forecast endpoint
+        env:
+          AUTH_TOKEN: ${{ secrets.FORECAST_AUTH_TOKEN }}
         run: |
-          curl -X POST https://stocksavvy-ahtd.onrender.com/forecasts 
+          echo "Starting forecast generation..."
+          response=$(curl -s -w "\n%{http_code}" -X POST https://stocksavvy-ahtd.onrender.com/api/products/run-forecasts/ \
+            -H "Authorization: Bearer ${{ secrets.FORECAST_AUTH_TOKEN }}" \
+            -H "Content-Type: application/json")
+          
+          # Extract status code and response body
+          status_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          
+          echo "Response status code: $status_code"
+          echo "Response body: $body"
+          
+          # Check if the request was successful
+          if [ "$status_code" -eq 200 ]; then
+            echo "Forecast generation completed successfully"
+            exit 0
+          else
+            echo "Forecast generation failed with status code $status_code"
+            echo "Error details: $body"
+            exit 1
+          fi 

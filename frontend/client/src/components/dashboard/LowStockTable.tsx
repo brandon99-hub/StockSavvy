@@ -28,17 +28,24 @@ interface LowStockTableProps {
   categories: Array<{ id: number; name: string }>;
 }
 
+// Extend the Product type to include category_name
+interface ExtendedProduct extends Omit<Product, 'category'> {
+  category_name?: string;
+  category: number | { id: number; name: string };
+}
+
 const LowStockTable: FC<LowStockTableProps> = ({ products, onReorder, categories }) => {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [reorderingProduct, setReorderingProduct] = useState<number | null>(null);
+  const [sendingNotification, setSendingNotification] = useState<number | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 6;
 
   // Get category name helper
-  const getCategoryName = (product: Product) => {
+  const getCategoryName = (product: ExtendedProduct): string => {
     // First check if we have category_name directly
-    if ('category_name' in product && product.category_name) {
+    if (product.category_name) {
       return product.category_name;
     }
     // Then check if we have a category object
@@ -80,6 +87,29 @@ const LowStockTable: FC<LowStockTableProps> = ({ products, onReorder, categories
     }
   };
 
+  const handleSendNotification = async (productId: number) => {
+    try {
+      setSendingNotification(productId);
+
+      await apiRequest(`/api/products/${productId}/send_notification/`, {
+        method: "POST",
+      });
+
+      toast({
+        title: "Success",
+        description: "Notification sent successfully",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to send notification",
+        variant: "destructive",
+      });
+    } finally {
+      setSendingNotification(null);
+    }
+  };
+
   // Filter and sort low stock products
   const lowStockProducts = products
     .filter(product => 
@@ -117,7 +147,7 @@ const LowStockTable: FC<LowStockTableProps> = ({ products, onReorder, categories
             <TableHead className="text-right">Current</TableHead>
             <TableHead className="text-right">Minimum</TableHead>
             <TableHead className="text-right">Status</TableHead>
-            <TableHead className="text-right">Action</TableHead>
+            <TableHead className="text-right">Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -160,7 +190,22 @@ const LowStockTable: FC<LowStockTableProps> = ({ products, onReorder, categories
                      "Low Stock"}
                   </Badge>
                 </TableCell>
-                <TableCell className="text-right">
+                <TableCell className="text-right space-x-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleSendNotification(product.id)}
+                    disabled={sendingNotification === product.id}
+                    className="w-32"
+                  >
+                    {sendingNotification === product.id ? (
+                      <>
+                        <span className="animate-pulse">Sending...</span>
+                      </>
+                    ) : (
+                      "Send Notification"
+                    )}
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
@@ -188,28 +233,29 @@ const LowStockTable: FC<LowStockTableProps> = ({ products, onReorder, categories
           <Pagination>
             <PaginationContent>
               <PaginationItem>
-                <PaginationPrevious
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                  className={currentPage <= 1 ? 'opacity-50 cursor-not-allowed' : ''}
-                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                >
+                  Previous
+                </Button>
               </PaginationItem>
-              {Array.from({length: Math.min(totalPages, 3)}).map((_, index) => (
-                <PaginationItem key={index}>
-                  <Button
-                    variant={currentPage === index + 1 ? 'outline' : 'ghost'}
-                    size="icon"
-                    onClick={() => setCurrentPage(index + 1)}
-                    className="w-8 h-8"
-                  >
-                    {index + 1}
-                  </Button>
-                </PaginationItem>
-              ))}
               <PaginationItem>
-                <PaginationNext
-                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                  className={currentPage >= totalPages ? 'opacity-50 cursor-not-allowed' : ''}
-                />
+                <span className="px-4">
+                  Page {currentPage} of {totalPages}
+                </span>
+              </PaginationItem>
+              <PaginationItem>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                >
+                  Next
+                </Button>
               </PaginationItem>
             </PaginationContent>
           </Pagination>

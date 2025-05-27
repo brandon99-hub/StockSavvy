@@ -11,6 +11,7 @@ import {
   Tooltip,
   Filler,
 } from 'chart.js';
+import { getProductIcon, getIconColor } from '../utils/iconMapper';
 
 ChartJS.register(LineElement, PointElement, CategoryScale, LinearScale, Legend, Tooltip, Filler);
 
@@ -48,9 +49,6 @@ const COLORS = [
   'bg-pink-100',
   'bg-indigo-100',
   'bg-teal-100',
-];
-const ICONS = [
-  '📦', '🛒', '👕', '👟', '🎽', '🧢', '👜',
 ];
 
 const ForecastsPage = () => {
@@ -203,13 +201,16 @@ const ForecastsPage = () => {
             {paginatedProducts.map((p, idx) => {
               const cardDates = getCardDates(p.product_id);
               const color = COLORS[idx % COLORS.length];
-              const icon = ICONS[idx % ICONS.length];
+              const Icon = getProductIcon(p.product_name, p.category_name);
+              const iconColor = getIconColor(p.category_name);
               return (
                 <div
                   key={p.product_id}
                   className={`relative group bg-white rounded-2xl shadow-lg flex flex-col h-full border-t-4 ${color} transition-transform hover:-translate-y-1 hover:shadow-2xl`}
                 >
-                  <div className="absolute -top-6 left-6 text-4xl select-none">{icon}</div>
+                  <div className="absolute -top-6 left-6 text-4xl select-none">
+                    <Icon className="w-10 h-10" style={{ color: '#374151' }} />
+                  </div>
                   <div className="p-6 pt-10 flex-1 flex flex-col">
                     <div className="mb-2 flex items-center gap-2">
                       <span className="text-lg font-bold text-blue-900 truncate" title={p.product_name}>{p.product_name}</span>

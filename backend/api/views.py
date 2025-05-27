@@ -27,6 +27,7 @@ from django.core.exceptions import ValidationError
 import pytz
 import traceback
 from django.core.management import call_command
+from django.views.decorators.csrf import csrf_exempt
 
 User = get_user_model()
 
@@ -966,6 +967,28 @@ class ProductViewSet(viewsets.ModelViewSet):
                 {"detail": f"Error sending notification: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+    @action(detail=False, methods=['post'], url_path='run-forecasts')
+    def run_forecasts(self, request):
+        """Generate forecasts for all products"""
+        is_authenticated, user_id, is_admin = self.check_token_auth(request)
+        if not is_authenticated:
+            return Response({'detail': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+        if not is_admin:
+            return Response({'detail': 'Permission denied. Only admin and manager roles can generate forecasts.'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            # Call the management command
+            from django.core.management import call_command
+            call_command('generate_forecasts')
+            return Response({
+                'status': 'success',
+                'message': 'Forecasts generated successfully'
+            })
+        except Exception as e:
+            return Response({
+                'status': 'error',
+                'message': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class SaleViewSet(viewsets.ModelViewSet):
@@ -2527,43 +2550,3 @@ def all_product_forecasts(request):
             'total_pages': (total + limit - 1) // limit
         }
     })
-
-@api_view(['POST'])
-def run_forecasts(request):
-    print("Headers received:", request.headers)
-    def check_token_auth(request):
-        auth_header = request.headers.get('Authorization')
-        print("Authorization header:", auth_header)
-        if not auth_header or not auth_header.startswith('Bearer '):
-            return False, None, False
-        token = auth_header.split(' ')[1]
-        print("Token:", token)
-        if not token:
-            return False, None, False
-        parts = token.split('_')
-        user_id = int(parts[1]) if len(parts) > 1 else None
-        print("Parsed user_id:", user_id)
-        from django.db import connection
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT role FROM users WHERE id = %s",
-                [user_id]
-            )
-            row = cursor.fetchone()
-            print("DB row:", row)
-            if row and row[0] in ['admin', 'manager']:
-                return True, user_id, True
-        return False, None, False
-
-    is_authenticated, user_id, is_admin = check_token_auth(request)
-    print("is_authenticated:", is_authenticated, "user_id:", user_id, "is_admin:", is_admin)
-    if not is_authenticated:
-        return Response({'detail': 'Authentication required'}, status=401)
-    if not is_admin:
-        return Response({'detail': 'Permission denied'}, status=403)
-    try:
-        from django.core.management import call_command
-        call_command('generate_forecasts')
-        return Response({'status': 'success', 'message': 'Forecasts generated successfully'})
-    except Exception as e:
-        return Response({'status': 'error', 'message': str(e)}, status=500)

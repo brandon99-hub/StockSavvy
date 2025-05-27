@@ -252,13 +252,16 @@ const AddProductForm = ({ categories, editProduct, onCancel }: AddProductFormPro
     if (/^[A-Za-z]{1,3}[0-9]+$/.test(sku)) {
       return null;
     }
+    if (/^[0-9]+$/.test(sku)) {
+      return null;
+    }
     if (/^[A-Za-z]{1,}$/.test(sku)) {
       return "SKU must end with a number for auto-generation. You can disable auto-generation or change the SKU.";
     }
     if (/[0-9].*[A-Za-z]/.test(sku) || /^[A-Za-z]{4,}/.test(sku)) {
       return "SKU must have up to 3 letters at the start, followed by numbers only. No numbers allowed between letters.";
     }
-    return "Invalid SKU format. Use up to 3 letters followed by numbers (e.g., ABC001).";
+    return "Invalid SKU format. Use up to 3 letters followed by numbers (e.g., ABC001) or only numbers (e.g., 002).";
   }
 
   return (

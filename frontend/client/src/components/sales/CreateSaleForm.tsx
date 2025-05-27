@@ -58,7 +58,7 @@ import {
 import {Popover, PopoverContent, PopoverTrigger} from '../ui/popover';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '../ui/dialog';
 
-const STORE_NAME = "Mahatma Clothing";
+const STORE_NAME = "Working Wave";
 
 type SaleItem = {
     productId: number;

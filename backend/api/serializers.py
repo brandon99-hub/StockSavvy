@@ -83,11 +83,13 @@ class ProductSerializer(serializers.ModelSerializer):
     def validate_hybrid_sku(self, sku):
         if re.fullmatch(r'^[A-Za-z]{1,3}[0-9]+$', sku):
             return True, None
+        if re.fullmatch(r'^[0-9]+$', sku):
+            return True, None
         if re.fullmatch(r'^[A-Za-z]{1,}$', sku):
             return False, "SKU must end with a number for auto-generation. You can disable auto-generation or change the SKU."
         if re.search(r'[0-9].*[A-Za-z]', sku) or re.match(r'^[A-Za-z]{4,}', sku):
             return False, "SKU must have up to 3 letters at the start, followed by numbers only. No numbers allowed between letters."
-        return False, "Invalid SKU format. Use up to 3 letters followed by numbers (e.g., ABC001)."
+        return False, "Invalid SKU format. Use up to 3 letters followed by numbers (e.g., ABC001) or only numbers (e.g., 002)."
 
     def create(self, validated_data):
         # Outlier price detection
