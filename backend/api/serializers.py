@@ -2,7 +2,8 @@ from django.contrib.auth.hashers import make_password
 from rest_framework import serializers
 from .models import (
     User, Category, Product, RestockRule,
-    SaleItem, Sale, Activity, ProductForecast
+    SaleItem, Sale, Activity, ProductForecast,
+    Shop, ShopInventory, Customer, PaymentMethod, SalePayment, CreditTransaction
 )
 import datetime
 from django.utils import timezone
@@ -13,20 +14,128 @@ import logging
 from .utils import to_nairobi
 import pytz
 import re
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
 
+# Utility function for price outlier detection
+def is_price_outlier(product_name, category_id, price):
+    """
+    Detect if a price is an outlier compared to similar products in the same category.
+    Uses IQR (Interquartile Range) method.
+    Returns: (is_outlier: bool, stats: dict)
+    """
+    try:
+        # Get prices of products in the same category
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT sell_price FROM products 
+                WHERE category_id = %s AND sell_price > 0
+            """, [category_id])
+            prices = [float(row[0]) for row in cursor.fetchall()]
+        
+        if len(prices) < 3:
+            # Not enough data to determine outliers
+            return False, {'message': 'Insufficient data for outlier detection'}
+        
+        # Calculate IQR
+        q1 = np.percentile(prices, 25)
+        q3 = np.percentile(prices, 75)
+        iqr = q3 - q1
+        
+        # Calculate bounds
+        lower_bound = q1 - 1.5 * iqr
+        upper_bound = q3 + 1.5 * iqr
+        
+        # Check if price is an outlier
+        is_outlier = price < lower_bound or price > upper_bound
+        
+        return is_outlier, {
+            'lower_bound': lower_bound,
+            'upper_bound': upper_bound,
+            'q1': q1,
+            'q3': q3,
+            'iqr': iqr
+        }
+    except Exception as e:
+        logger.error(f"Error in price outlier detection: {str(e)}")
+        return False, {'error': str(e)}
+
+
+# ============ NEW: Shop Serializers ============
+class ShopSerializer(serializers.ModelSerializer):
+    manager_name = serializers.CharField(source='manager.name', read_only=True)
+    
+    class Meta:
+        model = Shop
+        fields = ['id', 'name', 'code', 'location', 'phone', 'manager', 'manager_name', 'is_active', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
+
+
+class ShopInventorySerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source='product.name', read_only=True)
+    product_sku = serializers.CharField(source='product.sku', read_only=True)
+    product_barcode = serializers.CharField(source='product.barcode', read_only=True)
+    
+    class Meta:
+        model = ShopInventory
+        fields = ['id', 'shop', 'product', 'product_name', 'product_sku', 'product_barcode', 
+                  'quantity', 'min_stock_level', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
+
+
+class CustomerSerializer(serializers.ModelSerializer):
+    shop_name = serializers.CharField(source='shop.name', read_only=True)
+    
+    class Meta:
+        model = Customer
+        fields = ['id', 'shop', 'shop_name', 'name', 'phone', 'id_number', 
+                  'credit_limit', 'current_balance', 'status', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at', 'current_balance']
+
+
+class PaymentMethodSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PaymentMethod
+        fields = ['id', 'name', 'code', 'is_active', 'created_at']
+        read_only_fields = ['created_at']
+
+
+class SalePaymentSerializer(serializers.ModelSerializer):
+    payment_method_name = serializers.CharField(source='payment_method.name', read_only=True)
+    
+    class Meta:
+        model = SalePayment
+        fields = ['id', 'sale', 'payment_method', 'payment_method_name', 'amount', 'reference_number', 'created_at']
+        read_only_fields = ['created_at']
+
+
+class CreditTransactionSerializer(serializers.ModelSerializer):
+    customer_name = serializers.CharField(source='customer.name', read_only=True)
+    created_by_name = serializers.CharField(source='created_by.name', read_only=True)
+    
+    class Meta:
+        model = CreditTransaction
+        fields = ['id', 'customer', 'customer_name', 'shop', 'sale', 'transaction_type', 
+                  'amount', 'balance_after', 'payment_method', 'notes', 'created_by', 
+                  'created_by_name', 'created_at']
+        read_only_fields = ['created_at']
+
+
+# ============ UPDATED: User Serializer ============
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(
         write_only=True,
         required=False,
         style={'input_type': 'password'}
     )
+    shop_name = serializers.CharField(source='shop.name', read_only=True)
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'password', 'name', 'role', 'is_staff', 'is_superuser']
+        fields = ['id', 'username', 'password', 'name', 'email', 'role', 'is_staff', 'is_superuser', 
+                  'shop', 'shop_name', 'can_access_all_shops', 'created_at']
         extra_kwargs = {
             'password': {'write_only': True}
         }
@@ -65,20 +174,44 @@ class CategorySerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 
+# ============ UPDATED: Product Serializer ============
 class ProductSerializer(serializers.ModelSerializer):
     category = CategorySerializer(read_only=True)
     category_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     buy_price = serializers.DecimalField(max_digits=10, decimal_places=2, coerce_to_string=False)
     sell_price = serializers.DecimalField(max_digits=10, decimal_places=2, coerce_to_string=False)
     
+    # Computed fields for quantity tracking
+    shop_total_quantity = serializers.SerializerMethodField()
+    has_mismatch = serializers.SerializerMethodField()
+    quantity_diff = serializers.SerializerMethodField()
+    has_shop_inventory = serializers.SerializerMethodField()
+    
+    def get_shop_total_quantity(self, obj):
+        return obj.get_shop_total_quantity()
+    
+    def get_has_mismatch(self, obj):
+        return obj.has_quantity_mismatch()
+    
+    def get_quantity_diff(self, obj):
+        return obj.quantity_difference()
+    
+    def get_has_shop_inventory(self, obj):
+        from .models import ShopInventory
+        return ShopInventory.objects.filter(product=obj).exists()
+    
     class Meta:
         model = Product
         fields = [
             'id', 'name', 'sku', 'description', 'category', 'category_id',
-            'quantity', 'min_stock_level', 'buy_price', 'sell_price',
-            'created_at', 'updated_at'
+            'min_stock_level', 'buy_price', 'sell_price',
+            'carton_buy_price', 'carton_sell_price',
+            'barcode', 'bc_item_no', 'last_bc_sync',
+            'uom_type', 'pieces_per_carton', 'uom_data',
+            'master_quantity', 'shop_total_quantity', 'has_mismatch', 'quantity_diff',
+            'has_shop_inventory', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at', 'last_bc_sync', 'shop_total_quantity', 'has_mismatch', 'quantity_diff', 'has_shop_inventory']
 
     def validate_hybrid_sku(self, sku):
         if re.fullmatch(r'^[A-Za-z]{1,3}[0-9]+$', sku):
@@ -92,19 +225,6 @@ class ProductSerializer(serializers.ModelSerializer):
         return False, "Invalid SKU format. Use up to 3 letters followed by numbers (e.g., ABC001) or only numbers (e.g., 002)."
 
     def create(self, validated_data):
-        # Outlier price detection
-        name = validated_data.get('name')
-        category_id = validated_data.get('category_id')
-        sell_price = float(validated_data.get('sell_price', 0))
-        force = self.context.get('force', False)
-        if name and category_id and sell_price > 0 and not force:
-            is_outlier, stats = is_price_outlier(name, category_id, sell_price)
-            if is_outlier:
-                raise serializers.ValidationError({
-                    'sell_price': [
-                        f"Warning: The selling price ({sell_price}) is an outlier for similar products in this category. Typical range: {stats['lower_bound']:.2f} - {stats['upper_bound']:.2f}. If you are sure, you can override this warning."
-                    ]
-                })
         try:
             # Check if SKU is provided
             sku = validated_data.get('sku')
@@ -134,25 +254,36 @@ class ProductSerializer(serializers.ModelSerializer):
             with connection.cursor() as cursor:
                 cursor.execute("""
                     INSERT INTO products (
-                        sku, name, description, category_id, quantity, 
-                        min_stock_level, buy_price, sell_price, created_at, updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        sku, name, description, category_id, 
+                        min_stock_level, buy_price, sell_price, 
+                        carton_buy_price, carton_sell_price,
+                        barcode, bc_item_no, last_bc_sync,
+                        uom_type, pieces_per_carton, master_quantity,
+                        created_at, updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                 """, [
                     validated_data.get('sku'),
                     validated_data.get('name'),
                     validated_data.get('description'),
                     validated_data.get('category_id'),
-                    validated_data.get('quantity', 0),
                     validated_data.get('min_stock_level', 0),
                     validated_data.get('buy_price', 0),
                     validated_data.get('sell_price', 0),
+                    validated_data.get('carton_buy_price'),
+                    validated_data.get('carton_sell_price'),
+                    validated_data.get('barcode'),
+                    validated_data.get('bc_item_no'),
+                    validated_data.get('last_bc_sync'),
+                    validated_data.get('uom_type', 'PCS'),
+                    validated_data.get('pieces_per_carton', 1),
+                    validated_data.get('master_quantity', 0),
                     validated_data.get('created_at'),
                     validated_data.get('updated_at')
                 ])
                 product_id = cursor.fetchone()[0]
 
-            # Return the created Product instance, not a dict!
+            # Return the created Product instance
             return Product.objects.get(id=product_id)
 
         except Exception as e:
@@ -160,19 +291,6 @@ class ProductSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(f"Error creating product: {str(e)}")
 
     def update(self, instance, validated_data):
-        # Outlier price detection
-        name = validated_data.get('name', instance.name)
-        category_id = validated_data.get('category_id', instance.category_id)
-        sell_price = float(validated_data.get('sell_price', instance.sell_price))
-        force = self.context.get('force', False)
-        if name and category_id and sell_price > 0 and not force:
-            is_outlier, stats = is_price_outlier(name, category_id, sell_price)
-            if is_outlier:
-                raise serializers.ValidationError({
-                    'sell_price': [
-                        f"Warning: The selling price ({sell_price}) is an outlier for similar products in this category. Typical range: {stats['lower_bound']:.2f} - {stats['upper_bound']:.2f}. If you are sure, you can override this warning."
-                    ]
-                })
         category_id = validated_data.pop('category_id', None)
         if category_id is not None:
             try:
@@ -194,7 +312,7 @@ class ProductSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         data = super().to_representation(instance)
         # Convert date fields to Nairobi timezone
-        for field in ['created_at', 'updated_at']:
+        for field in ['created_at', 'updated_at', 'last_bc_sync']:
             if data.get(field):
                 data[field] = to_nairobi(getattr(instance, field)).isoformat() if getattr(instance, field) else None
         return data
@@ -220,10 +338,13 @@ class SaleItemSerializer(serializers.ModelSerializer):
         fields = ['id', 'sale', 'product', 'quantity', 'unit_price', 'total_price']
 
 
+# ============ UPDATED: Sale Serializer ============
 class SaleSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     user_id = serializers.IntegerField(write_only=True)
     items = SaleItemSerializer(many=True, read_only=True)
+    shop_name = serializers.CharField(source='shop.name', read_only=True)
+    customer_name = serializers.CharField(source='customer.name', read_only=True)
     total_amount = serializers.DecimalField(max_digits=10, decimal_places=2, coerce_to_string=True)
     discount = serializers.DecimalField(max_digits=10, decimal_places=2, coerce_to_string=True, required=False)
     discount_percentage = serializers.DecimalField(max_digits=10, decimal_places=2, coerce_to_string=True, required=False)
@@ -235,7 +356,9 @@ class SaleSerializer(serializers.ModelSerializer):
         model = Sale
         fields = [
             'id', 'sale_date', 'total_amount', 'user', 'user_id', 'created_at',
-            'discount', 'discount_percentage', 'original_amount', 'items'
+            'discount', 'discount_percentage', 'original_amount', 'items',
+            'shop', 'shop_name', 'customer', 'customer_name', 
+            'payment_status', 'amount_paid', 'amount_credit'
         ]
 
     def create(self, validated_data):
@@ -249,7 +372,7 @@ class SaleSerializer(serializers.ModelSerializer):
             if data.get(field):
                 data[field] = to_nairobi(getattr(instance, field)).isoformat() if getattr(instance, field) else None
         # Convert decimal fields to strings to avoid serialization issues
-        for field in ['total_amount', 'discount', 'discount_percentage', 'original_amount']:
+        for field in ['total_amount', 'discount', 'discount_percentage', 'original_amount', 'amount_paid', 'amount_credit']:
             if field in data and data[field] is not None:
                 data[field] = str(data[field])
         return data
@@ -259,11 +382,12 @@ class ActivitySerializer(serializers.ModelSerializer):
     product = ProductSerializer(read_only=True)
     user = UserSerializer(read_only=True)
     user_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    shop_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     created_at = serializers.DateTimeField(format='iso-8601', required=False)
     
     class Meta:
         model = Activity
-        fields = ['id', 'type', 'description', 'product', 'user', 'user_id', 'created_at', 'status']
+        fields = ['id', 'type', 'description', 'product', 'user', 'user_id', 'shop', 'shop_id', 'created_at', 'status']
 
     def create(self, validated_data):
         user_id = validated_data.pop('user_id', None)
@@ -296,40 +420,4 @@ class ActivitySerializer(serializers.ModelSerializer):
 class ProductForecastSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductForecast
-        fields = ['id', 'forecast_date', 'forecast_quantity', 'created_at', 'model_info'] 
-
-def is_price_outlier(name, category_id, sell_price):
-    """
-    Check if the given sell_price is an outlier for products with the same category and similar name.
-    Uses IQR (interquartile range) for robust outlier detection.
-    Returns (is_outlier: bool, stats: dict)
-    """
-    # Find similar products by category and name (case-insensitive, partial match)
-    name_pattern = f"%{name.split()[0]}%" if name else "%"
-    with connection.cursor() as cursor:
-        cursor.execute('''
-            SELECT sell_price FROM products
-            WHERE category_id = %s AND LOWER(name) LIKE LOWER(%s) AND sell_price > 0
-        ''', [category_id, name_pattern])
-        prices = [float(row[0]) for row in cursor.fetchall()]
-
-    if len(prices) < 5:
-        # Not enough data to judge outliers
-        return False, {"reason": "not enough data", "n": len(prices)}
-
-    prices.sort()
-    q1 = prices[len(prices)//4]
-    q3 = prices[3*len(prices)//4]
-    iqr = q3 - q1
-    lower_bound = q1 - 1.5 * iqr
-    upper_bound = q3 + 1.5 * iqr
-    is_outlier = sell_price < lower_bound or sell_price > upper_bound
-    return is_outlier, {
-        "q1": q1,
-        "q3": q3,
-        "iqr": iqr,
-        "lower_bound": lower_bound,
-        "upper_bound": upper_bound,
-        "n": len(prices),
-        "prices": prices[:10]  # sample
-    } 
+        fields = ['id', 'forecast_date', 'forecast_quantity', 'created_at', 'model_info']

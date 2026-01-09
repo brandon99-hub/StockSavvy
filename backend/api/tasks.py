@@ -83,7 +83,7 @@ def check_low_stock():
                 This is a notification that the following product is running low on stock:
 
                 Product: {product.name}
-                Current Stock: {product.quantity}
+                Current Stock: {product.master_quantity}
                 Minimum Stock Level: {product.min_stock_level}
                 Recommended Reorder Quantity: {restock_rule.reorder_quantity}
 

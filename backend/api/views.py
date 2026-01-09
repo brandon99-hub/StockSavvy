@@ -1,11 +1,12 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, IsAdminUser, BasePermission
+from rest_framework.permissions import IsAuthenticated, IsAdminUser, BasePermission, AllowAny
+from .permissions import IsSystemAdmin, IsShopManager, IsShopStaff, HasShopAccess
 from django.contrib.auth import login, logout, get_user_model, authenticate
-from django.db.models import Sum, F, Count
+from django.db.models import Sum, F, Count, Q
 from django.db.models.functions import TruncDate
-from .models import Category, Product, Sale, SaleItem, Activity, RestockRule, ProductForecast
+from .models import Category, Product, Sale, SaleItem, Activity, RestockRule, ProductForecast, Customer, CreditTransaction
 from .serializers import (
     UserSerializer, CategorySerializer, ProductSerializer,
     SaleSerializer, SaleItemSerializer, ActivitySerializer,
@@ -16,11 +17,12 @@ import datetime
 from django.db import connection
 from rest_framework.authtoken.models import Token
 from django.utils import timezone
-import decimal
+from decimal import Decimal
 from django.views.generic import TemplateView
 from django.conf import settings
 from django.db import models
 from django.db import transaction
+from .services.bc_sync import BCSyncService
 import logging
 from rest_framework.exceptions import APIException
 from django.core.exceptions import ValidationError
@@ -49,18 +51,6 @@ class FrontendAppView(TemplateView):
     template_name = "index.html"
 
 
-class IsAdminOrManager(BasePermission):
-    """
-    Custom permission to only allow admin or manager users to access the view.
-    """
-
-    def has_permission(self, request, view):
-        # Check if user is authenticated
-        if not request.user.is_authenticated:
-            return False
-
-        # Check if user has admin or manager role
-        return request.user.role in ['admin', 'manager']
 
 
 @api_view(['GET'])
@@ -74,56 +64,43 @@ def test_connection(request):
 
 class UserViewSet(viewsets.ModelViewSet):
     serializer_class = UserSerializer
-    permission_classes = []
+
+    def get_permissions(self):
+        if self.action in ['login']:
+            return [AllowAny()]
+        if self.action in ['create', 'destroy']:
+            return [IsSystemAdmin()]
+        if self.action in ['update', 'partial_update']:
+            # Either admin, or user updating themselves
+            return [IsAuthenticated()]
+        return [IsAuthenticated()]
 
     def get_queryset(self):
-        return User.objects.all().only(
-            'id', 'username', 'role', 'name', 'is_staff', 'is_superuser'
-        )
-
-    def check_token_auth(self, request):
-        try:
-            auth_header = request.headers.get('Authorization')
-            if not auth_header or not auth_header.startswith('Bearer '):
-                return False, None, False
-            token = auth_header.split(' ')[1]
-            if not token:
-                return False, None, False
-            parts = token.split('_')
-            user_id = int(parts[1]) if len(parts) > 1 else None
-            return True, user_id, True
-        except Exception as e:
-            return False, None, False
+        shop_id = self.request.query_params.get('shop')
+        queryset = User.objects.all().select_related('shop')
+        
+        if shop_id and shop_id != 'all':
+            # If a shop is specified, prioritize managers and staff
+            queryset = queryset.filter(shop_id=shop_id, role__in=['manager', 'staff'])
+            
+        return queryset
 
     def list(self, request, *args, **kwargs):
-        is_authenticated, _, _ = self.check_token_auth(request)
-        if is_authenticated:
-            queryset = self.filter_queryset(self.get_queryset())
-            serializer = self.get_serializer(queryset, many=True)
-            return Response(serializer.data)
-        return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-
-    def create(self, request, *args, **kwargs):
-        is_authenticated, user_id, is_admin = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin:
-            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-        return super().create(request, *args, **kwargs)
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
 
     def update(self, request, *args, **kwargs):
-        is_authenticated, user_id, is_admin = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin and str(user_id) != str(kwargs.get('pk')):
+        user = self.get_object()
+        # Only admin can update others. Users can update themselves.
+        if request.user.role != 'admin' and request.user.id != user.id:
             return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
         return super().update(request, *args, **kwargs)
 
     def partial_update(self, request, *args, **kwargs):
-        is_authenticated, user_id, is_admin = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin and str(user_id) != str(kwargs.get('pk')):
+        user = self.get_object()
+        # Only admin can update others. Users can update themselves.
+        if request.user.role != 'admin' and request.user.id != user.id:
             return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
         return super().partial_update(request, *args, **kwargs)
 
@@ -196,46 +173,32 @@ class UserViewSet(viewsets.ModelViewSet):
         return Response({'message': 'Logged out successfully'})
 
     def destroy(self, request, *args, **kwargs):
-        is_authenticated, user_id, is_admin = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin:
-            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-
         try:
-            # Get the product before deletion
             instance = self.get_object()
-            product_name = instance.name
-            product_id = instance.id
+            username = instance.username
+            
+            # Prevent self-deletion
+            if instance.id == request.user.id:
+                return Response({"detail": "You cannot delete your own account"}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Start a transaction
-            with transaction.atomic():
-                # Delete related activities first
-                with connection.cursor() as cursor:
-                    # Delete related sale items
-                    cursor.execute("DELETE FROM sale_items WHERE product_id = %s", [product_id])
+            # Delete the user
+            instance.delete()
 
-                    # Delete related activities
-                    cursor.execute("DELETE FROM activities WHERE product_id = %s", [product_id])
+            # Create activity log
+            Activity.objects.create(
+                type='user_deleted',
+                description=f'User deleted: {username}',
+                user=request.user,
+                created_at=timezone.now(),
+                status='completed'
+            )
 
-                    # Delete the product
-                    cursor.execute("DELETE FROM products WHERE id = %s", [product_id])
-
-                # Create final deletion activity log
-                Activity.objects.create(
-                    type='product_deleted',
-                    description=f'Product deleted: {product_name}',
-                    user_id=user_id,
-                    created_at=timezone.now(),
-                    status='completed'
-                )
-
-            return Response({"message": "Product deleted successfully"}, status=status.HTTP_200_OK)
+            return Response({"message": "User deleted successfully"}, status=status.HTTP_200_OK)
 
         except Exception as e:
-            print(f"Error deleting product: {str(e)}")
+            print(f"Error deleting user: {str(e)}")
             return Response(
-                {"detail": f"Error deleting product: {str(e)}"},
+                {"detail": f"Error deleting user: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -243,70 +206,21 @@ class UserViewSet(viewsets.ModelViewSet):
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
-    permission_classes = []
 
-    def check_token_auth(self, request):
-        auth_header = request.headers.get('Authorization')
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(' ')[1]
-            if token and token.startswith('token_'):
-                try:
-                    parts = token.split('_')
-                    if len(parts) >= 2:
-                        user_id = int(parts[1])
-                        # Get user from database to check admin status
-                        with connection.cursor() as cursor:
-                            cursor.execute(
-                                "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
-                                [user_id]
-                            )
-                            row = cursor.fetchone()
-                            if row:
-                                is_staff, is_superuser, role = row
-                                # Allow access if user is staff, superuser, or has admin role
-                                is_authorized = is_staff or is_superuser or (role and role.lower() == 'admin')
-                                return True, user_id, is_authorized
-                except (IndexError, ValueError) as e:
-                    print(f"Token validation error: {str(e)}")
-                    pass
-        return False, None, False
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [IsSystemAdmin()]
+        return [IsAuthenticated()]
 
     def list(self, request, *args, **kwargs):
-        is_authenticated, user_id, _ = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response(
-                {"detail": "Authentication required"},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-        return super().list(request, *args, **kwargs)
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
 
     def create(self, request, *args, **kwargs):
-        is_authenticated, user_id, is_admin = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response(
-                {"detail": "Authentication required"},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-        if not is_admin:
-            return Response(
-                {"detail": "Permission denied"},
-                status=status.HTTP_403_FORBIDDEN
-            )
         return super().create(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
-        is_authenticated, user_id, is_admin = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response(
-                {"detail": "Authentication required"},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-        if not is_admin:
-            return Response(
-                {"detail": "Permission denied"},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
         try:
             # Get the category before deletion
             instance = self.get_object()
@@ -333,7 +247,7 @@ class CategoryViewSet(viewsets.ModelViewSet):
             Activity.objects.create(
                 type='category_deleted',
                 description=f'Category deleted: {category_name}',
-                user_id=user_id,
+                user=self.request.user,
                 created_at=timezone.now(),
                 status='completed'
             )
@@ -351,60 +265,16 @@ class CategoryViewSet(viewsets.ModelViewSet):
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
-    permission_classes = []
 
-    def check_token_auth(self, request):
-        try:
-            auth_header = request.headers.get('Authorization')
-            if not auth_header or not auth_header.startswith('Bearer '):
-                logger.warning('Missing or invalid authorization header')
-                return False, None, False
-
-            token = auth_header.split(' ')[1]
-            if not token:
-                logger.warning('Invalid token format')
-                return False, None, False
-
-            try:
-                parts = token.split('_')
-                user_id = int(parts[1]) if len(parts) > 1 else None
-
-                # For receipt endpoint, we only need authentication, not authorization
-                if request.resolver_match and request.resolver_match.url_name == 'sale-receipt':
-                    return True, user_id, True
-
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
-                        [user_id]
-                    )
-                    row = cursor.fetchone()
-                    if row:
-                        is_staff, is_superuser, role = row
-                        # Allow access if user is staff, superuser, admin, or manager
-                        is_authorized = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager', 'staff'])
-                        return True, user_id, is_authorized
-                return False, None, False
-            except (IndexError, ValueError) as e:
-                logger.warning(f'Error parsing token: {str(e)}')
-                return False, None, False
-        except Exception as e:
-            logger.error(f'Unexpected error in token authentication: {str(e)}')
-            return False, None, False
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'restock', 'send_notification', 'run_forecasts']:
+            return [IsSystemAdmin()]
+        if self.action in ['low_stock', 'list', 'retrieve', 'next_sku', 'all_forecasts']:
+            return [IsAuthenticated()]
+        return [IsAuthenticated()]
 
     @action(detail=False, methods=['get'])
     def low_stock(self, request):
-        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response(
-                {"detail": "Authentication required"},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-        if not is_authorized:
-            return Response(
-                {"detail": "Permission denied"},
-                status=status.HTTP_403_FORBIDDEN
-            )
 
         try:
             # Get page number from query params, default to 1
@@ -412,46 +282,61 @@ class ProductViewSet(viewsets.ModelViewSet):
             items_per_page = int(request.query_params.get('limit', 10))
             offset = (page - 1) * items_per_page
 
+            shop_id = request.query_params.get('shop')
+
             with connection.cursor() as cursor:
+                # Build filter
+                shop_filter = ""
+                params = []
+                if shop_id and shop_id != 'all':
+                    shop_filter = "AND si.shop_id = %s"
+                    params = [shop_id]
+
                 # Get total count for pagination
-                cursor.execute("""
-                    SELECT COUNT(*)
+                cursor.execute(f"""
+                    SELECT COUNT(DISTINCT p.id)
                     FROM products p
-                    WHERE p.quantity <= p.min_stock_level
-                """)
+                    JOIN shop_inventory si ON p.id = si.product_id
+                    WHERE (si.quantity <= si.min_stock_level OR si.quantity IS NULL)
+                    {shop_filter}
+                """, params)
                 total_count = cursor.fetchone()[0]
                 total_pages = (total_count + items_per_page - 1) // items_per_page
 
                 # Get paginated low stock products
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT 
                         p.id,
                         p.name,
                         p.sku,
                         p.description,
-                        p.quantity,
-                        p.min_stock_level,
+                        COALESCE(SUM(si.quantity), 0) as quantity,
+                        COALESCE(MIN(si.min_stock_level), p.min_stock_level) as min_stock_level,
                         p.sell_price::float as sell_price,
                         c.name as category_name,
                         c.id as category_id,
                         CASE 
-                            WHEN p.quantity = 0 THEN 'Out of Stock'
-                            WHEN p.quantity <= p.min_stock_level THEN 'Low Stock'
+                            WHEN COALESCE(SUM(si.quantity), 0) = 0 THEN 'Out of Stock'
+                            WHEN COALESCE(SUM(si.quantity), 0) <= COALESCE(MIN(si.min_stock_level), p.min_stock_level) THEN 'Low Stock'
                             ELSE 'In Stock'
-                        END as status
+                        END as status,
+                        true as has_shop_inventory
                     FROM products p
                     LEFT JOIN categories c ON p.category_id = c.id
-                    WHERE p.quantity <= p.min_stock_level
+                    JOIN shop_inventory si ON p.id = si.product_id
+                    WHERE 1=1 {shop_filter}
+                    GROUP BY p.id, p.name, p.sku, p.description, p.sell_price, p.min_stock_level, c.name, c.id
+                    HAVING COALESCE(SUM(si.quantity), 0) <= COALESCE(MIN(si.min_stock_level), p.min_stock_level)
                     ORDER BY 
                         CASE 
-                            WHEN p.quantity = 0 THEN 1
-                            WHEN p.quantity <= p.min_stock_level THEN 2
+                            WHEN COALESCE(SUM(si.quantity), 0) = 0 THEN 1
+                            WHEN COALESCE(SUM(si.quantity), 0) <= COALESCE(MIN(si.min_stock_level), p.min_stock_level) THEN 2
                             ELSE 3
                         END,
-                        p.quantity ASC,
+                        COALESCE(SUM(si.quantity), 0) ASC,
                         p.name ASC
                     LIMIT %s OFFSET %s
-                """, [items_per_page, offset])
+                """, params + [items_per_page, offset])
                 columns = [col[0] for col in cursor.description]
                 low_stock_items = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
@@ -482,68 +367,95 @@ class ProductViewSet(viewsets.ModelViewSet):
             )
 
     def list(self, request):
-        is_authenticated, role, is_authorized = self.check_token_auth(request)
-        if not is_authenticated or not is_authorized:
-            return Response({"detail": "Authentication failed"}, status=status.HTTP_403_FORBIDDEN)
 
         try:
+            # Get pagination and filter params
+            page = int(request.query_params.get('page', 1))
+            limit = int(request.query_params.get('limit', 20))
+            offset = (page - 1) * limit
+            search = request.query_params.get('search', '').strip()
+            category = request.query_params.get('category', '').strip()
+
+            params = []
+            where_clauses = ["1=1"]
+
+            if search:
+                where_clauses.append("(p.name ILIKE %s OR p.sku ILIKE %s OR p.barcode ILIKE %s)")
+                params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
+            
+            if category and category != 'all':
+                where_clauses.append("p.category_id = %s")
+                params.append(category)
+
+            where_sql = " AND ".join(where_clauses)
+
             with connection.cursor() as cursor:
-                cursor.execute("""
-                    SELECT p.*, c.name as category_name, p.description
+                # Get total count
+                cursor.execute(f"SELECT COUNT(*) FROM products p WHERE {where_sql}", params)
+                total_count = cursor.fetchone()[0]
+
+                # Get paginated products with shop totals and mismatch info
+                cursor.execute(f"""
+                    SELECT 
+                        p.*, 
+                        c.name as category_name,
+                        COALESCE((SELECT SUM(si.quantity) FROM shop_inventory si WHERE si.product_id = p.id), 0) as shop_total_quantity,
+                        EXISTS(SELECT 1 FROM shop_inventory si WHERE si.product_id = p.id) as has_shop_inventory
                     FROM products p
                     LEFT JOIN categories c ON p.category_id = c.id
+                    WHERE {where_sql}
                     ORDER BY p.name
-                """)
+                    LIMIT %s OFFSET %s
+                """, params + [limit, offset])
+                
                 columns = [col[0] for col in cursor.description]
                 products = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
-                # Add current batch prices (FIFO) to each product
-                for product in products:
+                # Optimized batch price fetching for the paginated subset
+                product_ids = [p['id'] for p in products]
+                if product_ids:
+                    # Fetch only the latest active batch price for each product on this page
                     cursor.execute("""
-                        SELECT purchase_price, selling_price
+                        SELECT DISTINCT ON (product_id) 
+                            product_id, purchase_price, selling_price
                         FROM product_batches
-                        WHERE product_id = %s AND remaining_quantity > 0
-                        ORDER BY purchase_date ASC, id ASC
-                        LIMIT 1
-                    """, [product['id']])
-                    batch_row = cursor.fetchone()
-                    if batch_row:
-                        product['current_batch_buy_price'] = float(batch_row[0])
-                        product['current_batch_sell_price'] = float(batch_row[1])
-                    else:
-                        product['current_batch_buy_price'] = None
-                        product['current_batch_sell_price'] = None
+                        WHERE product_id = ANY(%s) AND remaining_quantity > 0
+                        ORDER BY product_id, purchase_date ASC, id ASC
+                    """, [product_ids])
+                    batch_prices = {row[0]: {'buy': float(row[1]), 'sell': float(row[2])} for row in cursor.fetchall()}
 
-                return Response(products)
+                    for p in products:
+                        prices = batch_prices.get(p['id'])
+                        p['current_batch_buy_price'] = prices['buy'] if prices else None
+                        p['current_batch_sell_price'] = prices['sell'] if prices else None
+                        
+                        # Add computed fields for quantity tracking
+                        sq = p['shop_total_quantity']
+                        mq = p['master_quantity']
+                        p['has_mismatch'] = mq != sq
+                        p['quantity_diff'] = mq - sq
+                        
+                        # Ensure numeric types are floats for JSON serialization
+                        if p['buy_price'] is not None: p['buy_price'] = float(p['buy_price'])
+                        if p['sell_price'] is not None: p['sell_price'] = float(p['sell_price'])
+                        if p['carton_buy_price'] is not None: p['carton_buy_price'] = float(p['carton_buy_price'])
+                        if p['carton_sell_price'] is not None: p['carton_sell_price'] = float(p['carton_sell_price'])
+                
+                return Response({
+                    'results': products,
+                    'total_count': total_count,
+                    'total_pages': (total_count + limit - 1) // limit,
+                    'current_page': page
+                })
+
         except Exception as e:
+            logger.error(f"Error in ProductViewSet.list: {str(e)}\n{traceback.format_exc()}")
             return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def retrieve(self, request, *args, **kwargs):
-        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response(
-                {"detail": "Authentication required"},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-        if not is_authorized:
-            return Response(
-                {"detail": "Permission denied"},
-                status=status.HTTP_403_FORBIDDEN
-            )
         return super().retrieve(request, *args, **kwargs)
 
     def create(self, request, *args, **kwargs):
-        is_authenticated, user_id, is_admin = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response(
-                {"detail": "Authentication required"},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-        if not is_admin:
-            return Response(
-                {"detail": "Permission denied"},
-                status=status.HTTP_403_FORBIDDEN
-            )
 
         try:
             # Create the product
@@ -553,9 +465,38 @@ class ProductViewSet(viewsets.ModelViewSet):
                 product_id = response.data['id']
 
                 # Fetch the Product instance from the database
-                from .models import Product
+                from .models import Product, ShopInventory
                 product_instance = Product.objects.get(id=product_id)
-                initial_quantity = product_instance.quantity
+                
+                # Get the quantity from request data
+                quantity_from_request = request.data.get('quantity', 0)
+                try:
+                    quantity_from_request = int(quantity_from_request)
+                except (ValueError, TypeError):
+                    quantity_from_request = 0
+                
+                # Apply UOM multiplier
+                multiplier = 1
+                if product_instance.uom_type == 'CARTON':
+                    multiplier = product_instance.pieces_per_carton
+                
+                initial_quantity = quantity_from_request * multiplier
+                
+                # Set master_quantity (for manually created products)
+                product_instance.master_quantity = initial_quantity
+                product_instance.save(update_fields=['master_quantity'])
+                
+                # Create shop_inventory for admin's shop if they have one
+                from .models import User
+                user = request.user
+                if user.shop and initial_quantity > 0:
+                    ShopInventory.objects.create(
+                        shop=user.shop,
+                        product=product_instance,
+                        quantity=initial_quantity,
+                        min_stock_level=product_instance.min_stock_level
+                    )
+                
                 buy_price = product_instance.buy_price
                 sell_price = product_instance.sell_price
                 product_created_at = product_instance.created_at
@@ -587,7 +528,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                     type='product_added',
                     description=f'New product added: {product_instance.name}',
                     product_id=product_id,
-                    user_id=user_id,
+                    user=request.user,
                     created_at=timezone.now(),
                     status='completed'
                 )
@@ -601,18 +542,12 @@ class ProductViewSet(viewsets.ModelViewSet):
             )
 
     def update(self, request, *args, **kwargs):
-        is_authenticated, user_id, is_admin = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin:
-            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-
         try:
             # Get the product before update
             instance = self.get_object()
             old_buy_price = instance.buy_price
             old_sell_price = instance.sell_price
-            old_quantity = instance.quantity
+            old_master_quantity = instance.master_quantity
 
             # Update the product
             response = super().update(request, *args, **kwargs)
@@ -641,7 +576,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                     type='product_updated',
                     description=f'Product updated: {product_data["name"]}',
                     product_id=product_data['id'],
-                    user_id=user_id,
+                    user=request.user,
                     created_at=timezone.now(),
                     status='completed'
                 )
@@ -656,15 +591,7 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         import traceback
-        is_authenticated, user_id, is_admin = self.check_token_auth(request)
-        logger.debug(f"Destroy called: is_authenticated={is_authenticated}, user_id={user_id}, is_admin={is_admin}")
-        if not is_authenticated:
-            logger.debug("Authentication failed")
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin:
-            logger.debug("Permission denied")
-            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-
+        logger.debug(f"Destroy called: user={request.user.username}")
         try:
             instance = self.get_object()
             logger.debug(f"Fetched product instance: id={instance.id}, name={instance.name}")
@@ -710,7 +637,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                 type='product_deleted',
                 description=f'Product deleted: {instance.name}',
                 product_id=instance.id,
-                user_id=user_id,
+                user=request.user,
                 created_at=timezone.now(),
                 status='completed'
             )
@@ -730,12 +657,6 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def restock(self, request, pk=None):
-        is_authenticated, user_id, is_admin = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin:
-            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-
         try:
             product = self.get_object()
             quantity = int(request.data.get('quantity', 0))
@@ -746,8 +667,8 @@ class ProductViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # Update product quantity
-            product.quantity += quantity
+            # Update master quantity
+            product.master_quantity += quantity
             product.save()
 
             # Create activity log for restock
@@ -755,7 +676,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                 type='product_restocked',
                 description=f'Product restocked: {product.name} (+{quantity})',
                 product_id=product.id,
-                user_id=user_id,
+                user=request.user,
                 created_at=timezone.now(),
                 status='completed'
             )
@@ -763,7 +684,7 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response({
                 "id": product.id,
                 "name": product.name,
-                "quantity": product.quantity,
+                "quantity": product.master_quantity,
                 "message": f"Successfully restocked {quantity} units"
             })
 
@@ -780,41 +701,48 @@ class ProductViewSet(viewsets.ModelViewSet):
         try:
             with transaction.atomic():
                 with connection.cursor() as cursor:
-                    # Get the pattern and next_sku from sku_sequence
-                    cursor.execute("SELECT next_sku, pattern FROM sku_sequence LIMIT 1;")
+                    cursor.execute("SELECT next_sku, pattern FROM sku_sequence LIMIT 1 FOR UPDATE;")
                     row = cursor.fetchone()
                     if row:
                         current_sku, pattern = row
-                        # If pattern is set, use it to format the next SKU
-                        if pattern:
-                            import re
-                            import string
-                            # Find the numeric part in current_sku
-                            match = re.search(r'(\d+)(?!.*\d)', str(current_sku))
-                            if match:
-                                num = int(match.group(1))
-                                next_num = num
+                        # Increment numeric part for next time
+                        next_sku_to_return = current_sku
+                        
+                        import re
+                        import string
+                        
+                        # Find the numeric part in current_sku
+                        match = re.search(r'(\d+)(?!.*\d)', str(current_sku))
+                        if match:
+                            prefix = str(current_sku)[:match.start()]
+                            num_str = match.group(1)
+                            num = int(num_str)
+                            next_num = num + 1
+                            
+                            # Format new SKU for storage
+                            new_sku_for_db = f"{prefix}{next_num:0{len(num_str)}d}" if len(num_str) > 1 else f"{prefix}{next_num}"
+                            
+                            # Update table
+                            cursor.execute("UPDATE sku_sequence SET next_sku = %s", [new_sku_for_db])
+                            
+                            logger.info(f"Generated next SKU: {next_sku_to_return}, New reserved: {new_sku_for_db}")
+                            
+                            # Handle pattern for return if exists
+                            if pattern:
                                 # Support {num:03d} style formatting
-                                formatter = string.Formatter()
                                 m = re.search(r'\{num:(.*?)\}', pattern)
                                 if m:
                                     format_spec = m.group(1)
-                                    formatted_num = f"{next_num:{format_spec}}"
-                                    next_sku = pattern.replace(f'{{num:{format_spec}}}', formatted_num)
+                                    formatted_num = f"{num:{format_spec}}"
+                                    next_sku_to_return = pattern.replace(f'{{num:{format_spec}}}', formatted_num)
                                 else:
-                                    next_sku = pattern.replace('{num}', str(next_num))
-                            else:
-                                # If no numeric part, just use current_sku
-                                next_sku = str(current_sku)
-                            return Response({'next_sku': next_sku})
+                                    next_sku_to_return = pattern.replace('{num}', str(num))
+                                    
+                            return Response({'next_sku': next_sku_to_return})
                         else:
-                            # No pattern: treat as numeric if possible
-                            try:
-                                next_num = int(current_sku)
-                                next_sku = str(next_num)
-                            except Exception:
-                                next_sku = str(current_sku)
-                            return Response({'next_sku': next_sku})
+                            # Not numeric, just return as is but maybe we should still update?
+                            # If it's not numeric, we can't easily increment.
+                            return Response({'next_sku': current_sku})
                     else:
                         # Fallback to old logic if sku_sequence is not set
                         cursor.execute("""
@@ -832,12 +760,6 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='forecasts')
     def all_forecasts(self, request):
-        is_authenticated, _, is_admin = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({'detail': 'Authentication required'}, status=401)
-        if not is_admin:
-            return Response({'detail': 'Permission denied'}, status=403)
-
         page = int(request.query_params.get('page', 1))
         limit = int(request.query_params.get('limit', 20))
         offset = (page - 1) * limit
@@ -873,12 +795,6 @@ class ProductViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def send_notification(self, request, pk=None):
         """Send manual notification to supplier for low stock"""
-        is_authenticated, user_id, is_admin = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin:
-            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-
         try:
             product = self.get_object()
             
@@ -901,7 +817,7 @@ class ProductViewSet(viewsets.ModelViewSet):
             # Prepare notification data
             notification_data = {
                 'product_name': product.name,
-                'current_stock': product.quantity,
+                'current_stock': product.master_quantity,
                 'min_stock_level': product.min_stock_level,
                 'reorder_quantity': restock_rule.reorder_quantity,
                 'supplier_name': restock_rule.supplier_name,
@@ -922,7 +838,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                     This is a notification that the following product is running low on stock:
 
                     Product: {product.name}
-                    Current Stock: {product.quantity}
+                    Current Stock: {product.master_quantity}
                     Minimum Stock Level: {product.min_stock_level}
                     Recommended Reorder Quantity: {restock_rule.reorder_quantity}
 
@@ -951,7 +867,7 @@ class ProductViewSet(viewsets.ModelViewSet):
                 type='restock_notification',
                 description=f'Restock notification sent for {product.name}',
                 product_id=product.id,
-                user_id=user_id,
+                user=request.user,
                 created_at=timezone.now(),
                 status='completed'
             )
@@ -971,11 +887,6 @@ class ProductViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'], url_path='run-forecasts')
     def run_forecasts(self, request):
         """Generate forecasts for all products"""
-        is_authenticated, user_id, is_admin = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({'detail': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin:
-            return Response({'detail': 'Permission denied. Only admin and manager roles can generate forecasts.'}, status=status.HTTP_403_FORBIDDEN)
         try:
             # Call the management command
             from django.core.management import call_command
@@ -994,60 +905,15 @@ class ProductViewSet(viewsets.ModelViewSet):
 class SaleViewSet(viewsets.ModelViewSet):
     queryset = Sale.objects.all()
     serializer_class = SaleSerializer
-    permission_classes = []
 
-    def check_token_auth(self, request):
-        try:
-            auth_header = request.headers.get('Authorization')
-            if not auth_header or not auth_header.startswith('Bearer '):
-                logger.warning('Missing or invalid authorization header')
-                return False, None, False
-
-            token = auth_header.split(' ')[1]
-            if not token:
-                logger.warning('Invalid token format')
-                return False, None, False
-
-            try:
-                parts = token.split('_')
-                user_id = int(parts[1]) if len(parts) > 1 else None
-
-                # For receipt endpoint, we only need authentication, not authorization
-                if request.resolver_match and request.resolver_match.url_name == 'sale-receipt':
-                    return True, user_id, True
-
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
-                        [user_id]
-                    )
-                    row = cursor.fetchone()
-                    if row:
-                        is_staff, is_superuser, role = row
-                        # Allow access if user is staff, superuser, admin, or manager
-                        is_authorized = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager', 'staff'])
-                        return True, user_id, is_authorized
-                return False, None, False
-            except (IndexError, ValueError) as e:
-                logger.warning(f'Error parsing token: {str(e)}')
-                return False, None, False
-        except Exception as e:
-            logger.error(f'Unexpected error in token authentication: {str(e)}')
-            return False, None, False
+    def get_permissions(self):
+        if self.action in ['create', 'list', 'retrieve', 'receipt']:
+            return [IsAuthenticated()]
+        if self.action in ['clear_all']:
+            return [IsSystemAdmin()]
+        return [IsAuthenticated()]
 
     def list(self, request, *args, **kwargs):
-        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response(
-                {"detail": "Authentication required"},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-        if not is_authorized:
-            return Response(
-                {"detail": "Permission denied"},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
         try:
             with connection.cursor() as cursor:
                 cursor.execute("""
@@ -1119,11 +985,6 @@ class SaleViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         try:
-            is_authenticated, user_id, is_admin = self.check_token_auth(request)
-            if not is_authenticated:
-                logger.warning(f'Unauthorized sale creation attempt by user {user_id}')
-                return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-
             # Validate sale items
             sale_items = request.data.get('sale_items', [])
             if not sale_items:
@@ -1134,13 +995,68 @@ class SaleViewSet(viewsets.ModelViewSet):
             with transaction.atomic():
                 # Create sale
                 sale_data = request.data.copy()
-                sale_data['user_id'] = user_id
+                sale_data['user_id'] = request.user.id
                 sale_serializer = self.get_serializer(data=sale_data)
                 if not sale_serializer.is_valid():
                     logger.warning(f'Invalid sale data: {sale_serializer.errors}')
                     raise APIError(sale_serializer.errors)
 
                 sale = sale_serializer.save()
+
+                # Handle Customer Credit and Repayment
+                customer_id = request.data.get('customer')
+                repayment_amount = request.data.get('repayment_amount', 0)
+                
+                if customer_id:
+                    try:
+                        customer = Customer.objects.get(id=customer_id)
+                        
+                        # 1. Handle Credit Sale (Increase Balance)
+                        if sale.payment_status == 'credit' or sale.amount_credit > 0:
+                            customer.current_balance += sale.amount_credit
+                            CreditTransaction.objects.create(
+                                customer=customer,
+                                shop=sale.shop,
+                                sale=sale,
+                                transaction_type='sale',
+                                amount=sale.amount_credit,
+                                balance_after=customer.current_balance,
+                                created_by=request.user
+                            )
+                        
+                        # 2. Handle Debt Repayment during Sale (Decrease Balance)
+                        if repayment_amount and float(repayment_amount) > 0:
+                            repayment_amount = float(repayment_amount)
+                            customer.current_balance -= Decimal(str(repayment_amount))
+                            if customer.current_balance < 0:
+                                customer.current_balance = 0
+                            
+                            CreditTransaction.objects.create(
+                                customer=customer,
+                                shop=sale.shop,
+                                sale=sale,
+                                transaction_type='payment',
+                                amount=-Decimal(str(repayment_amount)),
+                                balance_after=customer.current_balance,
+                                notes=f"Repayment during Sale #{sale.id}",
+                                created_by=request.user
+                            )
+                        
+                        customer.save()
+                    except Customer.DoesNotExist:
+                        logger.warning(f"Customer {customer_id} not found during sale creation")
+
+                # Log activity
+                try:
+                    Activity.objects.create(
+                        type='sale_created',
+                        description=f"Transaction #{sale.id} - KSh {sale.total_amount:,.2f}",
+                        user=request.user,
+                        shop_id=sale.shop_id,
+                        status='completed'
+                    )
+                except Exception as e:
+                    logger.error(f"Error logging sale activity: {str(e)}")
 
                 # Create sale items and update stock using FIFO logic (batches only)
                 for item_data in sale_items:
@@ -1190,12 +1106,10 @@ class SaleViewSet(viewsets.ModelViewSet):
                                     SET remaining_quantity = remaining_quantity - %s
                                     WHERE id = %s
                                 """, [use_qty, batch_id])
-                                # Update product quantity
-                                cursor.execute("""
-                                    UPDATE products
-                                    SET quantity = quantity - %s
-                                    WHERE id = %s
-                                """, [use_qty, product_id])
+                                
+                                # Recalculate master_quantity from shop totals after sale
+                                # (This will be done after all items are processed)
+                                
                                 sale_portions.append({
                                     'batch_id': batch_id,
                                     'quantity': use_qty,
@@ -1226,6 +1140,9 @@ class SaleViewSet(viewsets.ModelViewSet):
                             batch_id=portion['batch_id'],
                             quantity=portion['quantity']
                         )
+                    
+                    # Recalculate master_quantity for this product
+                    product.update_master_quantity()
 
                 return Response(self.get_serializer(sale).data, status=status.HTTP_201_CREATED)
 
@@ -1234,17 +1151,6 @@ class SaleViewSet(viewsets.ModelViewSet):
             return Response({"detail": f"Error creating sale: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def retrieve(self, request, *args, **kwargs):
-        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response(
-                {"detail": "Authentication required"},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-        if not is_authorized:
-            return Response(
-                {"detail": "Permission denied"},
-                status=status.HTTP_403_FORBIDDEN
-            )
         return super().retrieve(request, *args, **kwargs)
 
     @action(detail=True, methods=['get'])
@@ -1321,12 +1227,6 @@ class SaleViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def clear_all(self, request):
-        is_authenticated, user_id, is_admin = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin:
-            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-
         try:
             # Start a transaction
             with transaction.atomic():
@@ -1346,7 +1246,7 @@ class SaleViewSet(viewsets.ModelViewSet):
                 Activity.objects.create(
                     type='sales_cleared',
                     description='All sales data has been cleared',
-                    user_id=user_id,
+                    user=request.user,
                     created_at=timezone.now(),
                     status='completed'
                 )
@@ -1364,19 +1264,21 @@ class SaleViewSet(viewsets.ModelViewSet):
 class ActivityViewSet(viewsets.ModelViewSet):
     queryset = Activity.objects.all()
     serializer_class = ActivitySerializer
-    permission_classes = []
+
+    def get_permissions(self):
+        if self.action in ['create', 'list', 'retrieve']:
+            return [IsAuthenticated()]
+        return [IsAuthenticated()]
 
     def create(self, request, *args, **kwargs):
         import traceback
         try:
-            is_authenticated, user_id, is_authorized = self.check_token_auth(request)
-
             # Create a copy of the request data to modify
             data = request.data.copy()
 
             # Add user_id if authenticated, otherwise leave it null
-            if is_authenticated and user_id:
-                data['user_id'] = user_id
+            if request.user.is_authenticated:
+                data['user'] = request.user.id
 
             # Create serializer with the modified data
             serializer = self.get_serializer(data=data)
@@ -1395,70 +1297,19 @@ class ActivityViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    def check_token_auth(self, request):
-        try:
-            auth_header = request.headers.get('Authorization')
-            if not auth_header or not auth_header.startswith('Bearer '):
-                return False, None, False
-
-            token = auth_header.split(' ')[1]
-            if not token:
-                return False, None, False
-
-            # Extract user_id from token, handling different formats
-            user_id = None
-            if token.startswith('token_'):
-                parts = token.split('_')
-                if len(parts) > 1:
-                    user_id = int(parts[1])
-            else:
-                # Try to extract user_id from other token formats
-                parts = token.split('_')
-                if len(parts) > 0:
-                    # Try to find a part that can be converted to an integer
-                    for part in parts:
-                        try:
-                            user_id = int(part)
-                            break
-                        except ValueError:
-                            continue
-
-            if user_id is None:
-                return False, None, False
-
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
-                    [user_id]
-                )
-                row = cursor.fetchone()
-                if row:
-                    is_staff, is_superuser, role = row
-                    # Allow access if user is staff, superuser, admin, or manager
-                    is_authorized = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager', 'staff'])
-                    return True, user_id, is_authorized
-        except Exception as e:
-            print(f"Token validation error: {str(e)}")
-            return False, None, False
-
-        return False, None, False
-
     def list(self, request, *args, **kwargs):
-        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response(
-                {"detail": "Authentication required"},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-        if not is_authorized:
-            return Response(
-                {"detail": "Permission denied"},
-                status=status.HTTP_403_FORBIDDEN
-            )
+        shop_id = request.query_params.get('shop')
 
         try:
             with connection.cursor() as cursor:
-                cursor.execute("""
+                # Build filter
+                shop_filter = ""
+                params = []
+                if shop_id and shop_id != 'all':
+                    shop_filter = "WHERE a.shop_id = %s OR (a.shop_id IS NULL AND u.shop_id = %s)"
+                    params = [shop_id, shop_id]
+
+                cursor.execute(f"""
                     SELECT 
                         a.id,
                         a.type,
@@ -1466,6 +1317,7 @@ class ActivityViewSet(viewsets.ModelViewSet):
                         a.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Nairobi' as created_at,
                         a.status,
                         u.name as user_name,
+                        sh.name as shop_name,
                         CASE 
                             WHEN a.type = 'sale' THEN 'sale'
                             WHEN a.type = 'restock' THEN 'restock'
@@ -1474,9 +1326,11 @@ class ActivityViewSet(viewsets.ModelViewSet):
                         END as activity_type
                     FROM activities a
                     LEFT JOIN users u ON a.user_id = u.id
+                    LEFT JOIN shops sh ON a.shop_id = sh.id OR (a.shop_id IS NULL AND u.shop_id = sh.id)
+                    {shop_filter}
                     ORDER BY a.created_at DESC
                     LIMIT 50
-                """)
+                """, params)
                 activities = [
                     {
                         **dict(zip([col[0] for col in cursor.description], row)),
@@ -1490,57 +1344,17 @@ class ActivityViewSet(viewsets.ModelViewSet):
             return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def retrieve(self, request, *args, **kwargs):
-        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response(
-                {"detail": "Authentication required"},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-        if not is_authorized:
-            return Response(
-                {"detail": "Permission denied"},
-                status=status.HTTP_403_FORBIDDEN
-            )
         return super().retrieve(request, *args, **kwargs)
 
 
 class SaleItemViewSet(viewsets.ModelViewSet):
     queryset = SaleItem.objects.all()
     serializer_class = SaleItemSerializer
-    permission_classes = []
 
-    def check_token_auth(self, request):
-        auth_header = request.headers.get('Authorization')
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(' ')[1]
-            if token and token.startswith('token_'):
-                try:
-                    parts = token.split('_')
-                    if len(parts) >= 2:
-                        user_id = int(parts[1])
-                        with connection.cursor() as cursor:
-                            cursor.execute(
-                                "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
-                                [user_id]
-                            )
-                            row = cursor.fetchone()
-                            if row:
-                                is_staff, is_superuser, role = row
-                                # Allow access if user is staff, superuser, admin, or manager
-                                is_authorized = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager', 'staff'])
-                                return True, user_id, is_authorized
-                except (IndexError, ValueError) as e:
-                    print(f"Token validation error: {str(e)}")
-                    pass
-        return False, None, False
+    def get_permissions(self):
+        return [IsAuthenticated()]
 
     def list(self, request, *args, **kwargs):
-        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_authorized:
-            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-
         try:
             # Get sale_id from query params if provided
             sale_id = request.query_params.get('sale_id')
@@ -1600,65 +1414,12 @@ class SaleItemViewSet(viewsets.ModelViewSet):
             return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-def check_token_auth(request):
-    auth_header = request.headers.get('Authorization')
-    if not auth_header or not auth_header.startswith('Bearer '):
-        return False, None, False
-
-    token = auth_header.split(' ')[1]
-    if not token.startswith('token_'):
-        return False, None, False
-
-    try:
-        parts = token.split('_')
-        user_id = int(parts[1])
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
-                [user_id]
-            )
-            row = cursor.fetchone()
-            if row:
-                is_staff, is_superuser, role = row
-                is_admin = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager'])
-                return True, user_id, is_admin
-    except (IndexError, ValueError) as e:
-        print(f"Token validation error: {str(e)}")
-        return False, None, False
-
-    return False, None, False
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, IsShopManager])
 def profit_report(request):
-    # Validate token
-    auth_header = request.headers.get('Authorization')
-    if not auth_header or not auth_header.startswith('Bearer '):
-        return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-
-    token = auth_header.split(' ')[1]
     try:
-        # Decode token and get user info
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
-        user_id = payload.get('user_id')
-
-        # Get user role and permissions
-        with connection.cursor() as cursor:
-            cursor.execute("""
-                SELECT u.is_staff, u.is_superuser, ur.role 
-                FROM users u 
-                LEFT JOIN user_roles ur ON u.id = ur.user_id 
-                WHERE u.id = %s
-            """, [user_id])
-            row = cursor.fetchone()
-            if not row:
-                return Response({"detail": "User not found"}, status=status.HTTP_401_UNAUTHORIZED)
-
-            is_staff, is_superuser, role = row
-            is_admin = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager'])
-            if not is_admin:
-                return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-
         # Get date range from query params
         start_date = request.query_params.get('start')
         end_date = request.query_params.get('end')
@@ -1725,8 +1486,6 @@ def profit_report(request):
                 'monthly': results
             })
 
-    except jwt.InvalidTokenError:
-        return Response({"detail": "Invalid token"}, status=status.HTTP_401_UNAUTHORIZED)
     except Exception as e:
         print(f"Error generating profit report: {str(e)}")
         return Response({"detail": "Internal server error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1735,106 +1494,50 @@ def profit_report(request):
 class RestockRuleViewSet(viewsets.ModelViewSet):
     queryset = RestockRule.objects.all()
     serializer_class = RestockRuleSerializer
-    permission_classes = []
 
-    def check_token_auth(self, request):
-        auth_header = request.headers.get('Authorization')
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(' ')[1]
-            if token and token.startswith('token_'):
-                try:
-                    parts = token.split('_')
-                    if len(parts) >= 2:
-                        user_id = int(parts[1])
-                        # Get user from database to check admin status
-                        with connection.cursor() as cursor:
-                            cursor.execute(
-                                "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
-                                [user_id]
-                            )
-                            row = cursor.fetchone()
-                            if row:
-                                is_staff, is_superuser, role = row
-                                # Allow access if user is staff, superuser, admin, or manager
-                                is_authorized = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager'])
-                                return True, user_id, is_authorized
-                except (IndexError, ValueError) as e:
-                    print(f"Token validation error: {str(e)}")
-                    pass
-        return False, None, False
-
-    def list(self, request, *args, **kwargs):
-        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_authorized:
-            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-        return super().list(request, *args, **kwargs)
-
-    def create(self, request, *args, **kwargs):
-        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_authorized:
-            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-        return super().create(request, *args, **kwargs)
-
-    def update(self, request, *args, **kwargs):
-        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_authorized:
-            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-        return super().update(request, *args, **kwargs)
-
-    def destroy(self, request, *args, **kwargs):
-        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_authorized:
-            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-        return super().destroy(request, *args, **kwargs)
-
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [IsSystemAdmin()]
+        return [IsAuthenticated()]
 
 class AnalyticsViewSet(viewsets.ViewSet):
-    permission_classes = []
-
-    def check_token_auth(self, request):
-        auth_header = request.headers.get('Authorization')
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(' ')[1]
-            if token and token.startswith('token_'):
-                try:
-                    parts = token.split('_')
-                    if len(parts) >= 2:
-                        user_id = int(parts[1])
-                        with connection.cursor() as cursor:
-                            cursor.execute(
-                                "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
-                                [user_id]
-                            )
-                            row = cursor.fetchone()
-                            if row:
-                                is_staff, is_superuser, role = row
-                                # Allow access if user is staff, superuser, admin, or manager
-                                is_authorized = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager', 'staff'])
-                                return True, user_id, is_authorized
-                except (IndexError, ValueError) as e:
-                    print(f"Token validation error: {str(e)}")
-                    pass
-        return False, None, False
+    permission_classes = [IsAuthenticated, IsShopStaff]
 
     def list(self, request):
-        is_authenticated, _, is_admin = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin:
-            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
+        user = request.user
+        requested_shop_id = request.query_params.get('shop')
+
+        # Use helper-like logic for shop isolation
+        if user.role == 'admin' or user.can_access_all_shops:
+            if requested_shop_id and requested_shop_id != 'all':
+                inv_shop_filter = "AND si.shop_id = %s"
+                sales_shop_filter = "AND s.shop_id = %s"
+                params = [requested_shop_id]
+            else:
+                inv_shop_filter = ""
+                sales_shop_filter = ""
+                params = []
+        else:
+            user_shop_id = user.shop.id if user.shop else None
+            if not user_shop_id:
+                return Response({"detail": "No shop assigned"}, status=status.HTTP_403_FORBIDDEN)
+            inv_shop_filter = "AND si.shop_id = %s"
+            sales_shop_filter = "AND s.shop_id = %s"
+            params = [user_shop_id]
 
         try:
             with connection.cursor() as cursor:
+                # Build filters
+                inv_shop_filter = ""
+                sales_shop_filter = ""
+                params = []
+                if shop_id and shop_id != 'all':
+                    inv_shop_filter = "AND si.shop_id = %s"
+                    sales_shop_filter = "AND s.shop_id = %s"
+                    params = [shop_id]
+
                 # Sales analytics
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT 
                         COALESCE(SUM(total_amount), 0) as total_sales,
                         COUNT(*) as sales_count,
@@ -1843,48 +1546,53 @@ class AnalyticsViewSet(viewsets.ViewSet):
                     FROM sales s
                     LEFT JOIN sale_items si ON s.id = si.sale_id
                     WHERE s.created_at >= NOW() - INTERVAL '30 days'
-                """)
+                    {sales_shop_filter}
+                """, params)
                 sales_data = dict(zip([col[0] for col in cursor.description], cursor.fetchone()))
 
-                # Product analytics with proper low stock calculation
-                cursor.execute("""
+                # Product analytics
+                cursor.execute(f"""
                     SELECT 
-                        COUNT(*) as total_products,
-                        COUNT(CASE WHEN quantity <= min_stock_level AND quantity > 0 THEN 1 END) as low_stock_count,
-                        COUNT(CASE WHEN quantity = 0 THEN 1 END) as out_of_stock_count,
-                        COALESCE(SUM(quantity * sell_price), 0) as inventory_value
-                    FROM products
-                """)
+                        COUNT(DISTINCT p.id) as total_products,
+                        COALESCE(SUM(CASE WHEN si.quantity <= si.min_stock_level AND si.quantity > 0 THEN 1 ELSE 0 END), 0) as low_stock_count,
+                        COALESCE(SUM(CASE WHEN COALESCE(si.quantity, 0) = 0 THEN 1 ELSE 0 END), 0) as out_of_stock_count,
+                        COALESCE(SUM(si.quantity * p.sell_price), 0) as inventory_value
+                    FROM products p
+                    LEFT JOIN shop_inventory si ON p.id = si.product_id
+                    WHERE 1=1 {inv_shop_filter}
+                """, params)
                 product_data = dict(zip([col[0] for col in cursor.description], cursor.fetchone()))
 
-                # Get low stock items with proper ordering
-                cursor.execute("""
+                # Get low stock items
+                cursor.execute(f"""
                     SELECT 
                         p.id,
                         p.name,
                         p.sku,
-                        p.quantity,
-                        p.min_stock_level,
+                        COALESCE(si.quantity, 0) as quantity,
+                        COALESCE(si.min_stock_level, p.min_stock_level) as min_stock_level,
                         p.sell_price,
                         c.name as category_name,
                         CASE 
-                            WHEN p.quantity = 0 THEN 'Out of Stock'
-                            WHEN p.quantity <= p.min_stock_level THEN 'Low Stock'
+                            WHEN COALESCE(si.quantity, 0) = 0 THEN 'Out of Stock'
+                            WHEN COALESCE(si.quantity, 0) <= COALESCE(si.min_stock_level, p.min_stock_level) THEN 'Low Stock'
                             ELSE 'In Stock'
                         END as status
                     FROM products p
                     LEFT JOIN categories c ON p.category_id = c.id
-                    WHERE p.quantity <= p.min_stock_level
+                    JOIN shop_inventory si ON p.id = si.product_id
+                    WHERE COALESCE(si.quantity, 0) <= COALESCE(si.min_stock_level, p.min_stock_level)
+                    {inv_shop_filter}
                     ORDER BY 
                         CASE 
-                            WHEN p.quantity = 0 THEN 1
-                            WHEN p.quantity <= p.min_stock_level THEN 2
+                            WHEN COALESCE(si.quantity, 0) = 0 THEN 1
+                            WHEN COALESCE(si.quantity, 0) <= COALESCE(si.min_stock_level, p.min_stock_level) THEN 2
                             ELSE 3
                         END,
-                        p.quantity ASC,
+                        quantity ASC,
                         p.name ASC
                     LIMIT 10
-                """)
+                """, params)
                 low_stock_items = [
                     {
                         **dict(zip([col[0] for col in cursor.description], row)),
@@ -1893,7 +1601,9 @@ class AnalyticsViewSet(viewsets.ViewSet):
                     for row in cursor.fetchall()
                 ]
 
-                # Recent activities with proper timezone handling and formatting
+                # Recent activities
+                # Note: We should filter activities by shop if possible, but activities don't have shop_id yet.
+                # For now, we'll just show all activities for admin, or filtered by user if we had that logic.
                 cursor.execute("""
                     SELECT 
                         a.id,
@@ -1944,148 +1654,149 @@ class AnalyticsViewSet(viewsets.ViewSet):
 
 
 class ReportViewSet(viewsets.ViewSet):
-    permission_classes = []
+    permission_classes = [IsAuthenticated, IsShopStaff]
 
-    def check_token_auth(self, request):
-        auth_header = request.headers.get('Authorization')
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(' ')[1]
-            if token and token.startswith('token_'):
-                try:
-                    parts = token.split('_')
-                    if len(parts) >= 2:
-                        user_id = int(parts[1])
-                        with connection.cursor() as cursor:
-                            cursor.execute(
-                                "SELECT is_staff, is_superuser, role FROM users WHERE id = %s",
-                                [user_id]
-                            )
-                            row = cursor.fetchone()
-                            if row:
-                                is_staff, is_superuser, role = row
-                                # Allow access if user is staff, superuser, admin, or manager
-                                is_authorized = is_staff or is_superuser or (role and role.lower() in ['admin', 'manager', 'staff'])
-                                return True, user_id, is_authorized
-                except (jwt.InvalidTokenError, IndexError, ValueError, Exception) as e:
-                    print(f"Token validation error: {str(e)}")
-                    return False, None, False
-            return False, None, False
+    def get_shop_filter(self, user, requested_shop_id):
+        """Helper to determine the shop filter based on user role and request."""
+        if user.role == 'admin' or user.can_access_all_shops:
+            if requested_shop_id and requested_shop_id != 'all':
+                return "WHERE si.shop_id = %s", [requested_shop_id], requested_shop_id
+            return "", [], 'all'
+        
+        # Non-admin users are restricted to their own shop
+        user_shop_id = user.shop.id if user.shop else None
+        if not user_shop_id:
+            # Fallback for users with no shop assigned
+            return "WHERE 1=0", [], None
+            
+        return "WHERE si.shop_id = %s", [user_shop_id], user_shop_id
 
     @action(detail=False, methods=['get'])
     def inventory(self, request):
-        is_authenticated, user_id, is_admin = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin:
-            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
+        user = request.user
+        requested_shop_id = request.query_params.get('shop')
+        shop_filter, params, active_shop_id = self.get_shop_filter(user, requested_shop_id)
+        
+        # Get page number from query params, default to 1
+        page = int(request.query_params.get('page', 1))
+        items_per_page = 6
+        offset = (page - 1) * items_per_page
 
-        try:
-            # Get page number from query params, default to 1
-            page = int(request.query_params.get('page', 1))
-            items_per_page = 6
-            offset = (page - 1) * items_per_page
+        with connection.cursor() as cursor:
+            # Summary and pagination logic remains mostly the same, but using our sanitized shop_filter
 
-            with connection.cursor() as cursor:
-                # Get total count for pagination
-                cursor.execute("SELECT COUNT(*) FROM products")
-                total_count = cursor.fetchone()[0]
-                total_pages = (total_count + items_per_page - 1) // items_per_page
+            # Get total count for pagination
+            cursor.execute(f"SELECT COUNT(*) FROM products p")
+            total_count = cursor.fetchone()[0]
+            total_pages = (total_count + items_per_page - 1) // items_per_page
 
-                # Get summary statistics
-                cursor.execute("""
-                    SELECT 
-                        COUNT(*) as total_products,
-                        COUNT(CASE WHEN quantity <= min_stock_level AND quantity > 0 THEN 1 END) as low_stock_count,
-                        COUNT(CASE WHEN quantity = 0 THEN 1 END) as out_of_stock_count,
-                        COALESCE(SUM(quantity * buy_price), 0) as total_value
-                    FROM products
-                """)
-                summary = dict(zip([col[0] for col in cursor.description], cursor.fetchone()))
+            # Get summary statistics
+            cursor.execute(f"""
+                SELECT 
+                    COALESCE(COUNT(DISTINCT p.id), 0) as total_products,
+                    COALESCE(SUM(CASE WHEN si.quantity <= si.min_stock_level AND si.quantity > 0 THEN 1 ELSE 0 END), 0) as low_stock_count,
+                    COALESCE(SUM(CASE WHEN COALESCE(si.quantity, 0) = 0 THEN 1 ELSE 0 END), 0) as out_of_stock_count,
+                    COALESCE(SUM(si.quantity * p.buy_price), 0) as total_value
+                FROM products p
+                LEFT JOIN shop_inventory si ON p.id = si.product_id
+                {shop_filter}
+            """, params)
+            summary = dict(zip([col[0] for col in cursor.description], cursor.fetchone()))
 
-                # Get category breakdown
-                cursor.execute("""
-                    SELECT 
-                        c.name,
-                        COUNT(p.id) as product_count,
-                        COALESCE(SUM(p.quantity), 0) as total_quantity,
-                        COALESCE(SUM(p.quantity * p.buy_price), 0) as value
-                    FROM categories c
-                    LEFT JOIN products p ON c.id = p.category_id
-                    GROUP BY c.id, c.name
-                    ORDER BY value DESC
-                """)
-                categories = [dict(zip([col[0] for col in cursor.description], row))
-                              for row in cursor.fetchall()]
+            # Get category breakdown
+            cursor.execute(f"""
+                SELECT 
+                    c.name,
+                    COUNT(DISTINCT p.id) as product_count,
+                    COALESCE(SUM(si.quantity), 0) as total_quantity,
+                    COALESCE(SUM(si.quantity * p.buy_price), 0) as value
+                FROM categories c
+                LEFT JOIN products p ON c.id = p.category_id
+                LEFT JOIN shop_inventory si ON p.id = si.product_id
+                {shop_filter}
+                GROUP BY c.id, c.name
+                ORDER BY value DESC
+            """, params)
+            categories = [dict(zip([col[0] for col in cursor.description], row))
+                          for row in cursor.fetchall()]
 
-                # Get paginated product details
-                cursor.execute("""
-                    SELECT 
-                        p.id,
-                        p.name,
-                        p.sku,
-                        p.quantity,
-                        p.min_stock_level,
-                        p.buy_price,
-                        p.sell_price,
-                        p.description,
-                        c.name as category_name,
-                        CASE 
-                            WHEN p.quantity = 0 THEN 'Out of Stock'
-                            WHEN p.quantity <= p.min_stock_level THEN 'Low Stock'
-                            ELSE 'In Stock'
-                        END as status
-                    FROM products p
-                    LEFT JOIN categories c ON p.category_id = c.id
-                    ORDER BY 
-                        CASE 
-                            WHEN p.quantity = 0 THEN 1
-                            WHEN p.quantity <= p.min_stock_level THEN 2
-                            ELSE 3
-                        END,
-                        p.name
-                    LIMIT %s OFFSET %s
-                """, [items_per_page, offset])
-                products = [dict(zip([col[0] for col in cursor.description], row))
-                            for row in cursor.fetchall()]
+            # Get paginated product details
+            cursor.execute(f"""
+                SELECT 
+                    p.id,
+                    p.name,
+                    p.sku,
+                    COALESCE(SUM(si.quantity), 0) as quantity,
+                    COALESCE(MIN(si.min_stock_level), p.min_stock_level) as min_stock_level,
+                    p.buy_price,
+                    p.sell_price,
+                    p.description,
+                    c.name as category_name,
+                    CASE 
+                        WHEN COALESCE(SUM(si.quantity), 0) = 0 THEN 'Out of Stock'
+                        WHEN COALESCE(SUM(si.quantity), 0) <= COALESCE(MIN(si.min_stock_level), p.min_stock_level) THEN 'Low Stock'
+                        ELSE 'In Stock'
+                    END as status
+                FROM products p
+                LEFT JOIN categories c ON p.category_id = c.id
+                LEFT JOIN shop_inventory si ON p.id = si.product_id
+                {shop_filter}
+                GROUP BY p.id, p.name, p.sku, p.buy_price, p.sell_price, p.description, p.min_stock_level, c.name
+                ORDER BY 
+                    CASE 
+                        WHEN COALESCE(SUM(si.quantity), 0) = 0 THEN 1
+                        WHEN COALESCE(SUM(si.quantity), 0) <= COALESCE(MIN(si.min_stock_level), p.min_stock_level) THEN 2
+                        ELSE 3
+                    END,
+                    p.name
+                LIMIT %s OFFSET %s
+            """, params + [items_per_page, offset])
+            products = [dict(zip([col[0] for col in cursor.description], row))
+                        for row in cursor.fetchall()]
 
-                # Format decimal values
-                for row in products:
-                    if 'buy_price' in row and row['buy_price'] is not None:
-                        row['buy_price'] = str(row['buy_price'])
-                    if 'sell_price' in row and row['sell_price'] is not None:
-                        row['sell_price'] = str(row['sell_price'])
+            # Format decimal values
+            for row in products:
+                if 'buy_price' in row and row['buy_price'] is not None:
+                    row['buy_price'] = str(row['buy_price'])
+                if 'sell_price' in row and row['sell_price'] is not None:
+                    row['sell_price'] = str(row['sell_price'])
 
-                return Response({
-                    'summary': {
-                        'totalProducts': summary['total_products'],
-                        'lowStock': summary['low_stock_count'],
-                        'outOfStock': summary['out_of_stock_count'],
-                        'totalValue': str(summary['total_value'])
-                    },
-                    'categories': categories,
-                    'products': products,
-                    'pagination': {
-                        'currentPage': page,
-                        'totalPages': total_pages,
-                        'totalItems': total_count,
-                        'itemsPerPage': items_per_page
-                    }
-                })
-
-        except Exception as e:
-            print(f"Error generating inventory report: {str(e)}")
-            return Response(
-                {"detail": "Error generating inventory report"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            return Response({
+                'summary': {
+                    'totalProducts': summary['total_products'],
+                    'lowStock': summary['low_stock_count'],
+                    'outOfStock': summary['out_of_stock_count'],
+                    'totalValue': str(summary['total_value'])
+                },
+                'categories': categories,
+                'products': products,
+                'pagination': {
+                    'currentPage': page,
+                    'totalPages': total_pages,
+                    'totalItems': total_count,
+                    'itemsPerPage': items_per_page
+                }
+            })
 
     @action(detail=False, methods=['get'])
     def sales_chart(self, request):
-        is_authenticated, _, is_admin = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin:
-            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
+        user = request.user
+        requested_shop_id = request.query_params.get('shop')
+        
+        # Use a specialized filter for sales (different table alias)
+        if user.role == 'admin' or user.can_access_all_shops:
+            if requested_shop_id and requested_shop_id != 'all':
+                sales_filter = "WHERE s.shop_id = %s"
+                params = [requested_shop_id]
+            else:
+                sales_filter = ""
+                params = []
+        else:
+            user_shop_id = user.shop.id if user.shop else None
+            if not user_shop_id:
+                return Response({"items": []})
+            sales_filter = "WHERE s.shop_id = %s"
+            params = [user_shop_id]
 
         try:
             # Get page number from query params, default to 1
@@ -2093,18 +1804,28 @@ class ReportViewSet(viewsets.ViewSet):
             items_per_page = 6
             offset = (page - 1) * items_per_page
 
+            shop_id = request.query_params.get('shop')
+
             with connection.cursor() as cursor:
+                # Build filter
+                shop_filter = ""
+                params = []
+                if shop_id and shop_id != 'all':
+                    shop_filter = "AND s.shop_id = %s"
+                    params = [shop_id]
+
                 # Get total count for pagination
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COUNT(DISTINCT DATE_TRUNC('day', s.created_at)::date)
                     FROM sales s
                     WHERE s.created_at >= NOW() - INTERVAL '30 days'
-                """)
+                    {shop_filter}
+                """, params)
                 total_count = cursor.fetchone()[0]
                 total_pages = (total_count + items_per_page - 1) // items_per_page
 
                 # Get paginated sales data with items sold per day
-                cursor.execute("""
+                cursor.execute(f"""
                     WITH daily_sales AS (
                         SELECT 
                             DATE_TRUNC('day', s.created_at)::date as date,
@@ -2116,6 +1837,7 @@ class ReportViewSet(viewsets.ViewSet):
                         LEFT JOIN sale_items si ON s.id = si.sale_id
                         LEFT JOIN products p ON si.product_id = p.id
                         WHERE s.created_at >= NOW() - INTERVAL '30 days'
+                        {shop_filter}
                         GROUP BY DATE_TRUNC('day', s.created_at)
                     ),
                     product_quantities AS (
@@ -2127,6 +1849,7 @@ class ReportViewSet(viewsets.ViewSet):
                         LEFT JOIN sale_items si ON s.id = si.sale_id
                         LEFT JOIN products p ON si.product_id = p.id
                         WHERE s.created_at >= NOW() - INTERVAL '30 days'
+                        {shop_filter}
                         GROUP BY DATE_TRUNC('day', s.created_at), p.name
                     ),
                     product_details AS (
@@ -2150,7 +1873,7 @@ class ReportViewSet(viewsets.ViewSet):
                     LEFT JOIN product_details pd ON ds.date = pd.date
                     ORDER BY ds.date DESC
                     LIMIT %s OFFSET %s
-                """, [items_per_page, offset])
+                """, params * 2 + [items_per_page, offset])
                 columns = [col[0] for col in cursor.description]
                 results = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
@@ -2180,11 +1903,11 @@ class ReportViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['get'])
     def top_products(self, request):
-        is_authenticated, _, is_admin = self.check_token_auth(request)
+        is_authenticated, user_id, is_authorized = self.check_token_auth(request)
         if not is_authenticated:
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin:
-            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
+        
+        shop_id = request.query_params.get('shop')
 
         try:
             # Get page number from query params, default to 1
@@ -2197,13 +1920,22 @@ class ReportViewSet(viewsets.ViewSet):
             end_date = request.query_params.get('end_date')
 
             date_filter = ""
-            params = [items_per_page, offset]
+            shop_filter = ""
+            params = []
+
+            if shop_id and shop_id != 'all':
+                shop_filter = "AND s.shop_id = %s"
+                params.append(shop_id)
 
             if start_date and end_date:
                 date_filter = "AND s.created_at BETWEEN %s::timestamp AND %s::timestamp + interval '1 day'"
-                params = [start_date, end_date] + params
+                params.extend([start_date, end_date])
             else:
                 date_filter = "AND s.created_at >= NOW() - INTERVAL '30 days'"
+
+            # Add limit/offset to params later
+            count_params = list(params)
+            select_params = list(params) + [items_per_page, offset]
 
             with connection.cursor() as cursor:
                 # Get total count for pagination
@@ -2211,8 +1943,8 @@ class ReportViewSet(viewsets.ViewSet):
                     SELECT COUNT(DISTINCT si.product_id)
                     FROM sale_items si
                     JOIN sales s ON si.sale_id = s.id
-                    WHERE 1=1 {date_filter}
-                """, params[:-2] if start_date and end_date else [])
+                    WHERE 1=1 {date_filter} {shop_filter}
+                """, count_params)
 
                 total_count = cursor.fetchone()[0]
                 total_pages = (total_count + items_per_page - 1) // items_per_page
@@ -2232,11 +1964,11 @@ class ReportViewSet(viewsets.ViewSet):
                     JOIN sale_items si ON p.id = si.product_id
                     JOIN sales s ON si.sale_id = s.id
                     LEFT JOIN categories c ON p.category_id = c.id
-                    WHERE 1=1 {date_filter}
+                    WHERE 1=1 {date_filter} {shop_filter}
                     GROUP BY p.id, p.name, p.sku, c.name
                     ORDER BY total_quantity DESC
                     LIMIT %s OFFSET %s
-                """, params)
+                """, select_params)
 
                 columns = [col[0] for col in cursor.description]
                 results = [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -2277,8 +2009,8 @@ class ReportViewSet(viewsets.ViewSet):
         is_authenticated, user_id, is_admin = self.check_token_auth(request)
         if not is_authenticated:
             return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin:
-            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
+        
+        shop_id = request.query_params.get('shop')
 
         try:
             start_date = request.query_params.get('start')
@@ -2286,9 +2018,15 @@ class ReportViewSet(viewsets.ViewSet):
             if not start_date or not end_date:
                 return Response({"detail": "Date range required"}, status=status.HTTP_400_BAD_REQUEST)
 
+            shop_filter = ""
+            params = [start_date, end_date]
+            if shop_id and shop_id != 'all':
+                shop_filter = "AND s.shop_id = %s"
+                params.append(shop_id)
+
             with connection.cursor() as cursor:
                 # Get monthly profit data
-                cursor.execute("""
+                cursor.execute(f"""
                     WITH monthly_data AS (
                         SELECT 
                             DATE_TRUNC('month', s.created_at) as month,
@@ -2301,6 +2039,7 @@ class ReportViewSet(viewsets.ViewSet):
                         LEFT JOIN sale_items si ON s.id = si.sale_id
                         LEFT JOIN products p ON si.product_id = p.id
                         WHERE s.created_at BETWEEN %s::timestamp AND %s::timestamp + interval '1 day'
+                        {shop_filter}
                         GROUP BY DATE_TRUNC('month', s.created_at)
                     )
                     SELECT 
@@ -2316,7 +2055,7 @@ class ReportViewSet(viewsets.ViewSet):
                         END as profit_margin
                     FROM monthly_data
                     ORDER BY month DESC
-                """, [start_date, end_date])
+                """, params)
 
                 columns = [col[0] for col in cursor.description]
                 monthly_data = [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -2348,127 +2087,158 @@ class ReportViewSet(viewsets.ViewSet):
         except Exception as e:
             print(f"Error generating profit report: {str(e)}")
             return Response(
-                {"detail": "Internal server error"},
+                {"detail": f"Error generating profit report: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
     @action(detail=False, methods=['get'])
     def stats(self, request):
-        is_authenticated, _, is_admin = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin:
-            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
+        user = request.user
+        requested_shop_id = request.query_params.get('shop')
+        
+        # Use helper to get proper filters
+        if user.role == 'admin' or user.can_access_all_shops:
+            if requested_shop_id and requested_shop_id != 'all':
+                inv_shop_filter = "AND si.shop_id = %s"
+                sales_shop_filter = "AND s.shop_id = %s"
+                params = [requested_shop_id]
+            else:
+                inv_shop_filter = ""
+                sales_shop_filter = ""
+                params = []
+        else:
+            user_shop_id = user.shop.id if user.shop else None
+            if not user_shop_id:
+                return Response({"detail": "No shop assigned"}, status=status.HTTP_403_FORBIDDEN)
+            inv_shop_filter = "AND si.shop_id = %s"
+            sales_shop_filter = "AND s.shop_id = %s"
+            params = [user_shop_id]
 
         try:
             with connection.cursor() as cursor:
                 # Get current month stats with proper low stock counting
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT 
-                        COALESCE((SELECT COUNT(*) FROM products), 0) as total_products,
                         COALESCE((
-                            SELECT COUNT(*) 
-                            FROM products 
-                            WHERE quantity <= min_stock_level 
-                            AND quantity > 0
-                        ), 0) as low_stock_products,
+                            SELECT COUNT(DISTINCT p.id) 
+                            FROM products p
+                            {f"JOIN shop_inventory si ON p.id = si.product_id WHERE si.shop_id = %s" if requested_shop_id and requested_shop_id != 'all' else ""}
+                        ), 0) as total_products,
                         COALESCE((
-                            SELECT COUNT(*) 
-                            FROM products 
-                            WHERE quantity = 0
+                            SELECT SUM(si.quantity)
+                            FROM shop_inventory si
+                            WHERE 1=1 {inv_shop_filter}
+                        ), 0) as total_stock_quantity,
+                        COALESCE((
+                            SELECT COUNT(*)
+                            FROM shop_inventory si
+                            WHERE si.quantity <= si.min_stock_level AND si.quantity > 0 {inv_shop_filter}
+                        ), 0) as low_stock_count,
+                        COALESCE((
+                            SELECT COUNT(DISTINCT p.id) 
+                            FROM products p
+                            LEFT JOIN shop_inventory si ON p.id = si.product_id
+                            WHERE COALESCE(si.quantity, 0) = 0
+                            {inv_shop_filter}
                         ), 0) as out_of_stock_products,
                         COALESCE((
-                            SELECT SUM(total_amount) 
-                            FROM sales 
-                            WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)
+                            SELECT SUM(s.total_amount)
+                            FROM sales s
+                            WHERE s.sale_date >= date('now', 'start of month') {sales_shop_filter}
                         ), 0) as total_sales,
                         COALESCE((
                             SELECT COUNT(*) 
-                            FROM sales 
-                            WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)
+                            FROM sales s
+                            WHERE s.sale_date >= date('now', 'start of month')
+                            {sales_shop_filter}
                         ), 0) as total_orders
-                """)
+                """, ([requested_shop_id] if requested_shop_id and requested_shop_id != 'all' else []) + params * 5)
                 current_stats = cursor.fetchone()
 
                 # Get last month stats for comparison
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT 
                         COALESCE((
-                            SELECT COUNT(*) 
-                            FROM products 
-                            WHERE created_at < DATE_TRUNC('month', CURRENT_DATE)
-                        ), 0) as last_month_products,
-                        COALESCE((
-                            SELECT COUNT(*) 
-                            FROM products 
-                            WHERE quantity <= min_stock_level 
-                            AND quantity > 0 
-                            AND created_at < DATE_TRUNC('month', CURRENT_DATE)
-                        ), 0) as last_month_low_stock,
-                        COALESCE((
-                            SELECT SUM(total_amount) 
-                            FROM sales 
-                            WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') 
-                            AND created_at < DATE_TRUNC('month', CURRENT_DATE)
+                            SELECT SUM(s.total_amount)
+                            FROM sales s
+                            WHERE s.sale_date >= date('now', 'start of month', '-1 month') 
+                            AND s.sale_date < date('now', 'start of month')
+                            {sales_shop_filter}
                         ), 0) as last_month_sales,
                         COALESCE((
-                            SELECT COUNT(*) 
-                            FROM sales 
-                            WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') 
-                            AND created_at < DATE_TRUNC('month', CURRENT_DATE)
+                            SELECT COUNT(*)
+                            FROM sales s
+                            WHERE s.sale_date >= date('now', 'start of month', '-1 month')
+                            AND s.sale_date < date('now', 'start of month')
+                            {sales_shop_filter}
                         ), 0) as last_month_orders
-                """)
-                last_month_stats = cursor.fetchone()
+                """, params * 2)
+                last_stats = cursor.fetchone()
 
-                if current_stats and last_month_stats:
-                    total_products, low_stock_products, out_of_stock_products, total_sales, total_orders = current_stats
-                    last_month_products, last_month_low_stock, last_month_sales, last_month_orders = last_month_stats
+                # Calculate changes
+                sales_change = 0
+                if last_stats and last_stats[0] > 0:
+                    sales_change = ((current_stats[4] - last_stats[0]) / last_stats[0]) * 100
+                
+                orders_change = 0
+                if last_stats and last_stats[1] > 0:
+                    orders_change = ((current_stats[5] - last_stats[1]) / last_stats[1]) * 100
 
-                    # Calculate percentage changes
-                    products_change = ((total_products - last_month_products) / last_month_products * 100) if last_month_products > 0 else 0
-                    low_stock_change = ((low_stock_products - last_month_low_stock) / last_month_low_stock * 100) if last_month_low_stock > 0 else 0
-                    sales_change = ((total_sales - last_month_sales) / last_month_sales * 100) if last_month_sales > 0 else 0
-                    orders_change = ((total_orders - last_month_orders) / last_month_orders * 100) if last_month_orders > 0 else 0
+                return Response({
+                    'totalProducts': current_stats[0],
+                    'totalStockQuantity': current_stats[1],
+                    'lowStockCount': current_stats[2],
+                    'outOfStockCount': current_stats[3],
+                    'totalSales': float(current_stats[4]),
+                    'pendingOrders': current_stats[5],
+                    'compareLastMonth': {
+                        'sales': round(sales_change, 1),
+                        'orders': round(orders_change, 1),
+                        'products': 0,
+                        'lowStock': 0
+                    }
+                })
 
-                    return Response({
-                        'totalProducts': total_products,
-                        'lowStockCount': low_stock_products,
-                        'outOfStockCount': out_of_stock_products,
-                        'totalSales': float(total_sales),
-                        'pendingOrders': total_orders,
-                        'compareLastMonth': {
-                            'products': round(products_change, 1),
-                            'lowStock': round(low_stock_change, 1),
-                            'sales': round(sales_change, 1),
-                            'orders': round(orders_change, 1)
-                        }
-                    })
         except Exception as e:
-            print(f"Error in stats: {str(e)}")
-            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        return Response({"detail": "Error fetching stats"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            print(f"Error getting dashboard stats: {str(e)}")
+            return Response(
+                {"detail": f"Error getting dashboard stats: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @action(detail=False, methods=['get'])
     def category_chart(self, request):
-        is_authenticated, _, is_admin = self.check_token_auth(request)
-        if not is_authenticated:
-            return Response({"detail": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-        if not is_admin:
-            return Response({"detail": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
+        user = request.user
+        requested_shop_id = request.query_params.get('shop')
+
+        if user.role == 'admin' or user.can_access_all_shops:
+            if requested_shop_id and requested_shop_id != 'all':
+                shop_filter = "AND si.shop_id = %s"
+                params = [requested_shop_id]
+            else:
+                shop_filter = ""
+                params = []
+        else:
+            user_shop_id = user.shop.id if user.shop else None
+            if not user_shop_id:
+                return Response([])
+            shop_filter = "AND si.shop_id = %s"
+            params = [user_shop_id]
 
         try:
             with connection.cursor() as cursor:
-                cursor.execute("""
+                cursor.execute(f"""
                     WITH category_totals AS (
                         SELECT 
                             c.id,
                             c.name,
-                            COALESCE(COUNT(p.id), 0) as product_count,
-                            COALESCE(SUM(p.quantity), 0) as total_quantity,
-                            COALESCE(SUM(p.quantity * p.sell_price), 0) as total_value
+                            COALESCE(COUNT(DISTINCT p.id), 0) as product_count,
+                            COALESCE(SUM(si.quantity), 0) as total_quantity,
+                            COALESCE(SUM(si.quantity * p.sell_price), 0) as total_value
                         FROM categories c
                         LEFT JOIN products p ON c.id = p.category_id
+                        LEFT JOIN shop_inventory si ON p.id = si.product_id
+                        WHERE 1=1 {shop_filter}
                         GROUP BY c.id, c.name
                     ),
                     total_products AS (
@@ -2487,7 +2257,7 @@ class ReportViewSet(viewsets.ViewSet):
                         END as percentage
                     FROM category_totals
                     ORDER BY percentage DESC
-                """)
+                """, params)
                 columns = [col[0] for col in cursor.description]
                 results = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
@@ -2501,6 +2271,80 @@ class ReportViewSet(viewsets.ViewSet):
                 return Response(results)
         except Exception as e:
             print(f"Error in category_chart: {str(e)}")
+            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    # Sync all products from Business Central
+    @action(detail=False, methods=['post'], permission_classes=[IsSystemAdmin])
+    def sync_bc(self, request):
+        try:
+            result = BCSyncService.sync_all()
+            
+            Activity.objects.create(
+                type='restock',
+                description=f"BC Product Sync: {result['created']} created, {result['updated']} updated",
+                user=request.user,
+                status='completed'
+            )
+            
+            return Response(result)
+        except Exception as e:
+            logging.error(f"Error in BC sync action: {str(e)}")
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='shop-comparison', permission_classes=[IsSystemAdmin])
+    def shop_comparison(self, request):
+        try:
+            with connection.cursor() as cursor:
+                # 1. Sales by Shop (Gross Sales)
+                cursor.execute("""
+                    SELECT 
+                        s.name as shop_name,
+                        COALESCE(SUM(sa.total_amount), 0) as total_sales,
+                        COUNT(sa.id) as transaction_count
+                    FROM shops s
+                    LEFT JOIN sales sa ON s.id = sa.shop_id
+                    GROUP BY s.id, s.name
+                    ORDER BY total_sales DESC
+                """)
+                sales_by_shop = [
+                    {
+                        "shopName": row[0],
+                        "totalSales": float(row[1]),
+                        "transactions": row[2]
+                    } for row in cursor.fetchall()
+                ]
+
+                # 2. Inventory Value by Shop
+                cursor.execute("""
+                    SELECT 
+                        s.name as shop_name,
+                        COALESCE(SUM(si.quantity * p.sell_price), 0) as inventory_value,
+                        COALESCE(SUM(si.quantity), 0) as total_units
+                    FROM shops s
+                    LEFT JOIN shop_inventory si ON s.id = si.shop_id
+                    LEFT JOIN products p ON si.product_id = p.id
+                    GROUP BY s.id, s.name
+                    ORDER BY inventory_value DESC
+                """)
+                inventory_by_shop = [
+                    {
+                        "shopName": row[0],
+                        "inventoryValue": float(row[1]),
+                        "totalUnits": int(row[2])
+                    } for row in cursor.fetchall()
+                ]
+
+                return Response({
+                    "salesByShop": sales_by_shop,
+                    "inventoryByShop": inventory_by_shop,
+                    "revenueShare": [
+                        { "name": s["shopName"], "value": s["totalSales"] }
+                        for s in sales_by_shop if s["totalSales"] > 0
+                    ]
+                })
+
+        except Exception as e:
+            print(f"Error in shop_comparison: {str(e)}")
             return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])

@@ -31,12 +31,10 @@ class ProductBatch(models.Model):
     def clean(self):
         if self.remaining_quantity > self.quantity:
             raise ValidationError('Remaining quantity cannot be greater than initial quantity')
-        if self.purchase_price <= 0:
-            raise ValidationError('Purchase price must be positive')
-        if self.selling_price <= 0:
-            raise ValidationError('Selling price must be positive')
-        if self.selling_price < self.purchase_price:
-            raise ValidationError('Selling price cannot be less than purchase price')
+        if self.purchase_price < 0:
+            raise ValidationError('Purchase price cannot be negative')
+        if self.selling_price < 0:
+            raise ValidationError('Selling price cannot be negative')
 
     def save(self, *args, **kwargs):
         self.full_clean()

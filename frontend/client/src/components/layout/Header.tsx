@@ -1,8 +1,8 @@
-import {useState} from "react";
-import {useAuth} from "../../lib/auth";
-import {useToast} from "../../hooks/use-toast";
-import {useQueryClient, useQuery} from "@tanstack/react-query";
-import {formatDistanceToNow} from "date-fns";
+import { useState } from "react";
+import { useAuth } from "../../lib/auth";
+import { useToast } from "../../hooks/use-toast";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
+import { formatDistanceToNow } from "date-fns";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -10,21 +10,20 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger
 } from "../ui/dropdown-menu";
-import {Activity} from "../../../../shared/schema";
+import { Activity } from "../../../../shared/schema";
 
 interface HeaderProps {
     toggleSidebar: () => void;
 }
 
-const Header = ({toggleSidebar}: HeaderProps) => {
-    const {user, logout} = useAuth();
-    const {toast} = useToast();
+const Header = ({ toggleSidebar }: HeaderProps) => {
+    const { user, logout } = useAuth();
+    const { toast } = useToast();
     const queryClient = useQueryClient();
-    const [searchTerm, setSearchTerm] = useState("");
     const [readNotifications, setReadNotifications] = useState<Set<number>>(new Set());
 
     // Fetch activities from the /api/activities endpoint
-    const {data: activities = []} = useQuery<Activity[]>({
+    const { data: activities = [] } = useQuery<Activity[]>({
         queryKey: ['/api/activities/'],
         queryFn: async () => {
             try {
@@ -62,17 +61,17 @@ const Header = ({toggleSidebar}: HeaderProps) => {
     const getNotificationMeta = (type: string) => {
         switch (type) {
             case 'stock_added':
-                return {icon: 'fas fa-arrow-up', color: 'bg-green-100 text-green-500'};
+                return { icon: 'fas fa-arrow-up', color: 'bg-green-100 text-green-500' };
             case 'stock_removed':
-                return {icon: 'fas fa-arrow-down', color: 'bg-red-100 text-red-500'};
+                return { icon: 'fas fa-arrow-down', color: 'bg-red-100 text-red-500' };
             case 'order':
-                return {icon: 'fas fa-box', color: 'bg-blue-100 text-blue-500'};
+                return { icon: 'fas fa-box', color: 'bg-blue-100 text-blue-500' };
             case 'restock_order':
-                return {icon: 'fas fa-truck', color: 'bg-purple-100 text-purple-500'};
+                return { icon: 'fas fa-truck', color: 'bg-purple-100 text-purple-500' };
             case 'sale':
-                return {icon: 'fas fa-shopping-cart', color: 'bg-orange-100 text-orange-500'};
+                return { icon: 'fas fa-shopping-cart', color: 'bg-orange-100 text-orange-500' };
             default:
-                return {icon: 'fas fa-info-circle', color: 'bg-gray-100 text-gray-500'};
+                return { icon: 'fas fa-info-circle', color: 'bg-gray-100 text-gray-500' };
         }
     };
 
@@ -101,22 +100,7 @@ const Header = ({toggleSidebar}: HeaderProps) => {
                 </button>
             </div>
 
-            <div className="flex-1 md:ml-4">
-                <div className="relative max-w-md">
-                    <input
-                        type="text"
-                        placeholder="Search..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                    <div className="absolute left-3 top-2.5 text-gray-400">
-                        <i className="fas fa-search"></i>
-                    </div>
-                </div>
-            </div>
-
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-4 ml-auto">
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <button className="relative p-2 text-gray-600 hover:text-gray-900">
@@ -124,8 +108,8 @@ const Header = ({toggleSidebar}: HeaderProps) => {
                             {unreadCount > 0 && (
                                 <span
                                     className="absolute top-0 right-0 h-4 w-4 rounded-full bg-red-500 text-white text-xs flex items-center justify-center">
-                  {unreadCount}
-                </span>
+                                    {unreadCount}
+                                </span>
                             )}
                         </button>
                     </DropdownMenuTrigger>
@@ -170,7 +154,7 @@ const Header = ({toggleSidebar}: HeaderProps) => {
                                                 </p>
                                                 <p className="text-xs text-gray-500 mt-1">{activity.description}</p>
                                                 <p className="text-xs text-gray-400 mt-1">
-                                                    {activity.created_at ? formatDistanceToNow(new Date(activity.created_at), {addSuffix: true}) : ''}
+                                                    {activity.created_at ? formatDistanceToNow(new Date(activity.created_at), { addSuffix: true }) : ''}
                                                 </p>
                                             </div>
                                         </div>
@@ -183,7 +167,7 @@ const Header = ({toggleSidebar}: HeaderProps) => {
                                 </div>
                             )}
                         </div>
-                        <DropdownMenuSeparator/>
+                        <DropdownMenuSeparator />
                         <div className="p-2 text-center">
                             <button
                                 className="text-xs text-blue-600 hover:text-blue-800 font-medium"
@@ -226,7 +210,7 @@ const Header = ({toggleSidebar}: HeaderProps) => {
                         }}>
                             <i className="fas fa-cog mr-2"></i> Settings
                         </DropdownMenuItem>
-                        <DropdownMenuSeparator/>
+                        <DropdownMenuSeparator />
                         <DropdownMenuItem onClick={handleLogout}>
                             <i className="fas fa-sign-out-alt mr-2"></i> Logout
                         </DropdownMenuItem>

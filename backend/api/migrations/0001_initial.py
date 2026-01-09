@@ -24,7 +24,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'db_table': 'categories',
-                'managed': False,
+                'managed': True,
             },
         ),
         migrations.CreateModel(
@@ -43,7 +43,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'db_table': 'products',
-                'managed': False,
+                'managed': True,
             },
         ),
         migrations.CreateModel(
@@ -61,7 +61,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'db_table': 'restock_rules',
-                'managed': False,
+                'managed': True,
             },
         ),
         migrations.CreateModel(
@@ -77,7 +77,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'db_table': 'sales',
-                'managed': False,
+                'managed': True,
             },
         ),
         migrations.CreateModel(
@@ -90,7 +90,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'db_table': 'sale_items',
-                'managed': False,
+                'managed': True,
             },
         ),
         migrations.CreateModel(

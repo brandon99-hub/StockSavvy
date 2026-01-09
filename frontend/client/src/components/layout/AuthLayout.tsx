@@ -20,7 +20,7 @@ const AuthLayout = ({ children }: AuthLayoutProps) => {
     if (!isLoading && !isAuthenticated && !redirecting) {
       console.log('Not authenticated, redirecting to login...');
       setRedirecting(true);
-      
+
       // Use setTimeout to ensure redirect happens after state updates
       setTimeout(() => {
         navigate("/login");
@@ -63,23 +63,23 @@ const AuthLayout = ({ children }: AuthLayoutProps) => {
   return (
     <div className="min-h-screen flex flex-col md:flex-row">
       {/* Sidebar for desktop */}
-      <div className="hidden md:block md:w-64 md:min-h-screen transition-all duration-300 ease-in-out">
+      <div className="hidden md:block md:min-h-screen transition-all duration-300 ease-in-out">
         <Sidebar />
       </div>
-      
+
       {/* Mobile sidebar overlay */}
       {mobileOpen && (
-        <div className="md:hidden fixed inset-0 z-50 bg-gray-900 bg-opacity-50" onClick={toggleSidebar}>
+        <div className="md:hidden fixed inset-0 z-50 bg-gray-900/80 backdrop-blur-sm" onClick={toggleSidebar}>
           <div className="w-64 h-full" onClick={(e) => e.stopPropagation()}>
             <Sidebar isMobile={true} setMobileOpen={setMobileOpen} />
           </div>
         </div>
       )}
-      
+
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header toggleSidebar={toggleSidebar} />
-        
+
         <main className="flex-1 overflow-y-auto bg-gray-100 p-4 md:p-6">
           {children}
         </main>

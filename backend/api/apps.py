@@ -8,9 +8,5 @@ class ApiConfig(AppConfig):
     name = 'api'
 
     def ready(self):
-        try:
-            from .scheduler import start_scheduler
-            start_scheduler()
-            logger.info("Forecast scheduler started successfully")
-        except Exception as e:
-            logger.error(f"Failed to start forecast scheduler: {str(e)}") 
+        # apscheduler was removed as it's no longer used (moved to github cron)
+        pass

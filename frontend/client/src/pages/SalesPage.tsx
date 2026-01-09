@@ -5,7 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Button } from '../components/ui/button';
 import SalesList from '../components/sales/SalesList';
 import CreateSaleForm from '../components/sales/CreateSaleForm';
-import { Sale, SaleItem, Product, User } from '../types';
+import { Sale, SaleItem, Product, User, Customer } from '../types';
 import { useAuth } from '../lib/auth';
 import { apiRequest } from '../lib/queryClient';
 
@@ -29,7 +29,7 @@ const SalesPage = () => {
   });
 
   // Fetch products for product lookup
-  const { data: products = [], isLoading: isProductsLoading, refetch: refetchProducts } = useQuery<Product[]>({
+  const { data: productsData, isLoading: isProductsLoading, refetch: refetchProducts } = useQuery<any>({
     queryKey: ['/api/products/'],
     queryFn: () => apiRequest('/api/products/'),
     // Refetch every 5 seconds to ensure we have the latest prices
@@ -40,21 +40,29 @@ const SalesPage = () => {
     staleTime: 1000
   });
 
+  const products = Array.isArray(productsData) ? productsData : (productsData?.results || []);
+
   // Fetch users for user lookup
   const { data: users = [], isLoading: isUsersLoading } = useQuery<User[]>({
     queryKey: ['/api/users/'],
     queryFn: () => apiRequest('/api/users/')
   });
 
-  const isLoading = isSalesLoading || isSaleItemsLoading || isProductsLoading || isUsersLoading;
+  // Fetch customers
+  const { data: customers = [], isLoading: isCustomersLoading } = useQuery<Customer[]>({
+    queryKey: ['/api/customers/'],
+    queryFn: () => apiRequest('/api/customers/')
+  });
+
+  const isLoading = isSalesLoading || isSaleItemsLoading || isProductsLoading || isUsersLoading || isCustomersLoading;
 
   // Convert products and users arrays to objects for easier lookup
-  const productsMap = products.reduce((acc, product) => {
+  const productsMap = products.reduce((acc: Record<number, Product>, product: Product) => {
     acc[product.id] = product;
     return acc;
   }, {} as Record<number, Product>);
 
-  const usersMap = users.reduce((acc, user) => {
+  const usersMap = users.reduce((acc: Record<number, User>, user: User) => {
     acc[user.id] = user;
     return acc;
   }, {} as Record<number, User>);
@@ -88,9 +96,9 @@ const SalesPage = () => {
           {isLoading ? (
             <div className="text-center py-8">Loading sales data...</div>
           ) : (
-            <SalesList 
-              sales={sales} 
-              saleItems={saleItems} 
+            <SalesList
+              sales={sales}
+              saleItems={saleItems}
               products={productsMap}
               users={usersMap}
             />
@@ -98,7 +106,7 @@ const SalesPage = () => {
         </TabsContent>
         {canCreateSale && (
           <TabsContent value="create">
-            <CreateSaleForm products={products} />
+            <CreateSaleForm products={products} customers={customers} />
           </TabsContent>
         )}
       </Tabs>

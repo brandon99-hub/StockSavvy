@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
 } from '../ui/table';
 import {
   Card,
@@ -21,16 +21,16 @@ import {
   PaginationPrevious,
 } from "../ui/pagination";
 import { Button } from '../ui/button';
-import { 
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger
 } from '../ui/dropdown-menu';
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogHeader, 
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
   DialogTitle,
   DialogFooter
 } from '../ui/dialog';
@@ -67,14 +67,15 @@ import {
 } from '@mui/material';
 import { Search as SearchIcon } from '@mui/icons-material';
 import {
-    Edit, 
-    Trash2, 
-    Plus, 
-    Search, 
-    AlertTriangle, 
-    CheckCircle, 
-    XCircle,
-    Layers
+  Edit,
+  Trash2,
+  Plus,
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  Layers,
+  ArrowLeftRight,
+  Clock
 } from 'lucide-react';
 import { formatCurrency } from '../../lib/utils';
 
@@ -88,6 +89,10 @@ interface InventoryListProps {
   isLoading?: boolean;
   onEdit: (product: Product) => void;
   onViewBatches: (product: Product) => void;
+  totalCount: number;
+  totalPages: number;
+  currentPage: number;
+  onPageChange: (page: number) => void;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -102,16 +107,32 @@ const InventoryList: React.FC<InventoryListProps> = ({
   isLoading = false,
   onEdit,
   onViewBatches,
+  totalCount,
+  totalPages,
+  currentPage,
+  onPageChange
 }) => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [page, setPage] = useState(1);
   const { user } = useAuth();
   const canEdit = user?.role === 'admin' || user?.role === 'manager';
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
 
   const [sortField, setSortField] = useState<keyof Product>('name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Session-based UOM toggle state
+  const [uomView, setUomView] = useState<Record<number, 'PCS' | 'CARTON'>>({});
+
+  const toggleUOM = (productId: number) => {
+    setUomView(prev => ({
+      ...prev,
+      [productId]: prev[productId] === 'CARTON' ? 'PCS' : 'CARTON'
+    }));
+  };
+
+  const getCurrentUOM = (productId: number) => uomView[productId] || 'PCS';
 
   if (isLoading) {
     return (
@@ -133,38 +154,12 @@ const InventoryList: React.FC<InventoryListProps> = ({
     }
   };
 
-  const filteredProducts = products
-    .filter(product => {
-      const matchesCategory = !selectedCategory || product.category_id?.toString() === selectedCategory;
-      const matchesSearch = !searchQuery || (
-        (product.name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
-        (product.sku?.toLowerCase() || '').includes(searchQuery.toLowerCase())
-      );
-      return matchesCategory && matchesSearch;
-    })
-    .sort((a, b) => {
-      const aValue = a[sortField];
-      const bValue = b[sortField];
-      if (typeof aValue === 'string' && typeof bValue === 'string') {
-        return sortDirection === 'asc' 
-          ? aValue.localeCompare(bValue)
-          : bValue.localeCompare(aValue);
-      }
-      return sortDirection === 'asc' 
-        ? (aValue as number) - (bValue as number)
-        : (bValue as number) - (aValue as number);
-    });
-
-  // Paginate products
-  const totalPages = Math.ceil(filteredProducts.length / ITEMS_PER_PAGE);
-  const startIndex = (page - 1) * ITEMS_PER_PAGE;
-  const paginatedProducts = filteredProducts.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  const paginatedProducts = products;
 
   const handleDelete = async (product: Product) => {
     setProductToDelete(product);
   };
 
-  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const confirmDelete = async () => {
     if (!productToDelete) return;
@@ -182,7 +177,7 @@ const InventoryList: React.FC<InventoryListProps> = ({
         description: 'Product deleted successfully',
       });
       setProductToDelete(null);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Delete error:', error);
 
       // Extract the error message from the response
@@ -208,13 +203,28 @@ const InventoryList: React.FC<InventoryListProps> = ({
     return categories.find(c => c.id === categoryId)?.name || 'Uncategorized';
   };
 
-  const getStockStatus = (quantity: number, minStockLevel: number) => {
+  const getStockStatus = (product: Product) => {
+    const quantity = product.master_quantity || 0;
+    const minStockLevel = product.min_stock_level || 0;
+
+    // Only 'Pending' if there's no master stock AND no shop has recorded anything
+    if (quantity === 0 && !product.has_shop_inventory) {
+      return { status: 'Pending', color: 'bg-gray-100 text-gray-600' };
+    }
+
     if (quantity === 0) return { status: 'Out of Stock', color: 'bg-red-100 text-red-800' };
     if (quantity <= minStockLevel) return { status: 'Low Stock', color: 'bg-yellow-100 text-yellow-800' };
     return { status: 'In Stock', color: 'bg-green-100 text-green-800' };
   };
 
-  const getStockIcon = (quantity: number, minStockLevel: number) => {
+  const getStockIcon = (product: Product) => {
+    const quantity = product.master_quantity || 0;
+    const minStockLevel = product.min_stock_level || 0;
+
+    if (quantity === 0 && !product.has_shop_inventory) {
+      return <Clock className="w-4 h-4 text-gray-400" />;
+    }
+
     if (quantity === 0) return <XCircle className="w-4 h-4 text-red-500" />;
     if (quantity <= minStockLevel) return <AlertTriangle className="w-4 h-4 text-yellow-500" />;
     return <CheckCircle className="w-4 h-4 text-green-500" />;
@@ -240,37 +250,43 @@ const InventoryList: React.FC<InventoryListProps> = ({
         <Table>
           <TableHeader>
             <TableRow className="bg-gray-50">
-              <TableHead 
+              <TableHead
                 className="cursor-pointer hover:bg-gray-100"
                 onClick={() => handleSort('name')}
               >
                 Name {sortField === 'name' && (sortDirection === 'asc' ? '↑' : '↓')}
               </TableHead>
-              <TableHead 
+              <TableHead
                 className="cursor-pointer hover:bg-gray-100"
                 onClick={() => handleSort('sku')}
               >
                 SKU {sortField === 'sku' && (sortDirection === 'asc' ? '↑' : '↓')}
               </TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead>Category</TableHead>
-              <TableHead 
-                className="cursor-pointer hover:bg-gray-100 text-right"
-                onClick={() => handleSort('quantity')}
+              <TableHead
+                className="cursor-pointer hover:bg-gray-100"
+                onClick={() => handleSort('barcode')}
               >
-                Quantity {sortField === 'quantity' && (sortDirection === 'asc' ? '↑' : '↓')}
+                Barcode {sortField === 'barcode' && (sortDirection === 'asc' ? '↑' : '↓')}
               </TableHead>
-              <TableHead 
+              <TableHead>Category</TableHead>
+              <TableHead
+                className="cursor-pointer hover:bg-gray-100 text-right"
+                onClick={() => handleSort('master_quantity')}
+              >
+                Master Qty {sortField === 'master_quantity' && (sortDirection === 'asc' ? '↑' : '↓')}
+              </TableHead>
+              <TableHead className="text-center">UOM</TableHead>
+              <TableHead
                 className="cursor-pointer hover:bg-gray-100 text-right"
                 onClick={() => handleSort('buy_price')}
               >
-                Buy Price {sortField === 'buy_price' && (sortDirection === 'asc' ? '↑' : '↓')}
+                Unit Cost {sortField === 'buy_price' && (sortDirection === 'asc' ? '↑' : '↓')}
               </TableHead>
-              <TableHead 
+              <TableHead
                 className="cursor-pointer hover:bg-gray-100 text-right"
                 onClick={() => handleSort('sell_price')}
               >
-                Sell Price {sortField === 'sell_price' && (sortDirection === 'asc' ? '↑' : '↓')}
+                Unit Price {sortField === 'sell_price' && (sortDirection === 'asc' ? '↑' : '↓')}
               </TableHead>
               <TableHead>Status</TableHead>
               {canEdit && <TableHead className="text-right">Actions</TableHead>}
@@ -278,36 +294,80 @@ const InventoryList: React.FC<InventoryListProps> = ({
           </TableHeader>
           <TableBody>
             {isLoading ? (
+              Array.from({ length: 5 }).map((_, i) => (
+                <TableRow key={`skeleton-${i}`}>
+                  <TableCell><Skeleton className="h-4 w-32" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-28" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-12 ml-auto" /></TableCell>
+                  <TableCell><Skeleton className="h-6 w-12 mx-auto" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-20 ml-auto" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-20 ml-auto" /></TableCell>
+                  <TableCell><Skeleton className="h-6 w-24" /></TableCell>
+                  <TableCell><Skeleton className="h-8 w-24 ml-auto" /></TableCell>
+                </TableRow>
+              ))
+            ) : products.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-4">
-                  Loading...
-                </TableCell>
-              </TableRow>
-            ) : filteredProducts.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} className="text-center py-4">
-                  No products found
+                <TableCell colSpan={10} className="text-center py-8 text-gray-500">
+                  No products found matching your search.
                 </TableCell>
               </TableRow>
             ) : (
               paginatedProducts.map((product) => {
-                const stockStatus = getStockStatus(product.quantity, product.min_stock_level);
                 const category = categories.find(c => c.id === product.category_id);
 
                 return (
                   <TableRow key={product.id} className="hover:bg-gray-50">
                     <TableCell className="font-medium">{product.name}</TableCell>
                     <TableCell>{product.sku}</TableCell>
-                    <TableCell>{product.description || '-'}</TableCell>
+                    <TableCell className="font-mono text-xs">{product.barcode || '-'}</TableCell>
                     <TableCell>{category?.name || 'Uncategorized'}</TableCell>
-                    <TableCell className="text-right">{product.quantity}</TableCell>
-                    <TableCell className="text-right">{formatCurrency(product.current_batch_buy_price ?? product.buy_price)}</TableCell>
-                    <TableCell className="text-right">{formatCurrency(product.current_batch_sell_price ?? product.sell_price)}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex flex-col items-end gap-1">
+                        <span className="font-medium">{product.master_quantity || 0}</span>
+                        {product.has_mismatch && product.has_shop_inventory && (
+                          <Badge variant="destructive" className="text-[10px] h-4 py-0">
+                            Mismatch: {(product.quantity_diff ?? 0) > 0 ? '+' : ''}{product.quantity_diff ?? 0}
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {product.carton_buy_price || (product.pieces_per_carton > 1) ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => toggleUOM(product.id)}
+                          className="h-7 px-2 text-[10px] font-bold"
+                        >
+                          {getCurrentUOM(product.id)}
+                          <ArrowLeftRight className="ml-1 h-3 w-3" />
+                        </Button>
+                      ) : (
+                        <span className="text-gray-400 text-xs">PCS</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right font-medium">
+                      {formatCurrency(
+                        getCurrentUOM(product.id) === 'CARTON'
+                          ? product.carton_buy_price || (product.buy_price * product.pieces_per_carton)
+                          : product.buy_price
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right font-medium text-blue-600">
+                      {formatCurrency(
+                        getCurrentUOM(product.id) === 'CARTON'
+                          ? product.carton_sell_price || (product.sell_price * product.pieces_per_carton)
+                          : product.sell_price
+                      )}
+                    </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        {getStockIcon(product.quantity, product.min_stock_level)}
-                        <Badge className={stockStatus.color}>
-                          {stockStatus.status}
+                        {getStockIcon(product)}
+                        <Badge variant="outline" className={`${getStockStatus(product).color} border-none`}>
+                          {getStockStatus(product).status}
                         </Badge>
                       </div>
                     </TableCell>
@@ -350,8 +410,8 @@ const InventoryList: React.FC<InventoryListProps> = ({
         </Table>
 
         {/* Delete Confirmation Dialog */}
-        <AlertDialog 
-          open={!!productToDelete} 
+        <AlertDialog
+          open={!!productToDelete}
           onOpenChange={(open) => {
             if (!open) {
               setProductToDelete(null);
@@ -376,7 +436,7 @@ const InventoryList: React.FC<InventoryListProps> = ({
                 </div>
               ) : (
                 <AlertDialogDescription>
-                  Are you sure you want to delete the product "{productToDelete?.name}"? 
+                  Are you sure you want to delete the product "{productToDelete?.name}"?
                   This action cannot be undone and will permanently remove the product from your inventory.
                 </AlertDialogDescription>
               )}
@@ -401,20 +461,20 @@ const InventoryList: React.FC<InventoryListProps> = ({
         <Pagination>
           <PaginationContent>
             <PaginationItem>
-              <PaginationPrevious 
-                onClick={() => setPage(Math.max(1, page - 1))}
-                isActive={page > 1}
+              <PaginationPrevious
+                onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+                isActive={currentPage > 1}
               />
             </PaginationItem>
             <PaginationItem>
               <span className="text-sm text-gray-600">
-                Page {page} of {totalPages}
+                Page {currentPage} of {totalPages} (Total: {totalCount})
               </span>
             </PaginationItem>
             <PaginationItem>
               <PaginationNext
-                onClick={() => setPage(Math.min(totalPages, page + 1))}
-                isActive={page < totalPages}
+                onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+                isActive={currentPage < totalPages}
               />
             </PaginationItem>
           </PaginationContent>

@@ -14,6 +14,7 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'your-secret-key-here')
 ALLOWED_HOSTS = ['*']
 
 INSTALLED_APPS = [
+    'daphne',
     'api',
     'django.contrib.admin',
     'django.contrib.auth',
@@ -23,6 +24,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
+    'channels',
 ]
 
 MIDDLEWARE = [
@@ -56,6 +58,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'backend.wsgi.application'
+ASGI_APPLICATION = 'backend.asgi.application'
 
 PASSWORD_HASHERS = [
     'django.contrib.auth.hashers.PBKDF2PasswordHasher',  # Default hasher
@@ -63,7 +66,7 @@ PASSWORD_HASHERS = [
 ]
 
 # Database configuration
-DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://postgres.tmfdwxfdtwjbulrwqmus:Exlifes_6969@aws-0-eu-west-2.pooler.supabase.com:6543/postgres')
+DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://postgres.jrysglbumttznjggirmy:Exlifes_6969@aws-1-eu-west-2.pooler.supabase.com:6543/postgres')
 
 # Parse database URL
 db_config = dj_database_url.parse(DATABASE_URL)
@@ -81,9 +84,9 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'postgres',
-        'USER': 'postgres.tmfdwxfdtwjbulrwqmus',
+        'USER': 'postgres.jrysglbumttznjggirmy',
         'PASSWORD': 'Exlifes_6969',
-        'HOST': 'aws-0-eu-west-2.pooler.supabase.com',
+        'HOST': 'aws-1-eu-west-2.pooler.supabase.com',
         'PORT': '6543',
         'CONN_MAX_AGE': 60,  # Force reconnection every 60 seconds
         'OPTIONS': {
@@ -119,6 +122,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.SessionAuthentication',
+        'api.authentication.CustomTokenAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
@@ -216,4 +220,14 @@ Q_CLUSTER = {
         'port': 6379,
         'db': 0,
     }
+}
+
+# Channel Layers for WebSocket Progress
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            "hosts": [('127.0.0.1', 6379)],
+        },
+    },
 }

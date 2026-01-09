@@ -7,6 +7,10 @@ from .views import (
     profit_report, test_connection, get_product_forecasts, all_product_forecasts
 )
 from .batch_views import ProductBatchViewSet, BatchSaleItemViewSet
+from .shop_views import (
+    ShopViewSet, ShopInventoryViewSet, CustomerViewSet,
+    PaymentMethodViewSet, CreditTransactionViewSet
+)
 
 router = DefaultRouter()
 router.register(r'users', UserViewSet, basename='users')
@@ -20,6 +24,13 @@ router.register(r'reports', ReportViewSet, basename='reports')
 router.register(r'sales-items', SaleItemViewSet, basename='sale-items')
 router.register(r'product-batches', ProductBatchViewSet)
 router.register(r'batch-sale-items', BatchSaleItemViewSet)
+
+# Multi-shop endpoints
+router.register(r'shops', ShopViewSet, basename='shops')
+router.register(r'shop-inventory', ShopInventoryViewSet, basename='shop-inventory')
+router.register(r'customers', CustomerViewSet, basename='customers')
+router.register(r'payment-methods', PaymentMethodViewSet, basename='payment-methods')
+router.register(r'credit-transactions', CreditTransactionViewSet, basename='credit-transactions')
 
 urlpatterns = [
     path('test/', test_connection),

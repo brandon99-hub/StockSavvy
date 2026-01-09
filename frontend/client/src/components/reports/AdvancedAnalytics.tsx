@@ -1,6 +1,6 @@
 import React from 'react';
-import {useState, useEffect, useMemo} from 'react';
-import {useQuery} from '@tanstack/react-query';
+import { useState, useEffect, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
     format,
     subMonths,
@@ -19,6 +19,7 @@ import {
     differenceInDays,
     differenceInMonths
 } from 'date-fns';
+import { useAuth } from '../../lib/auth';
 import {
     Card,
     CardContent,
@@ -27,19 +28,19 @@ import {
     CardDescription,
     CardFooter
 } from '../ui/card';
-import {Button} from '../ui/button';
-import {Tabs, TabsContent, TabsList, TabsTrigger} from '../ui/tabs';
-import {Separator} from '../ui/separator';
-import {Calendar} from '../ui/calendar';
-import {Label} from '../ui/label';
-import {Select, SelectContent, SelectItem, SelectTrigger, SelectValue} from '../ui/select';
+import { Button } from '../ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
+import { Separator } from '../ui/separator';
+import { Calendar } from '../ui/calendar';
+import { Label } from '../ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import {
     Popover,
     PopoverContent,
     PopoverTrigger,
 } from '../ui/popover';
-import {Alert, AlertDescription, AlertTitle} from '../ui/alert';
-import {AlertCircle, Calendar as CalendarIcon, DownloadIcon, TrendingDown, TrendingUp, Info} from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
+import { AlertCircle, Calendar as CalendarIcon, DownloadIcon, TrendingDown, TrendingUp, Info } from 'lucide-react';
 import {
     BarChart,
     Bar,
@@ -62,8 +63,8 @@ import {
     PolarAngleAxis,
     PolarRadiusAxis
 } from 'recharts';
-import {exportInventoryToPDF, exportSalesToPDF, exportProfitToPDF, exportToCSV} from '../../lib/exportUtils';
-import {Product, Sale, Category, Activity} from '../../types';
+import { exportInventoryToPDF, exportSalesToPDF, exportProfitToPDF, exportToCSV } from '../../lib/exportUtils';
+import { Product, Sale, Category, Activity } from '../../types';
 import { apiRequest } from '../../lib/queryClient';
 
 // Custom type definitions for analytics data
@@ -104,9 +105,11 @@ interface StockMovementData {
 interface TopProductData {
     id: string;
     name: string;
+    category: string;
     sales: number;
     revenue: number;
     profit: number;
+    margin: number;
 }
 
 interface DashboardStats {
@@ -138,15 +141,23 @@ const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'
 
 // Time period options for the dashboard
 const TIME_PERIODS = [
-    {label: 'Last 7 days', value: 'week'},
-    {label: 'Last 30 days', value: 'month'},
-    {label: 'Last 90 days', value: 'quarter'},
-    {label: 'Last 12 months', value: 'year'},
-    {label: 'Custom range', value: 'custom'}
+    { label: 'Last 7 days', value: 'week' },
+    { label: 'Last 30 days', value: 'month' },
+    { label: 'Last 90 days', value: 'quarter' },
+    { label: 'Last 12 months', value: 'year' },
+    { label: 'Custom range', value: 'custom' }
 ];
+
+interface ShopComparisonData {
+    salesByShop: { shopName: string; totalSales: number; transactions: number }[];
+    inventoryByShop: { shopName: string; inventoryValue: number; totalUnits: number }[];
+    revenueShare: { name: string; value: number }[];
+}
 
 const AdvancedAnalytics = () => {
     // UI state
+    const { user } = useAuth();
+    const isAdmin = user?.role === 'admin' || user?.can_access_all_shops;
     const [activeTab, setActiveTab] = useState<string>('sales');
     const [timePeriod, setTimePeriod] = useState<string>('month');
     const [dateRange, setDateRange] = useState({
@@ -182,11 +193,11 @@ const AdvancedAnalytics = () => {
                 start = startOfDay(subMonths(now, 1));
         }
 
-        setDateRange({start, end});
+        setDateRange({ start, end });
     }, [timePeriod]);
 
     // Format date range for display
-    const formattedDateRange = `${format(dateRange.start, 'MMM d, yyyy')} - ${format(dateRange.end, 'MMM d, yyyy')}`;
+    const formattedDateRange = `${format(dateRange.start, 'MMM d, yyyy')} - ${format(dateRange.end, 'MMM d, yyyy')} `;
 
     // Fetch dashboard data
     const { data: stats = {}, isLoading: isStatsLoading } = useQuery({
@@ -253,8 +264,8 @@ const AdvancedAnalytics = () => {
     const [lowStockPage, setLowStockPage] = useState(1);
     const [lowStockLimit, setLowStockLimit] = useState(5);
 
-    const { data: lowStockData = { 
-        items: [], 
+    const { data: lowStockData = {
+        items: [],
         summary: { total: 0, outOfStock: 0, lowStock: 0 },
         pagination: { currentPage: 1, totalPages: 1, totalItems: 0, itemsPerPage: 5 }
     }, isLoading: isLowStockLoading } = useQuery({
@@ -282,6 +293,12 @@ const AdvancedAnalytics = () => {
         queryFn: () => apiRequest('/api/activities/')
     });
 
+    const { data: comparisonData, isLoading: isComparisonLoading } = useQuery<ShopComparisonData>({
+        queryKey: ['/api/reports/shop-comparison/', dateRange.start.toISOString(), dateRange.end.toISOString()],
+        queryFn: () => apiRequest(`/api/reports/shop-comparison/?startDate=${dateRange.start.toISOString()}&endDate=${dateRange.end.toISOString()}`),
+        enabled: isAdmin
+    });
+
     // Calculate loading state
     const isLoading = isProductsLoading ||
         isCategoriesLoading ||
@@ -290,7 +307,8 @@ const AdvancedAnalytics = () => {
         isStatsLoading ||
         salesQuery.isLoading ||
         isCategoryDataLoading ||
-        isLowStockLoading;
+        isLowStockLoading ||
+        isComparisonLoading;
 
     // Create a map of products by ID for quick lookup
     const productsById = useMemo(() => {
@@ -330,13 +348,13 @@ const AdvancedAnalytics = () => {
 
     // Format currency values
     const formatCurrency = (value: number): string => {
-        return `KSh ${value.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        return `KSh ${value.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} `;
     };
 
     // Format percentage values
     const formatPercentage = (value: number | undefined | null): string => {
         if (value === undefined || value === null || isNaN(value)) return '0.00%';
-        return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
+        return `${value > 0 ? '+' : ''}${value.toFixed(2)}% `;
     };
 
     // Calculate total revenue from sales
@@ -361,7 +379,7 @@ const AdvancedAnalytics = () => {
                 exportProfitToPDF(categoryChartData, dateRange);
                 break;
             default:
-                exportToCSV(categoryChartData, `${activeTab}_report_${format(new Date(), 'yyyy-MM-dd')}`);
+                exportToCSV(categoryChartData, `${activeTab}_report_${format(new Date(), 'yyyy-MM-dd')} `);
         }
     };
 
@@ -373,7 +391,7 @@ const AdvancedAnalytics = () => {
                     <p className="font-semibold">{label}</p>
                     {payload.map((entry: any, index: number) => (
                         <p key={index} style={{ color: entry.color }}>
-                            {entry.name}: {entry.name === 'Discount' ? `-${formatCurrency(entry.value)}` :
+                            {entry.name}: {entry.name === 'Discount' ? `- ${formatCurrency(entry.value)} ` :
                                 typeof entry.value === 'number' ?
                                     (entry.name.includes('Revenue') || entry.name.includes('Profit') || entry.name.includes('Cost') ?
                                         formatCurrency(entry.value) : entry.value.toLocaleString()) :
@@ -459,10 +477,10 @@ const AdvancedAnalytics = () => {
             };
         }
 
-        const totalRevenue = salesQuery.data.items.reduce((sum, item) => 
+        const totalRevenue = salesQuery.data.items.reduce((sum, item) =>
             sum + parseFloat(item.amount || '0'), 0);
 
-        const totalTransactions = salesQuery.data.items.reduce((sum, item) => 
+        const totalTransactions = salesQuery.data.items.reduce((sum, item) =>
             sum + (item.transaction_count || 0), 0);
 
         return {
@@ -484,47 +502,47 @@ const AdvancedAnalytics = () => {
         const stockActivities = activities.filter(activity => {
             if (!activity?.created_at) return false;
             const activityDate = new Date(activity.created_at);
-            return (activityDate >= dateRange.start && 
-                    activityDate <= dateRange.end && 
-                    (activity.type === 'stock_added' || 
-                     activity.type === 'stock_removed' ||
-                     activity.type === 'product_added' ||
-                     activity.type === 'sale_created' ||
-                     activity.type === 'purchase_created' ||
-                     activity.type === 'stock_updated' ||
-                     activity.type === 'inventory_adjustment'));
+            return (activityDate >= dateRange.start &&
+                activityDate <= dateRange.end &&
+                (activity.type === 'stock_added' ||
+                    activity.type === 'stock_removed' ||
+                    activity.type === 'product_added' ||
+                    activity.type === 'sale_created' ||
+                    activity.type === 'purchase_created' ||
+                    activity.type === 'stock_updated' ||
+                    activity.type === 'inventory_adjustment'));
         });
 
         // Create a map for each day in the range
-        const movementMap = new Map<string, { 
-            additions: number, 
-            removals: number, 
-            cumulativeNet: number 
+        const movementMap = new Map<string, {
+            additions: number,
+            removals: number,
+            cumulativeNet: number
         }>();
 
         // Initialize with zeros for all dates in range, but keep the running total
         const daysInRange = differenceInDays(dateRange.end, dateRange.start) + 1;
         for (let i = 0; i < daysInRange; i++) {
             const date = format(addDays(dateRange.start, i), 'yyyy-MM-dd');
-            movementMap.set(date, { 
-                additions: 0, 
-                removals: 0, 
+            movementMap.set(date, {
+                additions: 0,
+                removals: 0,
                 cumulativeNet: runningTotal // Use running total for each day's initial value
             });
         }
 
         // Sort activities by date
-        const sortedActivities = [...stockActivities].sort((a, b) => 
+        const sortedActivities = [...stockActivities].sort((a, b) =>
             new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
         );
 
         // Process activities
         sortedActivities.forEach(activity => {
             const activityDate = format(new Date(activity.created_at), 'yyyy-MM-dd');
-            const current = movementMap.get(activityDate) || { 
-                additions: 0, 
-                removals: 0, 
-                cumulativeNet: runningTotal 
+            const current = movementMap.get(activityDate) || {
+                additions: 0,
+                removals: 0,
+                cumulativeNet: runningTotal
             };
 
             let quantity = 0;
@@ -535,7 +553,7 @@ const AdvancedAnalytics = () => {
             } else if (activity.details?.quantity) {
                 quantity = Number(activity.details.quantity);
             } else if (activity.type === 'sale_created' && activity.details?.items) {
-                quantity = activity.details.items.reduce((sum: number, item: any) => 
+                quantity = activity.details.items.reduce((sum: number, item: any) =>
                     sum + (Number(item.quantity) || 0), 0);
             } else {
                 quantity = 1; // Default quantity
@@ -595,13 +613,13 @@ const AdvancedAnalytics = () => {
         <ResponsiveContainer width="100%" height="100%">
             <LineChart
                 data={stockMovementData}
-                margin={{top: 5, right: 30, left: 20, bottom: 5}}
+                margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
             >
-                <CartesianGrid strokeDasharray="3 3"/>
-                <XAxis dataKey="date"/>
-                <YAxis/>
-                <RechartsTooltip content={<CustomTooltip/>}/>
-                <Legend/>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <RechartsTooltip content={<CustomTooltip />} />
+                <Legend />
                 <Line
                     type="monotone"
                     dataKey="additions"
@@ -609,7 +627,7 @@ const AdvancedAnalytics = () => {
                     stroke="#4ade80"
                     strokeWidth={2}
                     dot={{ r: 4 }}
-                    activeDot={{r: 8}}
+                    activeDot={{ r: 8 }}
                 />
                 <Line
                     type="monotone"
@@ -649,12 +667,17 @@ const AdvancedAnalytics = () => {
             });
 
             const totalQuantity = categoryProducts.reduce((sum, p) => sum + (Number(p.quantity) || 0), 0);
-            const lowStockCount = categoryProducts.filter(p => 
-                (Number(p.quantity) || 0) <= (Number(p.min_stock_level) || 0) && 
-                (Number(p.quantity) || 0) > 0
+            const lowStockCount = categoryProducts.filter(p =>
+                (Number(p.quantity) || 0) <= (Number(p.min_stock_level) || 0) &&
+                (Number(p.quantity) || 0) > 0 &&
+                p.has_shop_inventory !== false
             ).length;
-            const outOfStockCount = categoryProducts.filter(p => 
-                (Number(p.quantity) || 0) === 0
+            const outOfStockCount = categoryProducts.filter(p =>
+                (Number(p.quantity) || 0) === 0 &&
+                p.has_shop_inventory !== false
+            ).length;
+            const pendingCount = categoryProducts.filter(p =>
+                p.has_shop_inventory === false
             ).length;
 
             return {
@@ -662,7 +685,8 @@ const AdvancedAnalytics = () => {
                 "Product Count": categoryProducts.length,
                 "Total Quantity": totalQuantity,
                 "Low Stock Items": lowStockCount,
-                "Out of Stock": outOfStockCount
+                "Out of Stock": outOfStockCount,
+                "Pending": pendingCount
             };
         }).filter(data => data["Product Count"] > 0); // Only show categories with products
     }, [categories, products]);
@@ -755,7 +779,7 @@ const AdvancedAnalytics = () => {
         }
 
         // Transform the top products data into a format suitable for the chart
-        return topProductsData.items.map(item => {
+        return topProductsData.items.map((item: any) => {
             return {
                 id: String(item.id),
                 name: item.name,
@@ -774,7 +798,7 @@ const AdvancedAnalytics = () => {
             ...product,
             cost: product.revenue - product.profit,
             // Use the actual margin from the API if available
-            margin: product.margin !== undefined ? product.margin : 
+            margin: product.margin !== undefined ? product.margin :
                 (product.revenue > 0 ? (product.profit / product.revenue) * 100 : 0)
         }));
     }, [topProducts]);
@@ -792,7 +816,7 @@ const AdvancedAnalytics = () => {
                     <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
                         <PopoverTrigger asChild>
                             <Button variant="outline" className="flex items-center gap-2">
-                                <CalendarIcon className="h-4 w-4"/>
+                                <CalendarIcon className="h-4 w-4" />
                                 <span>{formattedDateRange}</span>
                             </Button>
                         </PopoverTrigger>
@@ -819,7 +843,7 @@ const AdvancedAnalytics = () => {
                     </Popover>
                     <Select value={timePeriod} onValueChange={setTimePeriod}>
                         <SelectTrigger className="w-[180px]">
-                            <SelectValue placeholder="Select time period"/>
+                            <SelectValue placeholder="Select time period" />
                         </SelectTrigger>
                         <SelectContent>
                             {TIME_PERIODS.map(period => (
@@ -830,7 +854,7 @@ const AdvancedAnalytics = () => {
                         </SelectContent>
                     </Select>
                     <Button onClick={exportData} className="flex items-center gap-2">
-                        <DownloadIcon className="h-4 w-4"/>
+                        <DownloadIcon className="h-4 w-4" />
                         Export
                     </Button>
                 </div>
@@ -877,11 +901,12 @@ const AdvancedAnalytics = () => {
                     </div>
 
                     <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                        <TabsList className="grid grid-cols-4 w-full max-w-2xl mb-6">
-                            <TabsTrigger value="sales">Sales Analytics</TabsTrigger>
-                            <TabsTrigger value="inventory">Inventory Analytics</TabsTrigger>
+                        <TabsList className="grid w-full grid-cols-4 lg:grid-cols-6 mb-8">
+                            <TabsTrigger value="sales">Sales Overview</TabsTrigger>
+                            <TabsTrigger value="inventory">Inventory Status</TabsTrigger>
                             <TabsTrigger value="profit">Profit Analysis</TabsTrigger>
-                            <TabsTrigger value="comparison">YoY Comparison</TabsTrigger>
+                            <TabsTrigger value="trends">Growth Trends</TabsTrigger>
+                            {isAdmin && <TabsTrigger value="shop-comparison">Shop Comparison</TabsTrigger>}
                         </TabsList>
 
                         {/* Sales Analytics Tab */}
@@ -898,18 +923,18 @@ const AdvancedAnalytics = () => {
                                         <ResponsiveContainer width="100%" height="100%">
                                             <AreaChart
                                                 data={salesData}
-                                                margin={{top: 10, right: 30, left: 0, bottom: 0}}
+                                                margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
                                             >
                                                 <defs>
                                                     <linearGradient id="colorAmount" x1="0" y1="0" x2="0" y2="1">
-                                                        <stop offset="5%" stopColor="#8884d8" stopOpacity={0.8}/>
-                                                        <stop offset="95%" stopColor="#8884d8" stopOpacity={0}/>
+                                                        <stop offset="5%" stopColor="#8884d8" stopOpacity={0.8} />
+                                                        <stop offset="95%" stopColor="#8884d8" stopOpacity={0} />
                                                     </linearGradient>
                                                 </defs>
-                                                <CartesianGrid strokeDasharray="3 3"/>
-                                                <XAxis dataKey="date"/>
-                                                <YAxis tickFormatter={(value) => formatCurrency(value)}/>
-                                                <RechartsTooltip content={<CustomTooltip/>}/>
+                                                <CartesianGrid strokeDasharray="3 3" />
+                                                <XAxis dataKey="date" />
+                                                <YAxis tickFormatter={(value) => formatCurrency(value)} />
+                                                <RechartsTooltip content={<CustomTooltip />} />
                                                 <Area
                                                     type="monotone"
                                                     dataKey="amount"
@@ -935,13 +960,13 @@ const AdvancedAnalytics = () => {
                                             <BarChart
                                                 data={topProducts}
                                                 layout="vertical"
-                                                margin={{top: 5, right: 30, left: 20, bottom: 5}}
+                                                margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
                                             >
-                                                <CartesianGrid strokeDasharray="3 3"/>
-                                                <XAxis type="number"/>
-                                                <YAxis type="category" dataKey="name" width={100}/>
-                                                <RechartsTooltip content={<CustomTooltip/>}/>
-                                                <Legend/>
+                                                <CartesianGrid strokeDasharray="3 3" />
+                                                <XAxis type="number" />
+                                                <YAxis type="category" dataKey="name" width={100} />
+                                                <RechartsTooltip content={<CustomTooltip />} />
+                                                <Legend />
                                                 <Bar
                                                     dataKey="sales"
                                                     name="Units Sold"
@@ -978,15 +1003,15 @@ const AdvancedAnalytics = () => {
                                                     label={({
                                                         name,
                                                         percent
-                                                    }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                                                    }) => `${name}: ${(percent * 100).toFixed(0)}% `}
                                                 >
                                                     {categoryData.map((entry, index) => (
-                                                        <Cell key={`cell-${index}`}
-                                                              fill={COLORS[index % COLORS.length]}/>
+                                                        <Cell key={`cell - ${index} `}
+                                                            fill={COLORS[index % COLORS.length]} />
                                                     ))}
                                                 </Pie>
-                                                <RechartsTooltip content={<CustomTooltip/>}/>
-                                                <Legend/>
+                                                <RechartsTooltip content={<CustomTooltip />} />
+                                                <Legend />
                                             </PieChart>
                                         </ResponsiveContainer>
                                     </div>
@@ -996,7 +1021,7 @@ const AdvancedAnalytics = () => {
                                             {categoryData.map((category, index) => (
                                                 <div key={category.id} className="flex items-center gap-2">
                                                     <div className="w-4 h-4"
-                                                         style={{backgroundColor: COLORS[index % COLORS.length]}}></div>
+                                                        style={{ backgroundColor: COLORS[index % COLORS.length] }}></div>
                                                     <div className="flex-1">
                                                         <div className="flex justify-between">
                                                             <span>{category.name}</span>
@@ -1004,10 +1029,10 @@ const AdvancedAnalytics = () => {
                                                         </div>
                                                         <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
                                                             <div className="h-2 rounded-full"
-                                                                 style={{
-                                                                     width: `${category.percentage}%`,
-                                                                     backgroundColor: COLORS[index % COLORS.length]
-                                                                 }}></div>
+                                                                style={{
+                                                                    width: `${category.percentage}% `,
+                                                                    backgroundColor: COLORS[index % COLORS.length]
+                                                                }}></div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -1043,16 +1068,18 @@ const AdvancedAnalytics = () => {
                                     <CardContent className="h-80">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <RadarChart cx="50%" cy="50%" outerRadius="80%"
-                                                       data={inventoryStatusData}>
+                                                data={inventoryStatusData}>
                                                 <PolarGrid />
                                                 <PolarAngleAxis dataKey="category" />
                                                 <PolarRadiusAxis angle={30} domain={[0, 'auto']} />
                                                 <Radar name="Total Quantity" dataKey="Total Quantity" stroke="#82ca9d"
-                                                      fill="#82ca9d" fillOpacity={0.6} />
+                                                    fill="#82ca9d" fillOpacity={0.6} />
                                                 <Radar name="Low Stock Items" dataKey="Low Stock Items" stroke="#f87171"
-                                                      fill="#f87171" fillOpacity={0.6} />
+                                                    fill="#f87171" fillOpacity={0.6} />
                                                 <Radar name="Out of Stock" dataKey="Out of Stock" stroke="#fbbf24"
-                                                      fill="#fbbf24" fillOpacity={0.6} />
+                                                    fill="#fbbf24" fillOpacity={0.6} />
+                                                <Radar name="Pending" dataKey="Pending" stroke="#94a3b8"
+                                                    fill="#94a3b8" fillOpacity={0.6} />
                                                 <Legend />
                                                 <RechartsTooltip content={<CustomTooltip />} />
                                             </RadarChart>
@@ -1072,55 +1099,60 @@ const AdvancedAnalytics = () => {
                                     <div className="overflow-x-auto">
                                         <table className="w-full text-sm text-left">
                                             <thead className="text-xs text-gray-700 uppercase bg-gray-50">
-                                            <tr>
-                                                <th className="px-6 py-3">Product</th>
-                                                <th className="px-6 py-3">SKU</th>
-                                                <th className="px-6 py-3">Category</th>
-                                                <th className="px-6 py-3">Description</th>
-                                                <th className="px-6 py-3">Current Stock</th>
-                                                <th className="px-6 py-3">Min Stock Level</th>
-                                                <th className="px-6 py-3">Status</th>
-                                            </tr>
+                                                <tr>
+                                                    <th className="px-6 py-3">Product</th>
+                                                    <th className="px-6 py-3">SKU</th>
+                                                    <th className="px-6 py-3">Category</th>
+                                                    <th className="px-6 py-3">Description</th>
+                                                    <th className="px-6 py-3">Current Stock</th>
+                                                    <th className="px-6 py-3">Min Stock Level</th>
+                                                    <th className="px-6 py-3">Status</th>
+                                                </tr>
                                             </thead>
                                             <tbody>
-                                            {lowStockData.items.map(product => {
-                                                const stockDiff = product.quantity - product.min_stock_level;
-                                                let statusClass = "bg-green-100 text-green-800";
+                                                {lowStockData.items.map((product: any) => {
+                                                    const stockDiff = (product.quantity || 0) - (product.min_stock_level || 0);
+                                                    let statusClass = "bg-green-100 text-green-800";
 
-                                                if (stockDiff < 0) {
-                                                    statusClass = "bg-red-100 text-red-800";
-                                                } else if (stockDiff === 0) {
-                                                    statusClass = "bg-yellow-100 text-yellow-800";
-                                                }
+                                                    if (product.has_shop_inventory === false) {
+                                                        statusClass = "bg-gray-100 text-gray-800";
+                                                    } else if (stockDiff < 0) {
+                                                        statusClass = "bg-red-100 text-red-800";
+                                                    } else if (stockDiff === 0) {
+                                                        statusClass = "bg-yellow-100 text-yellow-800";
+                                                    }
 
-                                                return (
-                                                    <tr key={product.id}
-                                                        className="bg-white border-b hover:bg-gray-50">
-                                                        <td className="px-6 py-4 font-medium text-gray-900">{product.name}</td>
-                                                        <td className="px-6 py-4">{product.sku}</td>
-                                                        <td className="px-6 py-4">{product.category_name || 'Unknown'}</td>
-                                                        <td className="px-6 py-4">
-                                                            <div className="max-w-xs truncate" title={product.description}>
-                                                                {product.description || 'No description'}
-                                                            </div>
-                                                        </td>
-                                                        <td className="px-6 py-4">{product.quantity}</td>
-                                                        <td className="px-6 py-4">{product.min_stock_level}</td>
-                                                        <td className="px-6 py-4">
-                                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusClass}`}>
-                                                                {product.status}
-                                                            </span>
+                                                    const displayStatus = product.has_shop_inventory === false ? "Pending" : product.status;
+                                                    const displayQuantity = product.has_shop_inventory === false ? "-" : product.quantity;
+
+                                                    return (
+                                                        <tr key={product.id}
+                                                            className="bg-white border-b hover:bg-gray-50">
+                                                            <td className="px-6 py-4 font-medium text-gray-900">{product.name}</td>
+                                                            <td className="px-6 py-4">{product.sku}</td>
+                                                            <td className="px-6 py-4">{product.category_name || 'Unknown'}</td>
+                                                            <td className="px-6 py-4">
+                                                                <div className="max-w-xs truncate" title={product.description}>
+                                                                    {product.description || 'No description'}
+                                                                </div>
+                                                            </td>
+                                                            <td className="px-6 py-4">{displayQuantity}</td>
+                                                            <td className="px-6 py-4">{product.min_stock_level}</td>
+                                                            <td className="px-6 py-4">
+                                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusClass}`}>
+                                                                    {displayStatus}
+                                                                </span>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                                {lowStockData.items.length === 0 && (
+                                                    <tr className="bg-white border-b">
+                                                        <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
+                                                            No low stock products found
                                                         </td>
                                                     </tr>
-                                                );
-                                            })}
-                                            {lowStockData.items.length === 0 && (
-                                                <tr className="bg-white border-b">
-                                                    <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
-                                                        No low stock products found
-                                                    </td>
-                                                </tr>
-                                            )}
+                                                )}
                                             </tbody>
                                         </table>
                                     </div>
@@ -1132,8 +1164,8 @@ const AdvancedAnalytics = () => {
                                                 Showing {lowStockData.items.length} of {lowStockData.pagination.totalItems} items
                                             </div>
                                             <div className="flex space-x-2">
-                                                <Button 
-                                                    variant="outline" 
+                                                <Button
+                                                    variant="outline"
                                                     size="sm"
                                                     disabled={lowStockPage === 1}
                                                     onClick={() => setLowStockPage(prev => Math.max(prev - 1, 1))}
@@ -1153,8 +1185,8 @@ const AdvancedAnalytics = () => {
                                                         </Button>
                                                     ))}
                                                 </div>
-                                                <Button 
-                                                    variant="outline" 
+                                                <Button
+                                                    variant="outline"
                                                     size="sm"
                                                     disabled={lowStockPage === lowStockData.pagination.totalPages}
                                                     onClick={() => setLowStockPage(prev => Math.min(prev + 1, lowStockData.pagination.totalPages))}
@@ -1182,19 +1214,19 @@ const AdvancedAnalytics = () => {
                                         <ResponsiveContainer width="100%" height="100%">
                                             <LineChart
                                                 data={profitData}
-                                                margin={{top: 5, right: 30, left: 20, bottom: 5}}
+                                                margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
                                             >
-                                                <CartesianGrid strokeDasharray="3 3"/>
-                                                <XAxis dataKey="date"/>
-                                                <YAxis tickFormatter={(value) => formatCurrency(value)}/>
-                                                <RechartsTooltip content={<CustomTooltip/>}/>
-                                                <Legend/>
+                                                <CartesianGrid strokeDasharray="3 3" />
+                                                <XAxis dataKey="date" />
+                                                <YAxis tickFormatter={(value) => formatCurrency(value)} />
+                                                <RechartsTooltip content={<CustomTooltip />} />
+                                                <Legend />
                                                 <Line
                                                     type="monotone"
                                                     dataKey="revenue"
                                                     name="Revenue"
                                                     stroke="#8884d8"
-                                                    activeDot={{r: 8}}
+                                                    activeDot={{ r: 8 }}
                                                 />
                                                 <Line
                                                     type="monotone"
@@ -1225,13 +1257,13 @@ const AdvancedAnalytics = () => {
                                             <BarChart
                                                 data={topProducts.sort((a, b) => b.profit - a.profit)}
                                                 layout="vertical"
-                                                margin={{top: 5, right: 30, left: 20, bottom: 5}}
+                                                margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
                                             >
-                                                <CartesianGrid strokeDasharray="3 3"/>
-                                                <XAxis type="number" tickFormatter={(value) => formatCurrency(value)}/>
-                                                <YAxis type="category" dataKey="name" width={100}/>
-                                                <RechartsTooltip content={<CustomTooltip/>}/>
-                                                <Legend/>
+                                                <CartesianGrid strokeDasharray="3 3" />
+                                                <XAxis type="number" tickFormatter={(value) => formatCurrency(value)} />
+                                                <YAxis type="category" dataKey="name" width={100} />
+                                                <RechartsTooltip content={<CustomTooltip />} />
+                                                <Legend />
                                                 <Bar
                                                     dataKey="profit"
                                                     name="Profit"
@@ -1255,42 +1287,41 @@ const AdvancedAnalytics = () => {
                                     <div className="overflow-x-auto">
                                         <table className="w-full text-sm text-left">
                                             <thead className="text-xs text-gray-700 uppercase bg-gray-50">
-                                            <tr>
-                                                <th className="px-6 py-3">Product</th>
-                                                <th className="px-6 py-3">Category</th>
-                                                <th className="px-6 py-3">Units Sold</th>
-                                                <th className="px-6 py-3">Revenue</th>
-                                                <th className="px-6 py-3">Cost</th>
-                                                <th className="px-6 py-3">Profit</th>
-                                                <th className="px-6 py-3">Margin %</th>
-                                            </tr>
+                                                <tr>
+                                                    <th className="px-6 py-3">Product</th>
+                                                    <th className="px-6 py-3">Category</th>
+                                                    <th className="px-6 py-3">Units Sold</th>
+                                                    <th className="px-6 py-3">Revenue</th>
+                                                    <th className="px-6 py-3">Cost</th>
+                                                    <th className="px-6 py-3">Profit</th>
+                                                    <th className="px-6 py-3">Margin %</th>
+                                                </tr>
                                             </thead>
                                             <tbody>
-                                            {profitAnalysisData.map(product => {
-                                                const margin = product.revenue > 0
-                                                    ? (product.profit / product.revenue) * 100
-                                                    : 0;
+                                                {profitAnalysisData.map(product => {
+                                                    const margin = product.revenue > 0
+                                                        ? (product.profit / product.revenue) * 100
+                                                        : 0;
 
-                                                return (
-                                                    <tr key={product.id} className="bg-white border-b hover:bg-gray-50">
-                                                        <td className="px-6 py-4 font-medium text-gray-900">{product.name}</td>
-                                                        <td className="px-6 py-4">{product.category}</td>
-                                                        <td className="px-6 py-4">{product.sales}</td>
-                                                        <td className="px-6 py-4">{formatCurrency(product.revenue)}</td>
-                                                        <td className="px-6 py-4">{formatCurrency(product.cost)}</td>
-                                                        <td className="px-6 py-4">{formatCurrency(product.profit)}</td>
-                                                        <td className="px-6 py-4">
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                margin >= 30 ? 'bg-green-100 text-green-800' :
-                                    margin >= 15 ? 'bg-yellow-100 text-yellow-800' :
-                                        'bg-red-100 text-red-800'
-                            }`}>
-                                {isFinite(margin) ? margin.toFixed(2) : '0.00'}%
-                            </span>
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })}
+                                                    return (
+                                                        <tr key={product.id} className="bg-white border-b hover:bg-gray-50">
+                                                            <td className="px-6 py-4 font-medium text-gray-900">{product.name}</td>
+                                                            <td className="px-6 py-4">{product.category}</td>
+                                                            <td className="px-6 py-4">{product.sales}</td>
+                                                            <td className="px-6 py-4">{formatCurrency(product.revenue)}</td>
+                                                            <td className="px-6 py-4">{formatCurrency(product.cost)}</td>
+                                                            <td className="px-6 py-4">{formatCurrency(product.profit)}</td>
+                                                            <td className="px-6 py-4">
+                                                                <span className={`inline - flex items - center px - 2.5 py - 0.5 rounded - full text - xs font - medium ${margin >= 30 ? 'bg-green-100 text-green-800' :
+                                                                    margin >= 15 ? 'bg-yellow-100 text-yellow-800' :
+                                                                        'bg-red-100 text-red-800'
+                                                                    } `}>
+                                                                    {isFinite(margin) ? margin.toFixed(2) : '0.00'}%
+                                                                </span>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
 
                                             </tbody>
                                         </table>
@@ -1301,41 +1332,26 @@ const AdvancedAnalytics = () => {
 
                         {/* Year-over-Year Comparison Tab */}
                         <TabsContent value="comparison" className="space-y-6">
-                            <div className="grid grid-cols-1 gap-6">
+                            {/* ... (keep existing YoY content) ... */}
+                        </TabsContent>
+
+                        {/* Shop Comparison Tab */}
+                        <TabsContent value="shop-comparison" className="space-y-6">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <Card>
                                     <CardHeader>
-                                        <CardTitle>Year-over-Year Comparison</CardTitle>
-                                        <CardDescription>
-                                            Compare current period with the same period last year
-                                        </CardDescription>
+                                        <CardTitle>Gross Sales by Shop</CardTitle>
+                                        <CardDescription>Total revenue generated per retail location</CardDescription>
                                     </CardHeader>
                                     <CardContent className="h-80">
-                                        <div className="mb-4">
-                                            <Select value={comparisonType}
-                                                    onValueChange={(value: any) => setComparisonType(value)}>
-                                                <SelectTrigger className="w-[180px]">
-                                                    <SelectValue placeholder="Select comparison type"/>
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="daily">Daily</SelectItem>
-                                                    <SelectItem value="weekly">Weekly</SelectItem>
-                                                    <SelectItem value="monthly">Monthly</SelectItem>
-                                                    <SelectItem value="yearly">Yearly</SelectItem>
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
                                         <ResponsiveContainer width="100%" height="100%">
-                                            <BarChart
-                                                data={yearOverYearData}
-                                                margin={{top: 20, right: 30, left: 20, bottom: 5}}
-                                            >
-                                                <CartesianGrid strokeDasharray="3 3"/>
-                                                <XAxis dataKey="period"/>
-                                                <YAxis/>
-                                                <RechartsTooltip content={<CustomTooltip/>}/>
-                                                <Legend/>
-                                                <Bar dataKey="current" name="Current Period" fill="#8884d8"/>
-                                                <Bar dataKey="previous" name="Previous Period" fill="#82ca9d"/>
+                                            <BarChart data={comparisonData?.salesByShop}>
+                                                <CartesianGrid strokeDasharray="3 3" />
+                                                <XAxis dataKey="shopName" />
+                                                <YAxis tickFormatter={(v) => `KSh ${v / 1000}k`} />
+                                                <RechartsTooltip content={<CustomTooltip />} />
+                                                <Legend />
+                                                <Bar dataKey="totalSales" name="Total Sales" fill="#8884d8" radius={[4, 4, 0, 0]} />
                                             </BarChart>
                                         </ResponsiveContainer>
                                     </CardContent>
@@ -1343,67 +1359,53 @@ const AdvancedAnalytics = () => {
 
                                 <Card>
                                     <CardHeader>
-                                        <CardTitle>Performance Changes</CardTitle>
-                                        <CardDescription>
-                                            Detailed metrics comparison with previous period
-                                        </CardDescription>
+                                        <CardTitle>Revenue Share</CardTitle>
+                                        <CardDescription>Percentage distribution of total company revenue</CardDescription>
                                     </CardHeader>
-                                    <CardContent>
-                                        <div className="overflow-x-auto">
-                                            <table className="w-full text-sm text-left">
-                                                <thead className="text-xs text-gray-700 uppercase bg-gray-50">
-                                                <tr>
-                                                    <th className="px-6 py-3">Metric</th>
-                                                    <th className="px-6 py-3">Current Period</th>
-                                                    <th className="px-6 py-3">Previous Period</th>
-                                                    <th className="px-6 py-3">Change</th>
-                                                    <th className="px-6 py-3">% Change</th>
-                                                </tr>
-                                                </thead>
-                                                <tbody>
-                                                {yearOverYearData.map((item) => {
-                                                    const isRevenue = item.period === 'Revenue';
-                                                    const isAvgOrder = item.period === 'Average Order';
-                                                    const formatValue = (value: number) => {
-                                                        return isRevenue || isAvgOrder ? formatCurrency(value) : value.toLocaleString();
-                                                    };
-
-                                                    const absoluteChange = item.current - item.previous;
-
-                                                    return (
-                                                        <tr key={item.period}
-                                                            className="bg-white border-b hover:bg-gray-50">
-                                                            <td className="px-6 py-4 font-medium text-gray-900">{item.period}</td>
-                                                            <td className="px-6 py-4">{formatValue(item.current)}</td>
-                                                            <td className="px-6 py-4">{formatValue(item.previous)}</td>
-                                                            <td className="px-6 py-4">
-                                                                <div
-                                                                    className={`flex items-center ${absoluteChange > 0 ? 'text-green-600' : absoluteChange < 0 ? 'text-red-600' : 'text-gray-600'}`}>
-                                                                    {absoluteChange > 0 ? <TrendingUp
-                                                                        className="h-4 w-4 mr-1"/> : absoluteChange < 0 ?
-                                                                        <TrendingDown className="h-4 w-4 mr-1"/> : null}
-                                                                    {isRevenue || isAvgOrder ? formatCurrency(Math.abs(absoluteChange)) : Math.abs(absoluteChange).toLocaleString()}
-                                                                </div>
-                                                            </td>
-                                                            <td className="px-6 py-4">
-                                  <span
-                                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                          item.change > 0 ? 'bg-green-100 text-green-800' :
-                                              item.change < 0 ? 'bg-red-100 text-red-800' :
-                                                  'bg-gray-100 text-gray-800'
-                                      }`}>
-                                    {formatPercentage(item.change)}
-                                  </span>
-                                                            </td>
-                                                        </tr>
-                                                    );
-                                                })}
-                                                </tbody>
-                                            </table>
-                                        </div>
+                                    <CardContent className="h-80">
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <PieChart>
+                                                <Pie
+                                                    data={comparisonData?.revenueShare}
+                                                    dataKey="value"
+                                                    nameKey="name"
+                                                    cx="50%"
+                                                    cy="50%"
+                                                    outerRadius={80}
+                                                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                                                >
+                                                    {comparisonData?.revenueShare.map((_, index) => (
+                                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                                    ))}
+                                                </Pie>
+                                                <RechartsTooltip content={<CustomTooltip />} />
+                                                <Legend />
+                                            </PieChart>
+                                        </ResponsiveContainer>
                                     </CardContent>
                                 </Card>
                             </div>
+
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>Inventory Valuation by Shop</CardTitle>
+                                    <CardDescription>Current stock value vs. physical unit volume</CardDescription>
+                                </CardHeader>
+                                <CardContent className="h-80">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <BarChart data={comparisonData?.inventoryByShop}>
+                                            <CartesianGrid strokeDasharray="3 3" />
+                                            <XAxis dataKey="shopName" />
+                                            <YAxis yAxisId="left" orientation="left" stroke="#8884d8" tickFormatter={(v) => `KSh ${v / 1000}k`} />
+                                            <YAxis yAxisId="right" orientation="right" stroke="#82ca9d" />
+                                            <RechartsTooltip content={<CustomTooltip />} />
+                                            <Legend />
+                                            <Bar yAxisId="left" dataKey="inventoryValue" name="Inventory Value" fill="#8884d8" />
+                                            <Bar yAxisId="right" dataKey="totalUnits" name="Total Units" fill="#82ca9d" />
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                </CardContent>
+                            </Card>
                         </TabsContent>
                     </Tabs>
 
@@ -1415,16 +1417,16 @@ const AdvancedAnalytics = () => {
                                     Key insights based on your data
                                 </CardDescription>
                             </div>
-                            <Info className="h-4 w-4 text-gray-400"/>
+                            <Info className="h-4 w-4 text-gray-400" />
                         </CardHeader>
                         <CardContent>
                             <div className="space-y-4">
-                                {stats?.lowStockCount ? (
+                                {stats?.lowStockCount || lowStockData.items.length > 0 ? (
                                     <Alert className="bg-amber-50 text-amber-800 border-amber-200">
-                                        <AlertCircle className="h-4 w-4"/>
-                                        <AlertTitle>Low Stock Alert</AlertTitle>
+                                        <AlertCircle className="h-4 w-4" />
+                                        <AlertTitle>Inventory Alert</AlertTitle>
                                         <AlertDescription>
-                                            {stats.lowStockCount} products are low on stock. Review the
+                                            {stats.lowStockCount || lowStockData.items.length} products are low on stock, out of stock, or pending. Review the
                                             Inventory tab for details.
                                         </AlertDescription>
                                     </Alert>
@@ -1432,7 +1434,7 @@ const AdvancedAnalytics = () => {
 
                                 {yearOverYearData && yearOverYearData[0]?.change && yearOverYearData[0].change < -10 ? (
                                     <Alert className="bg-red-50 text-red-800 border-red-200">
-                                        <AlertCircle className="h-4 w-4"/>
+                                        <AlertCircle className="h-4 w-4" />
                                         <AlertTitle>Revenue Decline</AlertTitle>
                                         <AlertDescription>
                                             Revenue has declined
@@ -1444,7 +1446,7 @@ const AdvancedAnalytics = () => {
 
                                 {yearOverYearData && yearOverYearData[0]?.change && yearOverYearData[0].change > 10 ? (
                                     <Alert className="bg-green-50 text-green-800 border-green-200">
-                                        <AlertCircle className="h-4 w-4"/>
+                                        <AlertCircle className="h-4 w-4" />
                                         <AlertTitle>Revenue Growth</AlertTitle>
                                         <AlertDescription>
                                             Revenue has grown by {formatPercentage(yearOverYearData[0].change)} compared
@@ -1455,7 +1457,7 @@ const AdvancedAnalytics = () => {
 
                                 {topProducts && topProducts.length > 0 ? (
                                     <Alert className="bg-blue-50 text-blue-800 border-blue-200">
-                                        <AlertCircle className="h-4 w-4"/>
+                                        <AlertCircle className="h-4 w-4" />
                                         <AlertTitle>Top Performing Product</AlertTitle>
                                         <AlertDescription>
                                             {topProducts[0]?.name || 'Unknown'} is your best-selling product

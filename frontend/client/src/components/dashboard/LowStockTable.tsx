@@ -40,7 +40,7 @@ const LowStockTable: FC<LowStockTableProps> = ({ products, onReorder, categories
   const [reorderingProduct, setReorderingProduct] = useState<number | null>(null);
   const [sendingNotification, setSendingNotification] = useState<number | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 6;
+  const itemsPerPage = 4;
 
   // Get category name helper
   const getCategoryName = (product: ExtendedProduct): string => {
@@ -112,16 +112,16 @@ const LowStockTable: FC<LowStockTableProps> = ({ products, onReorder, categories
 
   // Filter and sort low stock products
   const lowStockProducts = products
-    .filter(product => 
-      product.quantity <= product.min_stock_level
-    )
-    .sort((a, b) => {
+    .filter(product =>
+      product.has_shop_inventory !== false &&
+      (product.quantity || 0) <= (product.min_stock_level || 0)
+    ).sort((a, b) => {
       // Sort by status (out of stock first, then low stock)
-      if (a.quantity === 0 && b.quantity !== 0) return -1;
-      if (a.quantity !== 0 && b.quantity === 0) return 1;
+      if ((a.quantity || 0) === 0 && (b.quantity || 0) !== 0) return -1;
+      if ((a.quantity || 0) !== 0 && (b.quantity || 0) === 0) return 1;
       // Then sort by how far below min_stock_level they are
-      const aDiff = a.quantity - a.min_stock_level;
-      const bDiff = b.quantity - b.min_stock_level;
+      const aDiff = (a.quantity || 0) - (a.min_stock_level || 0);
+      const bDiff = (b.quantity || 0) - (b.min_stock_level || 0);
       return aDiff - bDiff;
     });
 
@@ -163,31 +163,32 @@ const LowStockTable: FC<LowStockTableProps> = ({ products, onReorder, categories
                 <TableCell className="font-medium">{product.name}</TableCell>
                 <TableCell>
                   <Badge variant="outline" className="text-xs">
-                    {getCategoryName(product)}
+                    {getCategoryName(product as ExtendedProduct)}
                   </Badge>
                 </TableCell>
                 <TableCell className="text-right">
-                  <span className={`font-mono ${
-                    product.quantity === 0 ? 'text-red-600' : 
-                    product.quantity <= product.min_stock_level / 2 ? 'text-amber-600' : 
-                    'text-yellow-600'
-                  }`}>{product.quantity}</span>
+                  <span className={`font-mono ${product.has_shop_inventory === false ? 'text-gray-400' :
+                    (product.quantity || 0) === 0 ? 'text-red-600' :
+                      (product.quantity || 0) <= (product.min_stock_level || 0) / 2 ? 'text-amber-600' :
+                        'text-yellow-600'
+                    }`}>{product.has_shop_inventory === false ? '-' : (product.quantity || 0)}</span>
                 </TableCell>
                 <TableCell className="text-right">
                   <span className="font-mono">{product.min_stock_level}</span>
                 </TableCell>
                 <TableCell className="text-right">
                   <Badge
-                    variant={product.quantity === 0 ? "destructive" : "secondary"}
-                    className={`capitalize ${
-                      product.quantity === 0 ? 'bg-red-100 text-red-800' : 
-                      product.quantity <= product.min_stock_level / 2 ? 'bg-amber-100 text-amber-800' : 
-                      'bg-yellow-100 text-yellow-800'
-                    }`}
+                    variant={product.has_shop_inventory === false ? "secondary" : (product.quantity || 0) === 0 ? "destructive" : "secondary"}
+                    className={`capitalize ${product.has_shop_inventory === false ? 'bg-gray-100 text-gray-800' :
+                      (product.quantity || 0) === 0 ? 'bg-red-100 text-red-800' :
+                        (product.quantity || 0) <= (product.min_stock_level || 0) / 2 ? 'bg-amber-100 text-amber-800' :
+                          'bg-yellow-100 text-yellow-800'
+                      }`}
                   >
-                    {product.quantity === 0 ? "Out of Stock" : 
-                     product.quantity <= product.min_stock_level / 2 ? "Critical" : 
-                     "Low Stock"}
+                    {product.has_shop_inventory === false ? "Pending" :
+                      (product.quantity || 0) === 0 ? "Out of Stock" :
+                        (product.quantity || 0) <= (product.min_stock_level || 0) / 2 ? "Critical" :
+                          "Low Stock"}
                   </Badge>
                 </TableCell>
                 <TableCell className="text-right space-x-2">

@@ -3,6 +3,7 @@ import { Card } from "../ui/card";
 type StatCardProps = {
   title: string;
   value: number | string;
+  subValue?: string;
   icon: string;
   iconBg: string;
   iconColor: string;
@@ -10,16 +11,23 @@ type StatCardProps = {
   changePeriod: string;
 };
 
-const StatCard = ({ title, value, icon, iconBg, iconColor, change, changePeriod }: StatCardProps) => {
+const StatCard = ({ title, value, subValue, icon, iconBg, iconColor, change, changePeriod }: StatCardProps) => {
   const isPositive = change > 0;
   const isNeutral = change === 0;
-  
+
   return (
     <Card className="p-6 border border-gray-200">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm text-gray-500 font-medium">{title}</p>
-          <h3 className="text-2xl font-bold text-gray-800">{value}</h3>
+          <div className="flex items-baseline gap-2">
+            <h3 className="text-2xl font-bold text-gray-800">{value}</h3>
+            {subValue && (
+              <span className="text-xs font-semibold text-primary/70 bg-primary/5 px-1.5 py-0.5 rounded">
+                {subValue}
+              </span>
+            )}
+          </div>
         </div>
         <div className={`h-12 w-12 ${iconBg} rounded-full flex items-center justify-center ${iconColor}`}>
           <i className={`fas fa-${icon}`}></i>
